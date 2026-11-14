@@ -57,7 +57,7 @@ async fn router_accepts_source_backed_memory_and_next_snapshot_receives_it() {
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let providers = p.with_extension("toml");
-    std::fs::write(&providers,format!("[provider.mock]\nbase_url=\"http://{addr}\"\n[roles]\nbot_decision={{provider=\"mock\",model=\"mock\"}}\n")).unwrap();
+    std::fs::write(&providers,format!("[provider.mock]\nbase_url=\"http://{addr}\"\n[roles]\ndecision={{provider=\"mock\",model=\"mock\"}}\n")).unwrap();
     let gw = LlmGateway::load(&providers).unwrap();
     let snap =
         context_builder::capture_reply_snapshot(&p, &msg, msg.msg_id, &ContextCfg::default())
