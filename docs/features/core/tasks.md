@@ -58,3 +58,5 @@ pause/cancel/resume/amend 必须匹配原发起人、会话编号和类型；Web
 ## 后续设计边界
 
 目标设计补充见 [ADR-0018](../../adr/0018-lightweight-agent-runtime.md)：Agent仅执行任务事件、Router交接任务说明、Chat对接用户，并统一工具回执、等待和恢复。该ADR为待实现目标，不把当前JSON循环或已有检查点等同于完整新架构。
+
+本阶段Agent任务创建快照额外包含Router选中的working_context、dialogue、visual_context和execution_results；继续使用现有任务版本和原话授权检查。工作记忆本身不启动任务、不授予工具权限，也不证明某步已完成。当前阶段仅补齐派工时的语境，运行中补充仍走既有任务控制；ADR-0018的通用Agent loop、统一文件/浏览器工具与任务档案尚未实现。

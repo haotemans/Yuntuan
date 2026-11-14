@@ -12,6 +12,7 @@ pub const MAX_MESSAGES: usize = 40;
 pub const MAX_INPUT_CHARS: usize = 10_000;
 pub const MAX_FAILURES: i64 = 3;
 pub const MAX_PENDING_AGE_SECS: i64 = 600;
+pub const MAX_AUTOMATIC_AGE_SECS: i64 = 90;
 
 #[derive(Debug)]
 pub struct PendingBatch {
@@ -99,7 +100,8 @@ pub async fn release(path: &Path, ids: &[i64]) -> Result<()> {
 }
 
 pub async fn expire(path: &Path) -> Result<()> {
-    crate::db::connect(path).await?.execute("UPDATE messages SET decision_state='failed',processed_at=?1,decision_retry_at=0,decision_error=CASE WHEN decision_attempts>=?2 THEN COALESCE(decision_error,'已达到自动判断失败上限') ELSE '已超过10分钟自动回应时限，原文仍保留' END WHERE processed_at IS NULL AND decision_state='pending' AND sender_pid!='self' AND sender_bot=0 AND (decision_attempts>=?2 OR ts<?3)",params![now(),MAX_FAILURES,now()-MAX_PENDING_AGE_SECS]).await?;
+    let mut c = crate::db::connect(path).await?;
+    c.execute("UPDATE messages SET decision_state='failed',processed_at=?1,decision_retry_at=0,decision_error=CASE WHEN decision_attempts>=?2 THEN COALESCE(decision_error,'已达到自动判断失败上限') WHEN at_me=0 AND chat_type='group' AND reply_to IS NULL THEN '已超过普通群聊接话时限，原文仍保留' ELSE '已超过定向消息处理时限，原文仍保留' END WHERE processed_at IS NULL AND decision_state='pending' AND sender_pid!='self' AND sender_bot=0 AND (decision_attempts>=?2 OR ts<?1-CASE WHEN at_me=1 OR chat_type='private' OR reply_to IS NOT NULL THEN ?3 ELSE ?4 END)",params![now(),MAX_FAILURES,MAX_PENDING_AGE_SECS,MAX_AUTOMATIC_AGE_SECS]).await?;
     Ok(())
 }
 

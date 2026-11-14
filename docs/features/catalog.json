@@ -66,7 +66,8 @@
       "doc": "docs/features/core/replies.md",
       "source": [
         "crates/core/src/reply_engine.rs",
-        "crates/core/src/reply_engine/task_delivery_tests.rs"
+        "crates/core/src/reply_engine/task_delivery_tests.rs",
+        "crates/core/src/reply_engine/freshness.rs"
       ],
       "tests": [
         "crates/adapter-qq/tests/reply.rs",
@@ -94,7 +95,8 @@
         "crates/core/src/memory/material_cache.rs",
         "crates/core/src/vision/cache.rs",
         "crates/core/src/vision/registered.rs",
-        "crates/core/src/context_builder/conversation.rs"
+        "crates/core/src/context_builder/conversation.rs",
+        "crates/core/src/working_context.rs"
       ],
       "tests": [
         "crates/core/tests/bot_context.rs",
@@ -106,7 +108,8 @@
         "crates/core/tests/memory_storage.rs",
         "crates/core/tests/context_runtime.rs",
         "crates/core/tests/visual_followup.rs",
-        "crates/core/tests/visual_registered.rs"
+        "crates/core/tests/visual_registered.rs",
+        "crates/core/tests/working_context.rs"
       ],
       "module": "core"
     },

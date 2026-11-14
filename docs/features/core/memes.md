@@ -61,3 +61,5 @@ Decision的meme_type支持send_meme与reply附图，meme_scope为self/other/pref
 meme/context.rs增加格式与SQL一致性回归；reply_engine.rs使用两帧GIF验证原始字节、帧数、专属历史及图片来源；memes_api.rs验证专属GIF筛选和预览类型。Linux CI在全量测试前执行owned_专项；mock传输与API检查不等于真实QQ客户端已播放验收。
 
 已入库的云团专属原文件可作为虚构角色登记来源：只对active/admin记录且完整文件字节相同的图片生效，不按dHash近似判定角色身份。实际收到的原消息仍保留原作者，来源、纠正和失败语境见[记忆功能](memory.md)。
+
+QQ库存表情发送回归使用当前消息时间，避免将正常发图夹具当作过期消息；过时表情的停止发送由回复时效模块单独验证。采集、审核和库存数据不变。

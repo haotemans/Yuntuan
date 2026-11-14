@@ -1,5 +1,44 @@
 use super::*;
 
+#[tokio::test]
+async fn old_casual_retry_expires_without_losing_history_or_newer_directed_requests() {
+    let path = fixture().await;
+    let casual = insert(&path, "group", "云团这么早就睡了").await;
+    let direct = insert(&path, "group", "请分析这个问题").await;
+    let private = insert(&path, "private", "请继续处理").await;
+    let mut c = crate::db::connect(&path).await.unwrap();
+    c.execute(
+        "UPDATE messages SET ts=?1,decision_attempts=2 WHERE msg_id IN (?2,?3,?4)",
+        params![now() - 221, casual, direct, private],
+    )
+    .await
+    .unwrap();
+    c.execute(
+        "UPDATE messages SET at_me=1 WHERE msg_id=?1",
+        params![direct],
+    )
+    .await
+    .unwrap();
+    expire(&path).await.unwrap();
+    let state: String = sqlx::query_scalar("SELECT decision_state FROM messages WHERE msg_id=?1")
+        .bind(casual)
+        .fetch_one(&mut *c)
+        .await
+        .unwrap();
+    assert_eq!(state, "failed");
+    let pending: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE processed_at IS NULL")
+            .fetch_one(&mut *c)
+            .await
+            .unwrap();
+    assert_eq!(pending, 2);
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
+        .fetch_one(&mut *c)
+        .await
+        .unwrap();
+    assert_eq!(total, 3);
+}
+
 async fn fixture() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "yt-batch-{}-{}",

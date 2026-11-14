@@ -252,7 +252,7 @@ async fn mock_napcat(
 
 fn at_message(id: u64, uid: u64, text: &str) -> Value {
     json!({
-        "post_type": "message", "message_type": "group", "time": 1759400000, "message_id": id,
+        "post_type": "message", "message_type": "group", "time": yuantuan_core::window::now(), "message_id": id,
         "group_id": 555666, "user_id": uid,
         "sender": {"user_id": uid, "nickname": "小明", "card": "小明"},
         "message": [
@@ -264,7 +264,7 @@ fn at_message(id: u64, uid: u64, text: &str) -> Value {
 
 fn plain_group_message(id: u64, uid: u64, text: &str) -> Value {
     json!({
-        "post_type": "message", "message_type": "group", "time": 1759400000, "message_id": id,
+        "post_type": "message", "message_type": "group", "time": yuantuan_core::window::now(), "message_id": id,
         "group_id": 555666, "user_id": uid,
         "sender": {"user_id": uid, "nickname": "阿强", "card": ""},
         "message": [{"type": "text", "data": {"text": text}}]
