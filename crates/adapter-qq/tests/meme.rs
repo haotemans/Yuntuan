@@ -205,7 +205,7 @@ async fn mock_napcat_capture(port: u16, initial: Vec<Value>, captures: Captures)
 
 fn at_message(id: u64, uid: u64, text: &str) -> Value {
     json!({
-        "post_type": "message", "message_type": "group", "time": 1759400000, "message_id": id,
+        "post_type": "message", "message_type": "group", "time": yuantuan_core::window::now(), "message_id": id,
         "group_id": 555666, "user_id": uid,
         "sender": {"user_id": uid, "nickname": "小明", "card": "小明"},
         "message": [
@@ -376,7 +376,7 @@ async fn mock_image_server(listener: TcpListener, png: Vec<u8>) {
 
 fn image_message(id: u64, uid: u64, url: &str) -> Value {
     json!({
-        "post_type": "message", "message_type": "group", "time": 1759400000, "message_id": id,
+        "post_type": "message", "message_type": "group", "time": yuantuan_core::window::now(), "message_id": id,
         "group_id": 555666, "user_id": uid,
         "sender": {"user_id": uid, "nickname": "阿强", "card": ""},
         "message": [{"type": "image", "data": {"file": "x.jpg", "url": url}}]
