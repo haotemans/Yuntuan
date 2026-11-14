@@ -1672,6 +1672,15 @@ pub async fn prepare_and_enqueue(
         .context("bot_chat 调用失败")?;
     // 只对空正文重试一次，保留原快照；不重试工具调用、拒绝或网络错误。
     if raw.trim().is_empty() && !social {
+        if let Some(guard) = &freshness {
+            if let Some(reason) = guard
+                .reason(&engine.db_path, &msg.chat_type, &msg.chat_id, msg.msg_id)
+                .await?
+            {
+                engine.skipped(&msg.chat_id, reason);
+                return Ok(());
+            }
+        }
         warn!(chat_id=%msg.chat_id, anchor_msg_id=msg.msg_id, "bot_chat 正文为空，使用同一上下文重试一次");
         raw = llm
             .chat(llm::Role::BotChat, &ctx.system, &ctx.user, false)

@@ -438,6 +438,7 @@ async fn execute_outcome(
 ) {
     for route_turn in 0..3 {
         // Re-read the accepted source event, then project only the Router-selected topic.
+        snapshot.working_context.clear();
         if let Ok(mut c) = crate::db::connect(&deps.db_path).await {
             if let Ok(rows) = crate::working_context::view(&mut c, m, snapshot.cutoff).await {
                 snapshot.working_context = rows

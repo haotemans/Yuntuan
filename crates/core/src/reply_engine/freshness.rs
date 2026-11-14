@@ -154,7 +154,7 @@ impl ReplyFreshness {
         }
         let mut c = crate::db::connect(path).await?;
         let replaced: i64 = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM messages WHERE chat_type=?1 AND chat_id=?2 AND msg_id>?3 AND ((sender_pid='self' AND COALESCE(reply_anchor_id,0)!=?4) OR (sender_pid!='self' AND sender_bot=0 AND (at_me=1 OR chat_type='private' OR ltrim(COALESCE(text,'')) LIKE '云团%'))))")
-            .bind(kind).bind(chat).bind(self.cutoff).bind(anchor).fetch_one(&mut c).await?;
+            .bind(kind).bind(chat).bind(self.cutoff).bind(anchor).fetch_one(&mut *c).await?;
         Ok((replaced != 0).then_some("旧接话已让位给后续定向对话或已发送回复"))
     }
 }

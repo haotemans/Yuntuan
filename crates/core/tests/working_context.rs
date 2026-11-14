@@ -38,6 +38,32 @@ fn update(v: serde_json::Value) -> Update {
 }
 
 #[tokio::test]
+async fn v15_upgrade_preserves_messages_and_creates_idempotent_working_storage() {
+    let p = fixture().await;
+    let msg = message(&p, "升级前的原始发言").await;
+    let mut c = db::connect(&p).await.unwrap();
+    c.execute_batch("DROP TABLE working_context_versions; PRAGMA user_version=15;")
+        .await
+        .unwrap();
+    db::migrate(&mut c).await.unwrap();
+    db::migrate(&mut c).await.unwrap();
+    let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+        .fetch_one(&mut *c)
+        .await
+        .unwrap();
+    assert_eq!(version, 16);
+    let text: String = sqlx::query_scalar("SELECT text FROM messages WHERE msg_id=?1")
+        .bind(msg.msg_id)
+        .fetch_one(&mut *c)
+        .await
+        .unwrap();
+    assert_eq!(text, msg.text);
+    working_context::apply(&p, &msg, &update(json!({"goal_quote":"原始发言"})))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn router_accepts_source_backed_memory_and_next_snapshot_receives_it() {
     use yuantuan_core::{
         context_builder::{self, ContextCfg},
