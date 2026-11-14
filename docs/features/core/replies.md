@@ -54,6 +54,6 @@ Decision的合法表情计划可与Chat正文合成一次回复，既有Chat表�
 
 ## 回复时效
 
-[`crates/core/src/reply_engine/freshness.rs`](../../../crates/core/src/reply_engine/freshness.rs) 按原消息时间限制普通回复：social接话60秒，其他普通文字答复180秒。生成前、生成后、出队、打字延时后及附图前重新检查；过期停止发送并记录BubbleSent失败原因，不删除原消息。social还会在同一群/私聊出现后续定向消息或其他已发回复时让位；当前回复自己的前一泡不取消自己的后续泡和附图，普通插话也不取消明确答疑。
+[`crates/core/src/reply_engine/freshness.rs`](../../../crates/core/src/reply_engine/freshness.rs) 按原消息时间限制普通回复：social接话60秒，其他普通文字答复180秒。生成前、生成后、出队、打字延时后、附图前及发送重试前重新检查；过期停止发送并记录BubbleSent失败原因，不删除原消息。social还会在同一群/私聊出现后续定向消息或其他已发回复时让位；当前回复自己的前一泡不取消自己的后续泡和附图，普通插话也不取消明确答疑。
 
 已持久化的任务结果使用独立版本、取消状态和回执，不套闲聊时效；插件媒体保持既有交付机制。此检查不能撤回已交给适配器或上游的请求，不等于降低模型服务延迟。单元回归位于上述freshness模块及reply_engine.rs，覆盖队列/逐泡检查、分会话、自己的后续泡和生成期间的新定向消息。

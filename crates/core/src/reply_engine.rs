@@ -1001,7 +1001,7 @@ async fn process_plugin_result(
             operation: SendOperation::Forward,
             segments: json!(nodes),
         };
-        let result = send_with_retry(&eng.send, &req).await;
+        let result = send_with_retry(eng, job, &req).await;
         let (ok, note) = match result {
             Ok(data) => {
                 let message_id = data
@@ -1258,7 +1258,7 @@ async fn process_media_caption_with_file(
         target: job.target,
         segments: json!(segments),
     };
-    match send_with_retry(&eng.send, &req).await {
+    match send_with_retry(eng, job, &req).await {
         Ok(data) => {
             let message_id = data.get("message_id").and_then(|x| x.as_i64());
             if let Some(id) = message_id {
@@ -1450,7 +1450,7 @@ async fn process_bubbles_with_meme(
             target: job.target,
             segments: json!(segs),
         };
-        match send_with_retry(&eng.send, &req).await {
+        match send_with_retry(eng, job, &req).await {
             Ok(data) => {
                 if let Some(id) = data.get("message_id").and_then(|x| x.as_i64()) {
                     eng.self_ids.record(id);
@@ -1525,13 +1525,14 @@ async fn send_bubble_meme(
 }
 
 /// 单泡发送失败 → 退避重试一次（稳定六条③）；echo 10s 超时在适配层
-async fn send_with_retry(send: &SendFn, req: &SendRequest) -> Result<Value> {
-    match (send)(req.clone()).await {
+async fn send_with_retry(eng: &ReplyEngine, job: &ReplyJob, req: &SendRequest) -> Result<Value> {
+    match (eng.send)(req.clone()).await {
         Ok(v) => Ok(v),
         Err(e1) if e1.downcast_ref::<DeliveryUnconfirmed>().is_some() => Err(e1),
         Err(e1) => {
             tokio::time::sleep(Duration::from_millis(300)).await;
-            (send)(req.clone())
+            anyhow::ensure!(can_send(eng, job).await, "重试前回复已过时，停止补发");
+            (eng.send)(req.clone())
                 .await
                 .map_err(|e2| anyhow!("首试 {e1}；重试 {e2}"))
         }

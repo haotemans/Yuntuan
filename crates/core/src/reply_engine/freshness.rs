@@ -123,6 +123,36 @@ mod tests {
         process_job(&engine, job(None)).await;
         assert_eq!(count.load(Ordering::SeqCst), 1);
     }
+
+    #[tokio::test]
+    async fn failed_send_is_not_retried_after_a_new_directed_turn() {
+        let p = fixture().await;
+        let count = Arc::new(AtomicUsize::new(0));
+        let captured = count.clone();
+        let path = p.clone();
+        let send: SendFn = Arc::new(move |_| {
+            captured.fetch_add(1, Ordering::SeqCst);
+            let path = path.clone();
+            Box::pin(async move {
+                let mut c = crate::db::connect(&path).await?;
+                c.execute_batch("INSERT INTO messages(chat_id,chat_type,sender_pid,text,ts,at_me) VALUES('42','group','a','换个问题',unixepoch(),1)").await?;
+                anyhow::bail!("明确发送失败")
+            })
+        });
+        let engine = Arc::new(ReplyEngine::new(
+            p,
+            EventBus::default(),
+            send,
+            SelfMsgIds::default(),
+            Arc::new(std::sync::RwLock::new(ReplyCfg {
+                total_budget_ms: 0,
+                ..ReplyCfg::default()
+            })),
+            MoodState::default(),
+        ));
+        process_job(&engine, job(Some(guard()))).await;
+        assert_eq!(count.load(Ordering::SeqCst), 1, "新对话到来后不重试旧接话");
+    }
 }
 
 impl ReplyFreshness {
