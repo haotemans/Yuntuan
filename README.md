@@ -40,7 +40,7 @@
 
 ## Agent 架构
 
-后续改造采用 [ADR-0018：轻量通用 Agent](docs/adr/0018-lightweight-agent-runtime.md) 作为目标契约：Chat对接用户、Router分配上下文/记忆与任务、Agent执行细节，补齐工作记忆、统一工具协议和Docker浏览器/文件闭环。**该设计尚未实现和部署**；下文继续描述当前代码，不以设计替代验收。
+后续改造采用 [ADR-0018：轻量通用 Agent](docs/adr/0018-lightweight-agent-runtime.md) 作为目标契约：Chat对接用户、Router分配上下文/记忆与任务、Agent执行细节，补齐工作记忆、统一工具协议和Docker浏览器/文件闭环。第一阶段已增加带原话来源的版本化工作记忆、Router选择事项及Chat/Agent语境投影，并限制过时闲聊发送；统一工具协议、Docker浏览器/文件闭环和完整任务档案仍待后续实现。实际行为与验证边界见[记忆](docs/features/core/memory.md)及[回复时效](docs/features/core/replies.md)，不以设计替代验收。
 
 攸宁当前采用 **自研 Rust 运行时 + 事件驱动 + 三角色模型分工 + 对话／任务双路径**。模型负责理解意图、生成内容和选择下一步；宿主代码负责上下文、动作校验、能力调用、执行预算与状态落库，而不是让一个模型直接包办整个系统。
 

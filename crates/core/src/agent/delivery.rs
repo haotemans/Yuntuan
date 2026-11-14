@@ -105,6 +105,7 @@ async fn queue_ready(
             continue;
         }
         engine.enqueue(crate::reply_engine::ReplyJob {
+            freshness: None,
             chat_id: chat,
             chat_type: if kind == "private" {
                 crate::reply_engine::ChatType::Private

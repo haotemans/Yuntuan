@@ -243,6 +243,7 @@ fn enqueue_image_plugin_disabled(deps: &PipelineDeps, m: &MessageReceivedPayload
         return;
     };
     engine.enqueue(reply_engine::ReplyJob {
+        freshness: None,
         chat_id: m.chat_id.clone(),
         chat_type,
         target,
@@ -436,6 +437,20 @@ async fn execute_outcome(
     ctx_cfg: crate::context_builder::ContextCfg,
 ) {
     for route_turn in 0..3 {
+        // Re-read the accepted source event, then project only the Router-selected topic.
+        if let Ok(mut c) = crate::db::connect(&deps.db_path).await {
+            if let Ok(rows) = crate::working_context::view(&mut c, m, snapshot.cutoff).await {
+                snapshot.working_context = rows
+                    .into_iter()
+                    .filter(|v| {
+                        outcome
+                            .output
+                            .focus_context_id
+                            .is_some_and(|id| v["context_id"] == id)
+                    })
+                    .collect();
+            }
+        }
         if !outcome.output.image_corrections.is_empty() {
             if let Err(e) = crate::vision::refresh(&deps.db_path, &mut snapshot).await {
                 warn!(error=%e,"刷新图片纠正语境失败");
@@ -566,6 +581,7 @@ async fn execute_outcome(
                 Err(e) => {
                     warn!(chat_id = %m.chat_id, skill = %skill_name, error = %e, "invoke_skill 执行失败");
                     engine.enqueue(reply_engine::ReplyJob {
+                        freshness: None,
                         chat_id: m.chat_id.clone(),
                         chat_type,
                         target,
@@ -605,13 +621,18 @@ async fn execute_outcome(
                         match picked {
                             Some(path) => {
                                 info!(chat_id = %m.chat_id, category = %cat, "send_meme 抽图入队");
-                                engine.enqueue_meme(
+                                engine.enqueue_meme_guarded(
                                     m.chat_id.clone(),
                                     chat_type,
                                     target,
                                     m.msg_id,
                                     path,
                                     outcome.output.meme_requested,
+                                    Some(reply_engine::ReplyFreshness::for_reply(
+                                        &snapshot,
+                                        m,
+                                        &outcome.output,
+                                    )),
                                 );
                             }
                             None => {
@@ -643,7 +664,7 @@ async fn execute_outcome(
             if let Err(e) = crate::agent::create_scoped_task(
                     &deps.db_path,&deps.bus,&m.chat_id,&m.chat_type,&m.sender_pid,Some(m.msg_id),&goal,
                     outcome.output.task_plan.clone().unwrap_or_default(),
-                    serde_json::json!({"anchor":snapshot.anchor,"quoted_messages":snapshot.quoted_messages,"recent_messages":snapshot.recent_messages,"person_profile":snapshot.profile,"group_profile":snapshot.group_profile,"history":snapshot.historical_messages}),
+                    serde_json::json!({"anchor":snapshot.anchor,"quoted_messages":snapshot.quoted_messages,"recent_messages":snapshot.recent_messages,"person_profile":snapshot.profile,"group_profile":snapshot.group_profile,"history":snapshot.historical_messages,"working_context":snapshot.working_context,"dialogue":snapshot.dialogue,"visual_context":snapshot.visual_context,"execution_results":snapshot.execution_results}),
                 )
                 .await
                 {
@@ -843,6 +864,7 @@ fn enqueue_direct_reply(deps: &PipelineDeps, m: &MessageReceivedPayload, text: &
         return;
     };
     engine.enqueue(reply_engine::ReplyJob {
+        freshness: None,
         chat_id: m.chat_id.clone(),
         chat_type,
         target,

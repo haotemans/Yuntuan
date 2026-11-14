@@ -393,8 +393,12 @@ pub enum JobKind {
     },
 }
 
+mod freshness;
+pub use freshness::ReplyFreshness;
+
 #[derive(Debug, Clone)]
 pub struct ReplyJob {
+    pub freshness: Option<ReplyFreshness>,
     pub chat_id: String,
     pub chat_type: ChatType,
     pub target: u64,
@@ -442,6 +446,7 @@ impl Default for ReplyCfg {
 
 #[derive(Clone)]
 pub struct EngineHandle {
+    bus: EventBus,
     db_path: PathBuf,
     tx: mpsc::UnboundedSender<EngineCommand>,
     abort: tokio::task::AbortHandle,
@@ -453,6 +458,16 @@ enum EngineCommand {
 }
 
 impl EngineHandle {
+    fn skipped(&self, chat: &str, reason: &str) {
+        self.bus.publish(Event::BubbleSent(BubbleSentPayload {
+            chat_id: chat.into(),
+            bubble_index: 0,
+            total: 0,
+            ok: false,
+            note: Some(reason.into()),
+        }));
+    }
+
     pub fn enqueue_plugin_result(
         &self,
         chat_id: String,
@@ -497,6 +512,7 @@ impl EngineHandle {
         }
         self.tx
             .send(EngineCommand::Enqueue(ReplyJob {
+                freshness: None,
                 chat_id,
                 chat_type,
                 target,
@@ -571,6 +587,7 @@ impl EngineHandle {
         };
         self.tx
             .send(EngineCommand::Enqueue(ReplyJob {
+                freshness: None,
                 chat_id,
                 chat_type,
                 target,
@@ -591,7 +608,29 @@ impl EngineHandle {
         image: meme::PickedMeme,
         requested: bool,
     ) {
+        self.enqueue_meme_guarded(
+            chat_id,
+            chat_type,
+            target,
+            anchor_msg_id,
+            image,
+            requested,
+            None,
+        );
+    }
+
+    pub fn enqueue_meme_guarded(
+        &self,
+        chat_id: String,
+        chat_type: ChatType,
+        target: u64,
+        anchor_msg_id: i64,
+        image: meme::PickedMeme,
+        requested: bool,
+        freshness: Option<ReplyFreshness>,
+    ) {
         self.enqueue(ReplyJob {
+            freshness,
             chat_id,
             chat_type,
             target,
@@ -605,6 +644,7 @@ impl EngineHandle {
     /// 直接发图（meme）：入 per-chat 串行队列，与普通回复同队列保序（稳定六条②）
     pub fn enqueue_image(&self, chat_id: String, chat_type: ChatType, target: u64, image: PathBuf) {
         self.enqueue(ReplyJob {
+            freshness: None,
             chat_id,
             chat_type,
             target,
@@ -650,6 +690,7 @@ impl ReplyEngine {
     /// 派遣器：每个 chat 一个 worker（mpsc 串行）；折叠卡与普通回复同队列（稳定六条②）
     pub fn spawn(self) -> EngineHandle {
         let db_path = self.db_path.clone();
+        let bus = self.bus.clone();
         let engine = Arc::new(self);
         let (tx, mut rx) = mpsc::unbounded_channel::<EngineCommand>();
         let dispatcher = tokio::spawn(async move {
@@ -687,6 +728,7 @@ impl ReplyEngine {
         });
         info!("回复形态引擎已启动");
         EngineHandle {
+            bus,
             db_path,
             tx,
             abort: dispatcher.abort_handle(),
@@ -694,7 +736,37 @@ impl ReplyEngine {
     }
 }
 
+async fn can_send(eng: &ReplyEngine, job: &ReplyJob) -> bool {
+    let Some(guard) = &job.freshness else {
+        return true;
+    };
+    let kind = match job.chat_type {
+        ChatType::Group => "group",
+        ChatType::Private => "private",
+    };
+    let reason = match guard
+        .reason(&eng.db_path, kind, &job.chat_id, job.anchor_msg_id)
+        .await
+    {
+        Ok(None) => return true,
+        Ok(Some(reason)) => reason,
+        Err(_) => "回复时效检查暂不可用，未发送",
+    };
+    eng.bus.publish(Event::BubbleSent(BubbleSentPayload {
+        chat_id: job.chat_id.clone(),
+        bubble_index: 0,
+        total: 0,
+        ok: false,
+        note: Some(reason.into()),
+    }));
+    info!(chat_id=%job.chat_id,anchor_msg_id=job.anchor_msg_id,reason,"旧回复已停止发送");
+    false
+}
+
 async fn process_job(eng: &Arc<ReplyEngine>, job: ReplyJob) {
+    if !can_send(eng, &job).await {
+        return;
+    }
     match job.kind.clone() {
         JobKind::TaskResult {
             task_id,
@@ -1167,6 +1239,9 @@ async fn process_media_caption_with_file(
     history: Option<&str>,
     meme_id: Option<i64>,
 ) -> MediaDelivery {
+    if !can_send(eng, job).await {
+        return MediaDelivery::Failed;
+    }
     let file = file.unwrap_or_else(|| meme::file_url(path));
     let mut segments = vec![json!({"type":kind,"data":{"file":file}})];
     if job.chat_type == ChatType::Group && job.mention {
@@ -1338,6 +1413,9 @@ async fn process_bubbles_with_meme(
                 tokio::time::sleep(Duration::from_millis(d as u64)).await;
             }
         }
+        if !can_send(eng, job).await {
+            return;
+        }
         // 纯表情泡和文字附图使用相同通道；一个回复最多尝试一次。
         if b.text.is_empty() && b.meme.is_some() {
             if !meme_attempted {
@@ -1420,6 +1498,9 @@ async fn send_bubble_meme(
     total: usize,
     requested: bool,
 ) {
+    if !can_send(eng, job).await {
+        return;
+    }
     let kind = match job.chat_type {
         ChatType::Group => "group",
         ChatType::Private => "private",
@@ -1526,6 +1607,19 @@ pub async fn prepare_and_enqueue(
     reply_cfg: &ReplyCfg,
     skill_catalog: &[(String, String)],
 ) -> Result<()> {
+    let freshness = snapshot
+        .delivery_task
+        .is_none()
+        .then(|| ReplyFreshness::for_reply(snapshot, msg, out));
+    if let Some(guard) = &freshness {
+        if let Some(reason) = guard
+            .reason(&engine.db_path, &msg.chat_type, &msg.chat_id, msg.msg_id)
+            .await?
+        {
+            engine.skipped(&msg.chat_id, reason);
+            return Ok(());
+        }
+    }
     let length_hint = match out.reply_len {
         crate::decision::ReplyLen::Short => {
             "本次回复长度：short（建议）。普通聊天与简单问题优先1至3句，一句能说明就不展开。用户明确要求详解，或技术推导、代码、排障、重要风险需要时，保留必要步骤，不为简短牺牲正确性。一泡能说明就不分泡。"
@@ -1556,8 +1650,12 @@ pub async fn prepare_and_enqueue(
         budget_chars: ctx_cfg.budget_chars.saturating_sub(reserve),
         ..*ctx_cfg
     };
+    let mut focused_snapshot = snapshot.clone();
+    focused_snapshot
+        .working_context
+        .retain(|v| out.focus_context_id.is_some_and(|id| v["context_id"] == id));
     let mut ctx = context_builder::render_bot_context_with_skills(
-        snapshot,
+        &focused_snapshot,
         mood.get(),
         &budget,
         skill_catalog,
@@ -1587,6 +1685,15 @@ pub async fn prepare_and_enqueue(
         elapsed_ms = started.elapsed().as_millis() as u64,
         "bot_chat 生成完成"
     );
+    if let Some(guard) = &freshness {
+        if let Some(reason) = guard
+            .reason(&engine.db_path, &msg.chat_type, &msg.chat_id, msg.msg_id)
+            .await?
+        {
+            engine.skipped(&msg.chat_id, reason);
+            return Ok(());
+        }
+    }
     if let Ok(value) = serde_json::from_str::<Value>(raw.trim()) {
         if value["type"] == "execution_request" {
             anyhow::ensure!(
@@ -1672,6 +1779,7 @@ pub async fn prepare_and_enqueue(
         return Ok(());
     }
     engine.enqueue(ReplyJob {
+        freshness,
         chat_id: msg.chat_id.clone(),
         chat_type,
         target,
@@ -1748,6 +1856,7 @@ mod tests {
             meme: Some("开心".into()),
         });
         let job = ReplyJob {
+            freshness: None,
             chat_id: "123".into(),
             chat_type: ChatType::Private,
             target: 123,
@@ -1789,6 +1898,7 @@ mod tests {
             Box::pin(async move { Ok(json!({"message_id":n+1})) })
         });
         let make_job = || ReplyJob {
+            freshness: None,
             chat_id: "123".into(),
             chat_type: ChatType::Group,
             target: 123,
@@ -1987,10 +2097,12 @@ mod tests {
         .unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
         let counter = calls.clone();
+        let model_db = path.clone();
         let app = axum::Router::new().route(
             "/chat/completions",
             axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                 let counter = counter.clone();
+                let model_db = model_db.clone();
                 async move {
                     counter.fetch_add(1, Ordering::SeqCst);
                     let context: Value =
@@ -2006,6 +2118,10 @@ mod tests {
                             .as_str()
                             .unwrap()
                             .contains("可以只输出严格 JSON"));
+                    }
+                    if kind == "superseded" {
+                        let mut c=crate::db::connect(&model_db).await.unwrap();
+                        c.execute_batch("INSERT INTO messages(chat_id,chat_type,sender_pid,text,ts,at_me) VALUES('123','group','p_1','新的问题',unixepoch(),1)").await.unwrap();
                     }
                     let raw = match kind {
                         "empty" => String::new(),
@@ -2032,15 +2148,23 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let idle = tokio::spawn(std::future::pending::<()>());
         let engine = EngineHandle {
+            bus: EventBus::default(),
             db_path: path.clone(),
             tx,
             abort: idle.abort_handle(),
         };
-        for (index, kind) in ["normal", "empty", "execute", "long", "answer-execute"]
-            .iter()
-            .enumerate()
+        for (index, kind) in [
+            "normal",
+            "empty",
+            "execute",
+            "long",
+            "answer-execute",
+            "superseded",
+        ]
+        .iter()
+        .enumerate()
         {
-            conn.execute("INSERT INTO messages(chat_id,chat_type,sender_pid,text,ts) VALUES('123','group','p_1',?1,100)",params![kind]).await.unwrap();
+            conn.execute("INSERT INTO messages(chat_id,chat_type,sender_pid,text,ts) VALUES('123','group','p_1',?1,unixepoch())",params![kind]).await.unwrap();
             let msg = MessageReceivedPayload {
                 msg_id: conn.last_insert_rowid().await.unwrap(),
                 chat_id: "123".into(),
@@ -2052,7 +2176,7 @@ mod tests {
                 reply_to: None,
                 sender_bot: false,
                 image_urls: vec![],
-                ts: 100,
+                ts: now_secs(),
             };
             let snapshot = context_builder::capture_reply_snapshot(
                 &path,
@@ -2091,6 +2215,12 @@ mod tests {
                 };
                 assert_eq!(bubbles.len(), 1);
                 assert!(bubbles[0].text.contains("这图值得"));
+            } else if *kind == "superseded" {
+                result.unwrap();
+                assert!(
+                    rx.try_recv().is_err(),
+                    "模型生成期间话题被替代，不能入队旧回复"
+                );
             } else {
                 let error = result.unwrap_err();
                 assert_eq!(
@@ -2158,6 +2288,7 @@ mod tests {
             MoodState::default(),
         ));
         let job = ReplyJob {
+            freshness: None,
             chat_id: "dm_gif".into(),
             chat_type: ChatType::Private,
             target: 1,
@@ -2239,6 +2370,7 @@ mod tests {
                 .await
                 .unwrap();
         let job = ReplyJob {
+            freshness: None,
             chat_id: "dm_1".into(),
             chat_type: ChatType::Private,
             target: 1,
@@ -2389,12 +2521,13 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let idle = tokio::spawn(std::future::pending::<()>());
         let engine = EngineHandle {
+            bus: EventBus::default(),
             db_path: path.clone(),
             tx,
             abort: idle.abort_handle(),
         };
         for kind in ["chat", "exec"] {
-            conn.execute("INSERT INTO messages(chat_id,chat_type,sender_pid,text,ts) VALUES('dm_1','private','p_1',?1,100)",params![kind]).await.unwrap();
+            conn.execute("INSERT INTO messages(chat_id,chat_type,sender_pid,text,ts) VALUES('dm_1','private','p_1',?1,unixepoch())",params![kind]).await.unwrap();
             let msg = MessageReceivedPayload {
                 msg_id: conn.last_insert_rowid().await.unwrap(),
                 chat_id: "dm_1".into(),
@@ -2406,7 +2539,7 @@ mod tests {
                 reply_to: None,
                 sender_bot: false,
                 image_urls: vec![],
-                ts: 100,
+                ts: now_secs(),
             };
             let snapshot = context_builder::capture_reply_snapshot(
                 &path,

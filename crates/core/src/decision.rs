@@ -41,6 +41,10 @@ pub struct DecisionOutput {
     pub request_quote: Option<String>,
     pub memory_write: Option<String>,
     #[serde(default)]
+    pub working_memory: Option<crate::working_context::Update>,
+    #[serde(default)]
+    pub focus_context_id: Option<i64>,
+    #[serde(default)]
     pub profile_updates: Vec<crate::memory::ProfileUpdate>,
     #[serde(default)]
     pub image_corrections: Vec<crate::vision::ImageCorrection>,
@@ -119,6 +123,8 @@ images仅是图片观察，shared_by 只是分享者；不可据此认脸、把�
 - 一般概念、用法和少量常见例子可直接回答；不要仅因提到产品或模型名称就搜索。用户要求最新、具体版本、价格、来源核实或现有资料不足时才选择信息检索；不能把通用知识冒充最新实测。
 - evidence_msg_ids: 1–6 个本次可见的消息 ID，必须包含 anchor.msg_id；承接你对同一个人的上一回复时也引用 dialogue.last_reply_to_sender.msg_id。不能引用人物记忆里的远期编号或自造 ID
 reply_mode: answer / clarify / state_uncertainty / social；social用于不执行工具的自然接话，公开分享、轻松互动与共情不必等人叫你；缺必要信息用 clarify，历史事实无法确认用 state_uncertainty，避免额外闲聊追问。
+
+working_context是同一作者、同一会话的近期事项候选。只在当前问题确实延续某事项时输出focus_context_id；无关或不确定时省略，不用人物旧项目代替本轮主题。新增/修改要求时可输出working_memory:{context_id:已有编号或null,expected_revision:已有revision或null,goal_quote:当前原话中的目标（新建必填，更新可省略为空）,conditions:[{key:条件名,quote:当前消息逐字原话}]}。最多12个条件，quote为2至400字的当前原话，不能取旧消息、Bot回答、记忆或OCR。新话题新建，不把同群不同人的事情合并；不为普通玩笑编造任务。已有条件同key的当前明确纠正替换旧条件并保留旧版本。用户只说新条件时保留原goal，引用已有context_id和revision。该字段只是工作记忆，不能作为工具或任务授权。
 
 输出 Schema（action/mood/mention/reply_len/reason 必填；meme_type/task_goal/memory_write/skill_name/skill_slots 可为 null）：
 {
@@ -271,6 +277,7 @@ pub async fn decide(
     ctx["memory_hints"] = json!(snapshot.memories);
     ctx["context_limitations"] = json!(snapshot.limitations);
     ctx["dialogue"] = snapshot.dialogue.clone();
+    ctx["working_context"] = json!(snapshot.working_context);
     ctx["active_tasks"] = json!(snapshot.active_tasks);
     ctx["meme_categories"] = json!(snapshot.meme_categories);
     refresh_meme_context(&mut ctx, snapshot);
@@ -300,6 +307,7 @@ pub async fn decide(
         "person_context",
         "relationships",
         "meme_categories",
+        "working_context",
     ] {
         while ctx.to_string().chars().count() > 8000 {
             if ctx[key].as_array_mut().is_none_or(|a| a.pop().is_none()) {
@@ -358,6 +366,7 @@ fn parse_model_output(
         "skill_name",
         "skill_slots",
         "history_query",
+        "working_memory",
     ]
     .iter()
     .all(|key| value[*key].is_null() || value[*key].as_str().is_some_and(|v| v.trim().is_empty()))
@@ -489,7 +498,7 @@ pub async fn decide_periodic(
         crate::context_builder::capture_reply_snapshot(db_path, first, cutoff, cfg).await?;
     let mut ctx = json!({
         "trigger":"periodic", "bot_identity":snapshot.bot_identity, "pending_messages":batch.context,
-        "scene":snapshot.scene,"dialogue":snapshot.dialogue,"group_profile":snapshot.group_profile,
+        "scene":snapshot.scene,"dialogue":snapshot.dialogue,"group_profile":snapshot.group_profile,"working_context":snapshot.working_context,
         "person_context":snapshot.participants,"meme_categories":snapshot.meme_categories,
         "images":snapshot.visual_context.iter().take(3).collect::<Vec<_>>(),
         "recent_messages":snapshot.recent_messages.iter().filter(|m|!batch.messages.iter().any(|pending|pending.msg_id==m.msg_id)).rev().take(6).map(|m|compact_message(m,160)).collect::<Vec<_>>(),
@@ -502,6 +511,7 @@ pub async fn decide_periodic(
         "person_context",
         "group_profile",
         "meme_categories",
+        "working_context",
     ] {
         while ctx.to_string().chars().count() > 16_000 {
             if ctx[key].as_array_mut().is_none_or(|a| a.pop().is_none()) {
@@ -822,6 +832,42 @@ async fn finish_decision(
     } else {
         output.image_corrections.clear();
     }
+    if !fallback && !quiet_noop && !explicitly_addressed_to_other(msg, snapshot) {
+        if let Some(update) = &output.working_memory {
+            let semantic = output.assessment.as_ref().is_some_and(|a| {
+                a.audience == crate::engagement::Audience::Bot
+                    && a.confidence != crate::engagement::Level::Low
+            });
+            let existing = update.context_id.is_some_and(|id| {
+                snapshot
+                    .working_context
+                    .iter()
+                    .any(|v| v["context_id"] == id)
+            });
+            if semantic
+                && (is_directed(msg, snapshot)
+                    || existing
+                    || snapshot.dialogue["last_reply_to_sender"].is_object())
+            {
+                match crate::working_context::apply(db_path, msg, update).await {
+                    Ok(id) => {
+                        output.focus_context_id = Some(id);
+                        policy.notes.push("已保存带原话来源的当前事项与条件".into());
+                    }
+                    Err(e) => {
+                        policy.notes.push(format!(
+                            "工作记忆未保存：{}",
+                            e.to_string().chars().take(120).collect::<String>()
+                        ));
+                    }
+                }
+            } else {
+                policy
+                    .notes
+                    .push("工作记忆缺少同人事项归属或有效对话指向，未保存".into());
+            }
+        }
+    }
     if !quiet_noop {
         apply_side_effects(db_path, bus, mood, msg, &output).await;
     }
@@ -891,6 +937,8 @@ async fn finish_decision(
 
 fn fallback_output() -> DecisionOutput {
     DecisionOutput {
+        working_memory: None,
+        focus_context_id: None,
         action: DecisionAction::Ignore,
         mood: MoodValue::Calm,
         mention: false,

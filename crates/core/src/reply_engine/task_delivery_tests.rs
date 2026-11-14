@@ -47,6 +47,7 @@ async fn task_outbox_delivers_once_and_cancelled_revision_never_sends() {
         MoodState::default(),
     ));
     let job = ReplyJob {
+        freshness: None,
         chat_id: "42".into(),
         chat_type: ChatType::Group,
         target: 42,

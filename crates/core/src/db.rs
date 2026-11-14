@@ -422,6 +422,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "V0.15 图片文字缓存与有据纠正",
         include_str!("db/vision_v15.sql"),
     ),
+    ("V0.16 即时会话工作记忆", include_str!("db/working_v16.sql")),
 ];
 
 pub async fn migrate(conn: &mut sqlx::SqliteConnection) -> Result<()> {

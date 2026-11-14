@@ -72,3 +72,5 @@ images增加registered_asset与failure：登记信息来自宿主的实际发送
 ## 后续设计边界
 
 Router后续负责语义记忆归属、上下文分配和任务范围/预算，Agent在授权范围内自行安排细节；任务内工具步骤不逐次重走对话分类链。完整目标与实施阶段见 [ADR-0018](../../adr/0018-lightweight-agent-runtime.md)，尚未据此更改当前动作契约。
+
+Router新增可选working_memory（当前原话目标、条件、已有事项编号和预期版本）及focus_context_id。只有有效Bot对话指向且属于当前人的事项才可保存，Runtime核对原文和作用域后追加版本。新增事项、条件修订失败仅记录策略原因，不扩大权限、不再请求模型。候选进入现有字符预算裁剪；Chat/Agent投影只保留Router选中的事项，避免人物旧项目牵走当前话题。存储和实现边界见[工作记忆](memory.md)。

@@ -149,3 +149,11 @@ Context为实际发送来源或精确文件命中附加registered_asset，包含
 ## 后续设计边界
 
 后续工作记忆与任务过程记忆的职责、来源和即时更新目标集中在 [ADR-0018](../../adr/0018-lightweight-agent-runtime.md)。现有消息/任务记录继续保留；不要将设计接受误写为已完成工作记忆迁移。
+
+## 即时事项工作记忆（V16）
+
+新增 [`crates/core/src/working_context.rs`](../../../crates/core/src/working_context.rs)：人物画像之外保存同一作者、同一会话内的当前目标与条件。Router输出可选的working_memory及focus_context_id；Runtime逐字核对当前存储原话、作者、群/私聊归属和预期版本，再原子追加working_context_versions。新条件按key合并，纠正保留旧版本，重试同一来源不重复写入。目标和每项条件均带原消息编号，不能作为执行授权或完成凭据。
+
+快照只读上界内、近30天更新的最近3个事项候选；Router按预算可移除较旧候选，Chat和Agent只接收本轮明确选中的事项。不回填历史推断；每轮最多12项、累计最多24项条件，每段原话2至400字、每事项原话合计最多4000字。超过限制拒绝本次更新并记录原因，不覆盖旧数据、不触发额外模型重试。工作记忆目前没有管理UI，也不会自动修改运行中Agent的任务范围；完整任务档案、统一工具协议和Docker浏览器仍属ADR-0018后续阶段。
+
+回归入口：[`crates/core/tests/working_context.rs`](../../../crates/core/tests/working_context.rs)，覆盖条件延续、纠正版本、重复事件、归属、来源与快照上界；不代表真实模型提取已验收。
