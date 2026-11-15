@@ -69,7 +69,7 @@ async function openModels(page, { saveError = false, staleReadback = false, test
       const model = binding.model
       calls.push(`test:${model}`)
       if (testGate) await testGate
-      return route.fulfill({ json: { ok: true, model, latency_ms: 42, reasoning_effort: binding.reasoning_effort ?? null } })
+      return route.fulfill({ json: { ok: true, model, latency_ms: 42, reasoning_effort: binding.reasoning_effort ?? null, tool_protocol: binding.tool_protocol || 'json' } })
     }
     return route.fulfill({ json: {} })
   })
@@ -187,4 +187,32 @@ test('late response cannot overwrite results after changing the selection', asyn
   await finished
   await expect(card.locator('.test-badge')).toHaveCount(0)
   await expect(page.getByText('有未保存更改')).toBeVisible()
+})
+
+
+test('Agent tool protocol saves independently and survives reload', async ({ page }) => {
+  const { stored } = await openModels(page)
+  const agent = page.locator('.role-card').filter({ has: page.getByText('agent_exec', { exact: true }) })
+  await agent.locator('.n-select').nth(3).click()
+  await page.getByText('原生 tool_calls', { exact: true }).click()
+  await agent.getByRole('button', { name: '保存并测试' }).click()
+  await expect(agent.getByText('space-bunny-free · 42ms')).toBeVisible()
+  expect(stored().roles.agent_exec.tool_protocol).toBe('native')
+  expect(stored().roles.bot_chat.tool_protocol).toBeUndefined()
+  expect(stored().roles.decision.tool_protocol).toBeUndefined()
+  await page.reload()
+  await expect(agent.locator('.n-select').nth(3)).toContainText('原生 tool_calls')
+  await expect(page.getByText('有未保存更改')).toHaveCount(0)
+  await expect(agent.getByText(/连通测试不验证工具执行/)).toBeVisible()
+})
+
+test('tool protocol readback mismatch stops testing', async ({ page }) => {
+  const { calls } = await openModels(page, { staleReadback: true })
+  const agent = page.locator('.role-card').filter({ has: page.getByText('agent_exec', { exact: true }) })
+  await agent.locator('.n-select').nth(3).click()
+  await page.getByText('原生 tool_calls', { exact: true }).click()
+  calls.length = 0
+  await agent.getByRole('button', { name: '保存并测试' }).click()
+  await expect(agent.getByText('保存后回读的模型配置不一致，请重试')).toBeVisible()
+  expect(calls).toEqual(['save', 'read'])
 })

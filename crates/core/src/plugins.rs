@@ -94,26 +94,37 @@ impl Gate {
             .run(future)
             .await
             .and_then(|out| self.check_output(out))
-            .map_err(|error| anyhow::anyhow!(redact_error(&error.to_string(), &self.secrets)));
+            .map_err(|error| {
+                let message = redact_error(&error.to_string(), &self.secrets);
+                if let Some(typed) = error.downcast_ref::<ToolError>() {
+                    ToolError::new(typed.kind, message).into()
+                } else {
+                    anyhow::anyhow!(message)
+                }
+            });
         call.finish(result.as_ref().err().map(ToString::to_string));
         result
     }
     async fn enter(&self, chat: Option<&str>) -> Result<tokio::sync::OwnedSemaphorePermit> {
         if !self.active.load(Ordering::Acquire) {
-            bail!("插件已停止");
+            return Err(ToolError::new(ToolErrorKind::Unavailable, "插件已停止").into());
         }
         if let Some(allowed) = &self.policy.allowed_chats {
             if !chat.is_some_and(|id| allowed.iter().any(|c| c == id)) {
-                bail!("当前会话未启用此插件");
+                return Err(ToolError::new(
+                    ToolErrorKind::PermissionDenied,
+                    "当前会话未启用此插件",
+                )
+                .into());
             }
         }
         let permit = self
             .permits
             .clone()
             .try_acquire_owned()
-            .context("插件忙，请稍后重试")?;
+            .map_err(|_| ToolError::new(ToolErrorKind::Unavailable, "插件忙，请稍后重试"))?;
         if !self.active.load(Ordering::Acquire) {
-            bail!("插件已停止");
+            return Err(ToolError::new(ToolErrorKind::Unavailable, "插件已停止").into());
         }
         Ok(permit)
     }
@@ -125,8 +136,8 @@ impl Gate {
         .await
         {
             Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(anyhow::anyhow!("插件调用发生 panic")),
-            Err(_) => Err(anyhow::anyhow!("插件调用超时")),
+            Ok(Err(_)) => Err(ToolError::new(ToolErrorKind::Panic, "插件调用发生 panic").into()),
+            Err(_) => Err(ToolError::new(ToolErrorKind::Timeout, "插件调用超时").into()),
         }
     }
     fn check_output(&self, out: ToolOutput) -> Result<ToolOutput> {
@@ -177,6 +188,25 @@ impl Tool for HostedTool {
     }
     fn parameters_schema(&self) -> Value {
         self.inner.parameters_schema()
+    }
+    fn available_in_chat(&self, ctx: &ToolCtx) -> bool {
+        self.gate.active.load(Ordering::Acquire)
+            && self
+                .gate
+                .policy
+                .allowed_chats
+                .as_ref()
+                .is_none_or(|a| a.contains(&ctx.chat_id))
+            && self.inner.available_in_chat(ctx)
+    }
+    fn policy(&self) -> yuantuan_plugin_api::ToolPolicy {
+        self.inner.policy()
+    }
+    fn output_schema(&self) -> Option<Value> {
+        self.inner.output_schema()
+    }
+    fn audit_details(&self, args: &Value, output: &ToolOutput) -> Option<Value> {
+        self.inner.audit_details(args, output)
     }
     fn artifact_retention(&self) -> ArtifactRetention {
         self.inner.artifact_retention()

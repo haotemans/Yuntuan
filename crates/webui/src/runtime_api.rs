@@ -19,16 +19,10 @@ fn error(e: impl std::fmt::Display) -> (StatusCode, Json<Value>) {
 
 pub async fn capabilities(State(s): State<AppState>) -> Response {
     for name in s.extras.tools_registry.names() {
-        if let Some(t) = s.extras.tools_registry.get(name) {
-            yuantuan_core::capabilities::register(
-                &s.db_path,
-                name,
-                "tool",
-                t.description(),
-                &t.parameters_schema(),
-            )
-            .await
-            .map_err(error)?;
+        if let Some(tool) = s.extras.tools_registry.get(name) {
+            yuantuan_core::tools::executor::register(&s.db_path, tool.as_ref())
+                .await
+                .map_err(error)?;
         }
     }
     for (name, description) in s.extras.skill_registry.describe_for_decision() {
@@ -43,11 +37,11 @@ pub async fn capabilities(State(s): State<AppState>) -> Response {
         .map_err(error)?;
     }
     let mut c = s.open_db().await.map_err(error)?;
-    let rows=sqlx::query("SELECT c.*,(SELECT COUNT(*) FROM capability_invocations i WHERE i.name=c.name AND i.kind=c.kind) AS calls FROM capability_catalog c ORDER BY kind,name").fetch_all(&mut *c).await.map_err(error)?;
+    let rows=sqlx::query("SELECT c.*,d.definition_json,((SELECT COUNT(*) FROM capability_invocations i WHERE i.name=c.name AND i.kind=c.kind)+(SELECT COUNT(*) FROM task_invocations t WHERE c.kind='tool' AND t.tool_name=c.name)) AS calls FROM capability_catalog c LEFT JOIN tool_contracts d ON d.name=c.name AND c.kind='tool' ORDER BY kind,name").fetch_all(&mut *c).await.map_err(error)?;
     let items:Result<Vec<_>,sqlx::Error>=rows.iter().map(|r|{
         let name:String=r.try_get("name")?;let kind:String=r.try_get("kind")?;
         let available=if kind=="skill"{s.extras.skill_registry.get(&name).is_some()}else{s.extras.tools_registry.get(&name).is_some()};
-        Ok(json!({"name":name,"kind":kind,"description":r.try_get::<String,_>("description")?,"enabled":r.try_get::<bool,_>("enabled")?,"available":available,"scopes":serde_json::from_str::<Value>(&r.try_get::<String,_>("scopes")?).unwrap_or(json!([])),"calls":r.try_get::<i64,_>("calls")?}))
+        Ok(json!({"name":name,"kind":kind,"description":r.try_get::<String,_>("description")?,"enabled":r.try_get::<bool,_>("enabled")?,"available":available,"tool_contract":r.try_get::<Option<String>,_>("definition_json")?.and_then(|v|serde_json::from_str::<Value>(&v).ok()),"scopes":serde_json::from_str::<Value>(&r.try_get::<String,_>("scopes")?).unwrap_or(json!([])),"calls":r.try_get::<i64,_>("calls")?}))
     }).collect();
     Ok(Json(json!({"capabilities":items.map_err(error)?})))
 }
@@ -127,8 +121,8 @@ pub async fn task(State(s): State<AppState>, Path(id): Path<String>) -> Response
         .map_err(error)?;
     let rows=sqlx::query("SELECT revision,event_kind,source_msg_id,created_at FROM task_brief_versions WHERE task_id=? ORDER BY revision DESC LIMIT 10").bind(&id).fetch_all(&mut *c).await.map_err(error)?;
     let versions:Result<Vec<_>,sqlx::Error>=rows.iter().map(|r|Ok(json!({"revision":r.try_get::<i64,_>("revision")?,"event_kind":r.try_get::<String,_>("event_kind")?,"source_msg_id":r.try_get::<Option<i64>,_>("source_msg_id")?,"created_at":r.try_get::<i64,_>("created_at")?}))).collect();
-    let calls=sqlx::query("SELECT id,tool_name,state,started_at,finished_at FROM task_invocations WHERE task_id=? ORDER BY started_at LIMIT 100").bind(&id).fetch_all(&mut *c).await.map_err(error)?;
-    let calls:Result<Vec<_>,sqlx::Error>=calls.iter().map(|r|Ok(json!({"id":r.try_get::<String,_>("id")?,"tool":r.try_get::<String,_>("tool_name")?,"state":r.try_get::<String,_>("state")?,"started_at":r.try_get::<i64,_>("started_at")?,"finished_at":r.try_get::<Option<i64>,_>("finished_at")?}))).collect();
+    let calls=sqlx::query("SELECT i.id,i.tool_name,i.state,i.revision,i.started_at,i.finished_at,m.call_id,m.protocol,m.status,m.error_json,m.elapsed_ms FROM task_invocations i LEFT JOIN tool_invocation_records m ON m.invocation_id=i.id WHERE i.task_id=? ORDER BY i.started_at,i.id LIMIT 100").bind(&id).fetch_all(&mut *c).await.map_err(error)?;
+    let calls:Result<Vec<_>,sqlx::Error>=calls.iter().map(|r|Ok(json!({"id":r.try_get::<String,_>("id")?,"tool":r.try_get::<String,_>("tool_name")?,"call_id":r.try_get::<Option<String>,_>("call_id")?,"revision":r.try_get::<i64,_>("revision")?,"protocol":r.try_get::<Option<String>,_>("protocol")?,"status":r.try_get::<Option<String>,_>("status")?,"error":r.try_get::<Option<String>,_>("error_json")?.and_then(|v|serde_json::from_str::<Value>(&v).ok()),"elapsed_ms":r.try_get::<Option<i64>,_>("elapsed_ms")?,"state":r.try_get::<String,_>("state")?,"started_at":r.try_get::<i64,_>("started_at")?,"finished_at":r.try_get::<Option<i64>,_>("finished_at")?}))).collect();
     Ok(Json(
         json!({"runtime":{"root_id":r.try_get::<String,_>("root_id").map_err(error)?,"parent_id":r.try_get::<Option<String>,_>("parent_id").map_err(error)?,"phase":r.try_get::<String,_>("phase").map_err(error)?,"revision":r.try_get::<i64,_>("revision").map_err(error)?,"budget_reserved":r.try_get::<i64,_>("spent_tokens").map_err(error)?,"budget_limit":r.try_get::<i64,_>("max_tokens").map_err(error)?,"delivery_state":r.try_get::<String,_>("delivery_state").map_err(error)?,"stop_reason":r.try_get::<Option<String>,_>("stop_reason").map_err(error)?,"final_text":r.try_get::<Option<String>,_>("final_text").map_err(error)?},"brief":brief,"brief_versions":versions.map_err(error)?,"invocations":calls.map_err(error)?}),
     ))

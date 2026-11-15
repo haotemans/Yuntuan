@@ -7,9 +7,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub mod executor;
 pub mod sandbox;
 
-pub use yuantuan_plugin_api::{Tool, ToolCtx, ToolOutput};
+pub use yuantuan_plugin_api::{
+    Tool, ToolCall, ToolCancellation, ToolCtx, ToolDefinition, ToolEffect, ToolError,
+    ToolErrorKind, ToolOutput, ToolPolicy, ToolProtocol, ToolResult, ToolStatus,
+};
 
 /// 工具注册表：进程内单例（Arc 共享），启动时把所有 Tool 注册进来。
 /// 新增 Tool 的途径 = 实现 Tool + 在装配处 `registry.register(...)`。

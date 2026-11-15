@@ -9,7 +9,7 @@
 ## 实际行为
 
 - Decision 的 `start_task` 将目标持久化为 `tasks`，事件只负责唤醒 Runner；Runner 也扫描数据库等待任务。
-- `agent_exec` 使用 JSON 动作协议调度工具；任务与事件流水在 WebUI「任务回放」查看。
+- `agent_exec` 默认使用 JSON 动作协议，可显式选择原生 tool_calls；两者进入同一执行器调度工具；任务与事件流水在 WebUI「任务回放」查看。
 - 当前默认同时最多 2 个任务、Router未指定时每根任务最多 10 轮、单工具超时 120 秒；解析与工具错误有终止阈值。
 - 可选 Docker 开发沙箱默认关闭，仅对特定工具提供隔离，不代表所有插件和 MCP 在沙箱里执行。
 
@@ -59,7 +59,7 @@ pause/cancel/resume/amend 必须匹配原发起人、会话编号和类型；Web
 
 目标设计补充见 [ADR-0018](../../adr/0018-lightweight-agent-runtime.md)：Agent仅执行任务事件、Router交接任务说明、Chat对接用户，并统一工具回执、等待和恢复。该ADR为待实现目标，不把当前JSON循环或已有检查点等同于完整新架构。
 
-本阶段Agent任务创建快照额外包含Router选中的working_context、dialogue、visual_context和execution_results；继续使用现有任务版本和原话授权检查。工作记忆本身不启动任务、不授予工具权限，也不证明某步已完成。V17进一步保存任务说明并承接运行中的补充，详见下文；ADR-0018的通用Agent loop、统一文件/浏览器工具与任务档案尚未实现。
+本阶段Agent任务创建快照额外包含Router选中的working_context、dialogue、visual_context和execution_results；继续使用现有任务版本和原话授权检查。工作记忆本身不启动任务、不授予工具权限，也不证明某步已完成。V17进一步保存任务说明并承接运行中的补充，详见下文；ADR-0018的完整事件loop、统一文件/浏览器工具与任务档案尚未实现。
 
 ## V17 任务说明与当前任务语境
 
@@ -78,3 +78,22 @@ Router可用focus_task_id选择同一作者/同一会话的运行中或近30天�
 外部动作尚未确认时不推进amend；确认旧回执后，新的明确amend可应用先前已保存的同一事项目标，仍不重置预算或重放旧动作。
 
 Router明确选中事项但材料缺失时，任务创建整体回滚，失败交给Chat说明，不能按缩水条件悄悄启动。
+
+
+## V18 统一工具执行接口
+
+[`executor.rs`](../../../crates/core/src/tools/executor.rs) 为已注册本地/插件/MCP Tool 提供一个任务执行边界；[`protocol.rs`](../../../crates/core/src/agent/protocol.rs) 将兼容JSON动作和原生Chat Completions函数调用归一成同一调用。Skill保留原入口和共享ToolOutput，不因此向Agent开放全部技能。
+
+工具契约包含稳定名称、输入Schema、可选输出data Schema、效果类别、等待上限、取消语义和附件保留规则。调用编号由宿主关联任务、版本、原始发起人和会话；模型不能换任务目录或伪造来源。目录和实际执行均检查实现就绪、任务白名单、SQLite启停/类型化范围及插件权限。注册更新描述而保留已有开关和范围。
+
+统一结果包含call_id、name、task_id、revision、receipt_id、status、output、error.kind/message、retryable、external_action_started和elapsed_ms。状态分为succeeded、rejected、failed、unknown、cancelled；参数或权限预检拒绝为rejected，未执行且不创建外部动作回执，但保留检查点/拒绝事件。工具明确返回的前置错误也可标rejected。实际执行先写started及V18关联信息，结果、事件和检查点同事务提交；旧回执仍保存平铺summary/data/artifacts供既有成果投递读取。
+
+没有声明效果的旧Tool/MCP采用unknown，执行失败、超时、panic或输出无效后不能证明没有副作用，故记录unknown，停止任务并保留旧started状态供恢复检查。显式声明read_only时，确定返回的执行失败标failed，取消标cancelled；这不自动重试。retryable仅表示参数可以在有界新轮次修正。根任务相同工具/参数仍不重复调用，成功、失败、未知均不能靠换协议、版本或子任务绕过。
+
+默认AfterCall在任务暂停/修改时等待调用完成或超时，再归档旧版本结果而不推进新版本；显式DropFuture每秒检查取消并停止等待，不承诺撤回远端动作。工具最大120秒且受根任务剩余时间限制；输出存储限2MB、30个附件，模型投影data超过16KB转有截断标记的预览，summary限2000字，完整有效输出仍在原回执。基础Schema验证子集不等于完整JSON Schema实现，复杂约束与业务权限仍由工具负责。
+
+原生模式只接受本轮声明函数，一轮最多一个调用；缺编号、未声明工具、批量调用或无效JSON未执行。保留模型原始call_id，将完整已存调用/结果配对重建为assistant.tool_calls与tool.tool_call_id；历史压缩按整对保留，不留下悬空编号。带冒号/点的MCP名称通过稳定别名映射，不能由模型改写真实注册名。yuantuan_control仅表达宿主done/reply/wait_input/delegate，不直接发QQ。格式错误最多修正两轮；原生拒绝、截断和传输错误停止，不自动换模型或协议。
+
+两种协议共享根预算、2个任务槽、去重、版本屏障与回聊链路；parallel_safe是契约元数据，本阶段不增加单任务内并行工具。WebUI工具执行记录显示协议、调用编号、任务版本、状态、耗时和错误；任务完成、工具成功与QQ送达继续分开。模型原生函数格式参见[官方说明](https://developers.openai.com/api/docs/guides/function-calling?api-mode=chat)。
+
+验证入口：[`tool_protocol.rs`](../../../crates/core/tests/tool_protocol.rs) 用本地mock运行同一任务的双协议、调用配对、权限/来源、去重、错误分类及V17→V18保留回归；[`tasks-flow.spec.js`](../../../webui-frontend/tests/tasks-flow.spec.js) 与[`pages_api.rs`](../../../crates/webui/tests/pages_api.rs) 覆盖前后端状态。真实Provider原生执行、Docker依赖、浏览器和通用文件收发仍需后续验证，不能以这些mock或CI代替。

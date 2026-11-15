@@ -40,7 +40,7 @@
 
 ## Agent 架构
 
-后续改造采用 [ADR-0018：轻量通用 Agent](docs/adr/0018-lightweight-agent-runtime.md) 作为目标契约：Chat对接用户、Router分配上下文/记忆与任务、Agent执行细节，补齐工作记忆、统一工具协议和Docker浏览器/文件闭环。第一阶段已增加带原话来源的版本化工作记忆、Router选择事项及Chat/Agent语境投影，并限制过时闲聊发送；V17进一步独立保存版本化任务说明，补充要求可进入原任务；Agent按JSON读取说明与执行记录，工具目录按当前范围过滤，任务页显示条件、来源和版本。统一工具协议、Docker浏览器/文件闭环和完整任务归档仍待后续实现。实际行为与验证边界见[记忆](docs/features/core/memory.md)及[回复时效](docs/features/core/replies.md)，不以设计替代验收。
+后续改造采用 [ADR-0018：轻量通用 Agent](docs/adr/0018-lightweight-agent-runtime.md) 作为目标契约：Chat对接用户、Router分配上下文/记忆与任务、Agent执行细节，补齐工作记忆、统一工具协议和Docker浏览器/文件闭环。第一阶段已增加带原话来源的版本化工作记忆、Router选择事项及Chat/Agent语境投影，并限制过时闲聊发送；V17进一步独立保存版本化任务说明，补充要求可进入原任务；Agent按JSON读取说明与执行记录，工具目录按当前范围过滤，任务页显示条件、来源和版本。V18已将JSON动作和可选原生tool_calls接入统一工具执行器、类型化结果与持久关联回执；Docker浏览器/文件闭环和完整任务归档仍待后续实现。实际行为与验证边界见[记忆](docs/features/core/memory.md)及[回复时效](docs/features/core/replies.md)，不以设计替代验收。
 
 攸宁当前采用 **自研 Rust 运行时 + 事件驱动 + 三角色模型分工 + 对话／任务双路径**。模型负责理解意图、生成内容和选择下一步；宿主代码负责上下文、动作校验、能力调用、执行预算与状态落库，而不是让一个模型直接包办整个系统。
 
@@ -90,7 +90,7 @@ flowchart TD
 | `bot_chat` | 根据人格与当前上下文交流，分析搜索或任务结果；发现执行需求时可请求重新路由。 | 聊天正文交给回复引擎，结构化执行需求交回 Decision。 |
 | `agent_exec` | 围绕明确目标调用工具、拆分有限子任务、读取结果并汇总；缺少信息时等待补充。 | 输出 `tool_call / reply / done / delegate / wait_input`，由调度器执行、记账和落库。 |
 
-三者通过 [LlmGateway](crates/core/src/llm.rs) 使用统一的模型调用入口，角色绑定保存在 `providers.toml`。角色是职责分工，不与某个模型品牌绑定；例如每日归纳也复用 `decision` 角色。当前 Agent 执行采用应用层 JSON 动作协议，由 Rust 查表调用工具，不依赖模型直接执行代码。
+三者通过 [LlmGateway](crates/core/src/llm.rs) 使用统一的模型调用入口，角色绑定保存在 `providers.toml`。角色是职责分工，不与某个模型品牌绑定；例如每日归纳也复用 `decision` 角色。Agent默认采用应用层JSON动作协议，也可为agent_exec显式选择原生tool_calls；两种协议均由Rust校验并查表执行，不依赖模型直接执行代码。
 
 ### 对话管线：先判断，再回应
 
@@ -133,7 +133,7 @@ flowchart TD
 
 | 扩展层 | 当前实现与职责 |
 | --- | --- |
-| **Tool** | 最小执行能力，提供名称、描述、参数 schema 和调用接口；由 [ToolRegistry](crates/core/src/tools.rs) 统一注册。Agent 从注册表获取工具目录并执行。 |
+| **Tool** | 最小执行能力，提供名称、描述、参数 schema 和调用接口；由 [ToolRegistry](crates/core/src/tools.rs) 统一注册。Agent从注册表获取契约，统一执行器检查参数、来源和权限，返回带调用编号与状态的回执。 |
 | **Skill** | 可封装提示词、模型调用或工具逻辑，由 [SkillRegistry](crates/core/src/skills.rs) 管理。SQLite 同步能力说明、参数元数据、启停、会话范围和调用记录；实际执行仍须有已加载的插件实现并通过权限检查。支持 Decision 选择及命令／消息匹配直派。 |
 | **Plugin** | 打包与管理 Tool、Skill 的工程单元，通过 `plugin-api` 接入宿主。当前是编译进程序的 Rust 插件，运行时可启停和调整配置；宿主约束会话范围、超时、并发与输出大小，见[插件宿主](crates/core/src/plugins.rs)。 |
 | **MCP** | 通过本地子进程的 stdio 连接外部服务，将发现的工具包装后接入同一 ToolRegistry；当前实现覆盖工具发现与调用所需的子集，见 [MCP 客户端](crates/core/src/mcp.rs)。 |

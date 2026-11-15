@@ -53,4 +53,7 @@ V14→V15迁移夹具使用独立消息编号，保留已有V3种子原文；重
 
 V16新增版本化working_context_versions及作用域索引，SQL见[`working_v16.sql`](../../../crates/core/src/db/working_v16.sql)。只新增表，不清空原消息、人物画像、群记忆、任务与配置；迁移重放幂等。该阶段数据库版本为16，来源、所有者及版本写入由Runtime事务校验；详见[工作记忆](memory.md)。
 
-V17新增task_brief_versions及原消息/动作唯一索引，SQL见[`brief_v17.sql`](../../../crates/core/src/db/brief_v17.sql)。任务说明与任务控制在同一写事务提交，旧消息、任务、回执、画像及群记忆均不重写；迁移可重放。最新数据库版本为17；V16升级和旧任务不虚构来源的回归见[任务功能](tasks.md)。
+V17新增task_brief_versions及原消息/动作唯一索引，SQL见[`brief_v17.sql`](../../../crates/core/src/db/brief_v17.sql)。任务说明与任务控制在同一写事务提交，旧消息、任务、回执、画像及群记忆均不重写；迁移可重放。该阶段数据库版本为17；V16升级和旧任务不虚构来源的回归见[任务功能](tasks.md)。
+
+
+V18仅追加tool_contracts和tool_invocation_records，SQL见[`tools_v18.sql`](../../../crates/core/src/db/tools_v18.sql)。前者保存当前注册工具契约；后者关联task_invocations、任务版本和call_id，保存所用协议、当次契约快照、结果状态、错误及耗时，(task_id,revision,call_id)唯一。原task_invocations结果平铺形状不变，unknown继续标旧started以阻止恢复重放；完整输出与模型有界预览分离。保留消息、画像、群记忆、任务说明、配置和旧回执。最新数据库版本18，迁移保留/幂等及调用事务回归见[任务功能](tasks.md#v18-统一工具执行接口)。

@@ -3,6 +3,7 @@
 //! 角色未配置或 api_key 环境变量缺失 → 该角色不可用（warn 日志），调用方自行降级。
 //! 成本闸：全局滑动窗口 30 次/分，超限排队延迟不丢弃（架构十三章节流数值）。
 
+use crate::tools::ToolProtocol;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -79,6 +80,8 @@ struct RoleBind {
     model: String,
     #[serde(default)]
     reasoning_effort: Option<ReasoningEffort>,
+    #[serde(default)]
+    tool_protocol: ToolProtocol,
 }
 
 /// Optional Chat Completions reasoning control; omission preserves provider defaults.
@@ -96,6 +99,7 @@ pub struct ResolvedRole {
     pub provider: String,
     pub model: String,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub tool_protocol: ToolProtocol,
     base_url: String,
     api_key: Option<String>,
 }
@@ -270,6 +274,9 @@ impl LlmGateway {
             (Role::AgentExec, file.roles.agent_exec),
         ] {
             let Some(bind) = bind else { continue };
+            if role != Role::AgentExec && bind.tool_protocol != ToolProtocol::Json {
+                bail!("原生工具协议仅支持agent_exec角色");
+            }
             match file.provider.get(&bind.provider) {
                 None => {
                     tracing::warn!(role = %role, provider = %bind.provider, "roles 引用了不存在的 provider，该角色不可用");
@@ -292,6 +299,7 @@ impl LlmGateway {
                             provider: bind.provider.clone(),
                             model: bind.model,
                             reasoning_effort: bind.reasoning_effort,
+                            tool_protocol: bind.tool_protocol,
                             base_url: p.base_url.trim_end_matches('/').to_string(),
                             api_key,
                         },
@@ -707,13 +715,31 @@ impl LlmGateway {
             ],
             "temperature": if role == Role::Decision { 0.2 } else { 0.7 },
             // 本接口没有声明任何工具。上游编码代理可能擅自返回 bash 调用，
-            // 必须显式禁用；Agent 的工具协议由 agent.rs 自己处理 JSON。
+            // 必须显式禁用；Agent 原生工具调用使用独立 chat_with_tools 入口。
             "tool_choice": "none",
         });
         if json_mode {
             body["response_format"] = json!({"type": "json_object"});
         }
         r.apply_reasoning(&mut body);
+        let v = self
+            .exchange(role, &r, body, queued, system.len(), text_bytes)
+            .await?;
+        if role == Role::BotChat && !json_mode {
+            chat_response_text(&v)
+        } else {
+            response_text(&v)
+        }
+    }
+    async fn exchange(
+        &self,
+        role: Role,
+        r: &ResolvedRole,
+        body: Value,
+        queued: Instant,
+        system_bytes: usize,
+        text_bytes: usize,
+    ) -> Result<Value> {
         let mut req = self
             .http
             .post(format!("{}/chat/completions", r.base_url))
@@ -732,7 +758,7 @@ impl LlmGateway {
         };
         let status = resp.status();
         let text = resp.text().await.context("读取 LLM 响应体失败")?;
-        tracing::info!(role=%role, queue_ms, request_ms=requested.elapsed().as_millis() as u64, status=status.as_u16(), system_bytes=system.len(), user_bytes=text_bytes, "LLM请求计时");
+        tracing::info!(role=%role, queue_ms, request_ms=requested.elapsed().as_millis() as u64, status=status.as_u16(), system_bytes=system_bytes, user_bytes=text_bytes, "LLM请求计时");
         if !status.is_success() {
             let error = HttpFailure {
                 status: status.as_u16(),
@@ -749,11 +775,45 @@ impl LlmGateway {
         }
         let v: Value = serde_json::from_str(&text).context("LLM 响应非 JSON")?;
         self.record_usage(role, &r.model, &v);
-        if role == Role::BotChat && !json_mode {
-            chat_response_text(&v)
-        } else {
-            response_text(&v)
-        }
+        Ok(v)
+    }
+    /// Agent-only, explicitly configured native Chat Completions function calls.
+    pub async fn chat_with_tools(
+        &self,
+        system: &str,
+        user: &str,
+        tools: &[Value],
+        transcript: &[Value],
+    ) -> Result<Value> {
+        let r = self
+            .roles
+            .get(&Role::AgentExec)
+            .context("agent_exec未配置")?
+            .clone();
+        anyhow::ensure!(
+            r.tool_protocol == ToolProtocol::Native,
+            "当前Agent未启用原生工具协议"
+        );
+        let mut messages = vec![
+            json!({"role":"system","content":system}),
+            json!({"role":"user","content":user}),
+        ];
+        messages.extend_from_slice(transcript);
+        let mut body = json!({"model":r.model,"messages":messages,"tools":tools,"tool_choice":"auto","parallel_tool_calls":false,"max_tokens":8192,"temperature":0.7});
+        r.apply_reasoning(&mut body);
+        anyhow::ensure!(
+            body.to_string().len() + 8192 <= 300_000,
+            "原生工具上下文超过300k保守预算"
+        );
+        let queued = Instant::now();
+        self.gate.acquire().await;
+        let _permit = self
+            .concurrency
+            .acquire()
+            .await
+            .context("LLM并发信号量已关闭")?;
+        self.exchange(Role::AgentExec, &r, body, queued, system.len(), user.len())
+            .await
     }
 }
 
@@ -908,6 +968,7 @@ pub const DEFAULT_PROVIDERS_TEMPLATE: &str = r#"# 云团 LLM Provider 配置（�
 # decision   = { provider = "example", model = "便宜快速模型", reasoning_effort = "low" }
 # bot_chat   = { provider = "example", model = "中高档模型", reasoning_effort = "high" }
 # agent_exec = { provider = "example", model = "强模型" }
+# agent_exec可选 tool_protocol="native"（需上游支持tool_calls）；默认"json"。其余角色不启用工具。
 "#;
 
 #[cfg(test)]
@@ -1098,6 +1159,7 @@ agent_exec = {{provider="mock", model="same-model"}}
                 provider: "mock".into(),
                 model: "mock".into(),
                 reasoning_effort: None,
+                tool_protocol: ToolProtocol::Json,
                 base_url: "http://localhost".into(),
                 api_key: Some(key.into()),
             };

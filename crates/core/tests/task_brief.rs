@@ -269,7 +269,7 @@ async fn v16_upgrade_and_legacy_tasks_keep_existing_data_without_inventing_sourc
         .fetch_one(&mut *c)
         .await
         .unwrap();
-    assert_eq!(version, 17);
+    assert_eq!(version, 18);
 }
 
 #[tokio::test]
@@ -450,16 +450,17 @@ async fn agent_loop_uses_current_brief_after_compaction_and_repairs_args_without
     let app=axum::Router::new().route("/chat/completions",axum::routing::post(move |axum::Json(body):axum::Json<Value>|{
         let counter=counter.clone();async move{
             let system=body["messages"][0]["content"].as_str().unwrap();
-            assert!(system.contains("- enabled:"));
-            for name in ["disabled","other_scope","outside_plan"] {assert!(!system.contains(&format!("- {name}:")));}
+            let catalog:Vec<Value>=serde_json::from_str(system.split("可用工具（name: 描述）：\n").nth(1).unwrap().trim()).unwrap();
+            assert_eq!(catalog.len(),1);assert_eq!(catalog[0]["name"],"enabled");
+            assert!(catalog[0]["input_schema"].is_object());assert!(catalog[0]["policy"].is_object());
             let ctx:Value=serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
             assert_eq!(ctx["task_brief"]["revision"],2);
             assert_eq!(ctx["task_brief"]["changes"][0]["text"],"增加来源列");
             let n=counter.fetch_add(1,Ordering::SeqCst);
             let response=match n {
                 0=>{assert!(ctx["execution_history"].as_array().unwrap().len()<=10);json!({"action":"tool_call","tool_name":"enabled","tool_args":{"q":"bad"}})},
-                1=>{assert!(ctx["execution_history"].as_array().unwrap().iter().any(|v|v["role"]=="validation_error"));json!({"action":"tool_call","tool_name":"enabled","tool_args":{"q":11}})},
-                _=>{let receipts=ctx["execution_history"].as_array().unwrap().iter().filter(|v|v["role"]=="tool_result").collect::<Vec<_>>();assert_eq!(receipts.len(),1);assert_eq!(receipts[0]["data"]["q"],11);assert!(receipts[0]["receipt_id"].is_string());json!({"action":"done","text":"已核对要求和实际回执"})}
+                1=>{assert!(ctx["execution_history"].as_array().unwrap().iter().any(|v|v["role"]=="tool_result" && v["result"]["error"]["kind"]=="invalid_arguments" && v["result"]["external_action_started"]==false));json!({"action":"tool_call","tool_name":"enabled","tool_args":{"q":11}})},
+                _=>{let receipts=ctx["execution_history"].as_array().unwrap().iter().filter(|v|v["role"]=="tool_result" && v["result"]["status"]=="succeeded").collect::<Vec<_>>();assert_eq!(receipts.len(),1);assert_eq!(receipts[0]["result"]["output"]["data"]["q"],11);assert!(receipts[0]["result"]["receipt_id"].is_string());json!({"action":"done","text":"已核对要求和实际回执"})}
             };
             axum::Json(json!({"choices":[{"message":{"content":response.to_string()},"finish_reason":"stop"}]}))
         }

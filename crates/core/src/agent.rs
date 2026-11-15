@@ -2,15 +2,16 @@
 
 pub mod brief;
 pub mod delivery;
+pub mod protocol;
 pub mod runtime;
 use crate::db::params;
 use crate::db::SqliteExt;
 use crate::event::{Event, EventBus, TaskLifecyclePayload};
 use crate::llm::{LlmGateway, Role};
-use crate::tools::{Registry, ToolCtx};
+use crate::tools::{executor, Registry, ToolCall, ToolCtx, ToolProtocol, ToolStatus};
 use anyhow::{bail, Context, Result};
 pub use runtime::TaskPlan;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::Row;
 use std::collections::HashMap;
@@ -31,7 +32,6 @@ const MAX_PARSE_FAILURES: u32 = 2;
 const MAX_TOOL_FAILURES: u32 = 3;
 /// Two execution slots shared by parents and children.
 const MAX_CONCURRENT_TASKS: usize = 2;
-const TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 #[derive(Clone)]
 pub struct TaskRunnerDeps {
@@ -199,8 +199,10 @@ impl TaskState {
 }
 
 /// LLM 每轮输出协议
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RoundOutput {
+    #[serde(default)]
+    pub call_id: Option<String>,
     pub action: String,
     pub tool_name: Option<String>,
     pub tool_args: Option<Value>,
@@ -224,16 +226,10 @@ async fn run_task(deps: &TaskRunnerDeps, p: &TaskLifecyclePayload) -> Result<Str
         bail!("agent_exec 角色未配置");
     };
 
+    let mode = gw.role(Role::AgentExec).unwrap().tool_protocol;
     for name in deps.tools.names() {
         if let Some(tool) = deps.tools.get(name) {
-            crate::capabilities::register(
-                &deps.db_path,
-                name,
-                "tool",
-                tool.description(),
-                &tool.parameters_schema(),
-            )
-            .await?;
+            executor::register(&deps.db_path, tool.as_ref()).await?;
         }
     }
     let mut checkpoint = runtime::load(&deps.db_path, &task_id)
@@ -288,38 +284,52 @@ async fn run_task(deps: &TaskRunnerDeps, p: &TaskLifecyclePayload) -> Result<Str
             sender_pid: checkpoint.actor.clone(),
             locale: Some("zh-CN".into()),
         };
-        let visible = Registry::new();
-        for name in deps.tools.names() {
-            if (checkpoint.allowed.is_empty() || checkpoint.allowed.iter().any(|n| n == name))
-                && crate::capabilities::allowed(&deps.db_path, name, "tool", &ctx).await?
-            {
-                if let Some(tool) = deps.tools.get(name) {
-                    visible.register_arc(tool);
-                }
-            }
-        }
-        let system = build_system_prompt(&build_tools_catalog(&visible));
-        let user = render_history(&history, &brief);
+        let catalog =
+            executor::catalog(&deps.db_path, &deps.tools, &ctx, &checkpoint.allowed).await?;
+        let system = match mode {
+            ToolProtocol::Json => build_system_prompt(&serde_json::to_string(&catalog)?),
+            ToolProtocol::Native => build_native_system_prompt(),
+        };
+        let user = render_history(&protocol::json_history(&history, mode), &brief);
+        let functions = if mode == ToolProtocol::Native {
+            protocol::functions(&catalog)?
+        } else {
+            vec![]
+        };
+        let transcript = if mode == ToolProtocol::Native {
+            protocol::transcript(&history)?
+        } else {
+            vec![]
+        };
         let t0 = std::time::Instant::now();
         used_calls = runtime::reserve(
             &deps.db_path,
             &task_id,
             &checkpoint,
-            system.len() + user.len(),
+            system.len()
+                + user.len()
+                + serde_json::to_vec(&functions)?.len()
+                + serde_json::to_vec(&transcript)?.len(),
         )
         .await?;
         let remaining = checkpoint.deadline.saturating_sub(now_secs()).max(1) as u64;
-        let raw = tokio::time::timeout(
-            std::time::Duration::from_secs(remaining),
-            gw.chat(Role::AgentExec, &system, &user, true),
-        )
+        let raw = tokio::time::timeout(std::time::Duration::from_secs(remaining), async {
+            match mode {
+                ToolProtocol::Json => gw
+                    .chat(Role::AgentExec, &system, &user, true)
+                    .await
+                    .map(Value::String),
+                ToolProtocol::Native => {
+                    gw.chat_with_tools(&system, &user, &functions, &transcript)
+                        .await
+                }
+            }
+        })
         .await
         .context("任务时间预算用完")?;
-
-        let content = match raw {
+        let raw = match raw {
             Ok(c) => c,
             Err(e) => {
-                warn!(task_id = %task_id, error = %e, "agent_exec 调用失败");
                 record_event(
                     &deps.db_path,
                     &task_id,
@@ -330,25 +340,39 @@ async fn run_task(deps: &TaskRunnerDeps, p: &TaskLifecyclePayload) -> Result<Str
                 return Err(e).context("LLM 调用失败");
             }
         };
-
-        let round: RoundOutput = match parse_round(&content) {
+        let parsed = match mode {
+            ToolProtocol::Json => {
+                parse_round(raw.as_str().unwrap_or_default()).map_err(|message| {
+                    protocol::ProtocolError {
+                        message,
+                        repairable: true,
+                    }
+                })
+            }
+            ToolProtocol::Native => protocol::native(&raw, &catalog),
+        };
+        let round = match parsed {
             Ok(r) => {
                 parse_failures = 0;
                 r
             }
             Err(err) => {
                 parse_failures += 1;
-                record_event(&deps.db_path, &task_id, "parse_error",
-                    json!({"round": used_calls, "error": err, "raw_preview": &content[..content.floor_char_boundary(200)]})).await?;
-                if parse_failures >= MAX_PARSE_FAILURES {
-                    bail!("连续 {MAX_PARSE_FAILURES} 轮输出非法 JSON");
+                record_event(
+                    &deps.db_path,
+                    &task_id,
+                    "parse_error",
+                    json!({"round":used_calls,"error":err.to_string(),"protocol":mode}),
+                )
+                .await?;
+                if !err.repairable || parse_failures >= MAX_PARSE_FAILURES {
+                    bail!("Agent工具协议失败（JSON模式输出非法 JSON / 原生函数调用不完整）：{err}");
                 }
-                // 把错误反馈给 LLM 让它下一轮修正
-                history.push(json!({"role": "user", "content": format!(
-                    "你的上一次输出未通过 JSON 校验：{err}。请严格按协议只输出 JSON。")}));
+                history.push(json!({"role":"user","content":format!("上次输出未通过协议校验：{err}。按当前声明的协议修正；没有执行工具。") }));
                 continue;
             }
         };
+        let content = serde_json::to_string(&round)?;
 
         record_event(
             &deps.db_path,
@@ -409,107 +433,54 @@ async fn run_task(deps: &TaskRunnerDeps, p: &TaskLifecyclePayload) -> Result<Str
                     "已记录你的中间思考。继续：调用工具或返回 done。"}));
             }
             "tool_call" => {
-                let Some(name) = round.tool_name.clone() else {
-                    checkpoint.no_progress += 1;
-                    history.push(json!({"role": "user", "content":
-                        "protocol error: action=tool_call 必须带 tool_name"}));
-                    continue;
+                let name = round.tool_name.unwrap_or_default();
+                let call = ToolCall {
+                    call_id: if mode == ToolProtocol::Native {
+                        round.call_id.context("原生工具调用缺少编号")?
+                    } else {
+                        format!("json_{}_{}", checkpoint.revision, used_calls)
+                    },
+                    name,
+                    arguments: round.tool_args.unwrap_or(json!({})),
                 };
-                let Some(tool) = visible.get(&name) else {
-                    checkpoint.no_progress += 1;
-                    history.push(json!({"role": "user", "content": format!(
-                        "tool `{name}` 本轮不可用。只使用目录内已授权工具，不绕过启用或会话范围。")}));
-                    continue;
-                };
-                let args = round.tool_args.unwrap_or(json!({}));
-                let ctx = ToolCtx {
-                    task_id: Some(task_id.clone()),
-                    chat_id: p.chat_id.clone(),
-                    chat_type: checkpoint.chat_type.clone(),
-                    sender_pid: checkpoint.actor.clone(),
-                    locale: Some("zh-CN".into()),
-                };
-                history.push(json!({"role": "assistant", "content": content}));
-                if let Err(error) = crate::capabilities::check_tool(
-                    &deps.db_path,
-                    &name,
-                    &ctx,
-                    &tool.parameters_schema(),
-                    &args,
-                )
-                .await
-                {
-                    checkpoint.no_progress += 1;
-                    history.push(json!({"role":"validation_error","tool":name,"content":error.to_string(),"external_action_started":false}));
-                    continue;
-                }
-                let receipt =
-                    runtime::begin_invocation(&deps.db_path, &task_id, &checkpoint, &name, &args)
+                anyhow::ensure!(
+                    !history
+                        .iter()
+                        .any(|r| r["call"]["call_id"].as_str() == Some(call.call_id.as_str())),
+                    "工具调用编号已使用，停止重放"
+                );
+                let execution =
+                    executor::execute(&deps.db_path, &deps.tools, &ctx, &checkpoint, call, mode)
                         .await?;
-                // 超时保留 started 回执，不能盲目重放。
-                let remaining = checkpoint.deadline.saturating_sub(now_secs()).max(1) as u64;
-                let output = tokio::time::timeout(
-                    TOOL_TIMEOUT.min(std::time::Duration::from_secs(remaining)),
-                    tool.call(&ctx, args.clone()),
-                )
-                .await
-                .with_context(|| format!("工具 {name} 超时（{} 秒）", TOOL_TIMEOUT.as_secs()))?;
-                match output {
-                    Ok(out) => {
+                match execution.result.status {
+                    ToolStatus::Succeeded => {
                         tool_failures = 0;
                         checkpoint.no_progress = 0;
-                        record_event(
-                            &deps.db_path,
-                            &task_id,
-                            "tool_result",
-                            json!({
-                                "round": used_calls, "tool": name, "ok": true,
-                                "summary": out.summary,
-                                "artifacts": out.artifacts,
-                                "details": tool.audit_details(&args, &out),
-                            }),
-                        )
-                        .await?;
-                        let raw = out.data.to_string();
-                        let data = if raw.len() > 16_000 {
-                            json!({"truncated":true,"preview":raw.chars().take(4000).collect::<String>()})
-                        } else {
-                            out.data.clone()
-                        };
-                        history.push(json!({"role":"tool_result","receipt_id":receipt,"task_revision":checkpoint.revision,"tool":name,"state":"succeeded","summary":out.summary,"data":data,"artifacts":out.artifacts}));
-                        checkpoint.history = history.clone();
-                        runtime::complete_invocation(&deps.db_path,&task_id,&checkpoint,&receipt,json!({"summary":out.summary,"data":out.data,"artifacts":out.artifacts}),true).await?;
                     }
-                    Err(e) => {
+                    ToolStatus::Rejected => {
+                        checkpoint.no_progress += 1;
+                    }
+                    _ => {
                         tool_failures += 1;
                         checkpoint.no_progress += 1;
-                        history.push(json!({"role":"tool_result","receipt_id":receipt,"task_revision":checkpoint.revision,"tool":name,"state":"failed","error":e.to_string()}));
-                        checkpoint.history = history.clone();
-                        runtime::complete_invocation(
-                            &deps.db_path,
-                            &task_id,
-                            &checkpoint,
-                            &receipt,
-                            json!({"error":e.to_string()}),
-                            false,
-                        )
-                        .await?;
-                        record_event(
-                            &deps.db_path,
-                            &task_id,
-                            "tool_result",
-                            json!({
-                                "round": used_calls, "tool": name, "ok": false,
-                                "error": e.to_string(),
-                            }),
-                        )
-                        .await?;
-                        if tool_failures >= MAX_TOOL_FAILURES {
-                            bail!("连续 {MAX_TOOL_FAILURES} 次工具调用失败（最后: {name}: {e}）");
-                        }
-                        history.push(json!({"role": "user", "content": format!(
-                            "工具 `{name}` 抛错：{e}。可换工具或直接 done。")}));
                     }
+                }
+                history.push(execution.history_record());
+                checkpoint.history = history.clone();
+                executor::commit(&deps.db_path, &task_id, &checkpoint, &execution).await?;
+                if execution.result.status == ToolStatus::Unknown {
+                    bail!(
+                        "工具结果不确定，已保存回执，核实前不自动重试：{}",
+                        execution
+                            .result
+                            .error
+                            .as_ref()
+                            .map(|e| e.message.as_str())
+                            .unwrap_or("未知结果")
+                    );
+                }
+                if tool_failures >= MAX_TOOL_FAILURES {
+                    bail!("连续工具执行失败，停止自动循环");
                 }
             }
             other => {
@@ -587,6 +558,7 @@ fn render_history(history: &[Value], brief: &Value) -> String {
 }
 
 /// tools → 目录片段（含 mcp:*），每工具一行
+#[cfg(test)]
 fn build_tools_catalog(registry: &Registry) -> String {
     let mut names = registry.names();
     names.sort();
@@ -604,6 +576,12 @@ fn build_tools_catalog(registry: &Registry) -> String {
         }
     }
     out
+}
+
+fn build_native_system_prompt() -> String {
+    let compatible = build_system_prompt("以原生tools声明为准");
+    let rules = compatible.split("规则：").nth(1).unwrap();
+    format!("你是云团的agent_exec任务执行体。当前使用原生函数调用，每轮最多调用一个已声明函数；工具名由函数描述对应。用yuantuan_control报告进度、等待输入、拆分最多2个子任务或完成，也可直接给最终正文；不要输出动作JSON。子任务共享预算，不继续递归拆分。只有工具结果status=succeeded代表成功；rejected未执行，可按错误修正；unknown需核实，不能重试。\n规则：{rules}")
 }
 
 fn build_system_prompt(tools_catalog: &str) -> String {

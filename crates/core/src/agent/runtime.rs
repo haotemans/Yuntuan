@@ -120,6 +120,47 @@ pub async fn begin_invocation(
     name: &str,
     args: &Value,
 ) -> Result<String> {
+    begin_invocation_inner(path, id, s, name, args, None).await
+}
+
+pub async fn begin_tool_invocation(
+    path: &Path,
+    id: &str,
+    s: &Checkpoint,
+    ctx: &crate::tools::ToolCtx,
+    call: &crate::tools::ToolCall,
+    definition: &crate::tools::ToolDefinition,
+    protocol: crate::tools::ToolProtocol,
+) -> Result<String> {
+    ensure!(
+        ctx.task_id.as_deref() == Some(id)
+            && ctx.sender_pid == s.actor
+            && ctx.chat_type == s.chat_type,
+        "工具上下文与任务不匹配"
+    );
+    begin_invocation_inner(
+        path,
+        id,
+        s,
+        &call.name,
+        &call.arguments,
+        Some((ctx, call, definition, protocol)),
+    )
+    .await
+}
+async fn begin_invocation_inner(
+    path: &Path,
+    id: &str,
+    s: &Checkpoint,
+    name: &str,
+    args: &Value,
+    meta: Option<(
+        &crate::tools::ToolCtx,
+        &crate::tools::ToolCall,
+        &crate::tools::ToolDefinition,
+        crate::tools::ToolProtocol,
+    )>,
+) -> Result<String> {
     ensure!(
         s.allowed.is_empty() || s.allowed.iter().any(|n| n == name),
         "工具不在任务允许范围内"
@@ -133,6 +174,10 @@ pub async fn begin_invocation(
     let valid:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM task_runtime WHERE task_id=?1 AND revision=?2 AND phase='executing')")
         .bind(id).bind(s.revision).fetch_one(&mut *tx).await?;
     ensure!(valid, "任务已停止或改变");
+    if let Some((ctx, _, _, _)) = meta {
+        let scoped:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tasks t JOIN task_runtime r USING(task_id) WHERE t.task_id=?1 AND t.chat_id=?2 AND t.created_by_pid=?3 AND r.chat_type=?4)").bind(id).bind(&ctx.chat_id).bind(&ctx.sender_pid).bind(&ctx.chat_type).fetch_one(&mut *tx).await?;
+        ensure!(scoped, "工具调用来源与原任务不一致");
+    }
     let previous:i64=sqlx::query_scalar("SELECT COUNT(*) FROM task_invocations i JOIN task_runtime r ON r.task_id=i.task_id WHERE r.root_id=?1 AND i.tool_name=?2 AND i.args=?3")
         .bind(&s.root).bind(name).bind(args.to_string()).fetch_one(&mut *tx).await?;
     ensure!(
@@ -142,6 +187,9 @@ pub async fn begin_invocation(
     let receipt = super::new_task_id();
     tx.execute("INSERT INTO task_invocations(id,task_id,revision,tool_name,args,state,started_at) VALUES(?1,?2,?3,?4,?5,'started',?6)",
         params![receipt,id,s.revision,name,args.to_string(),now_secs()]).await?;
+    if let Some((_, call, definition, protocol)) = meta {
+        tx.execute("INSERT INTO tool_invocation_records(invocation_id,task_id,revision,call_id,protocol,definition_json,status) VALUES(?1,?2,?3,?4,?5,?6,'started')",params![receipt,id,s.revision,call.call_id,if protocol==crate::tools::ToolProtocol::Json {"json"}else{"native"},serde_json::to_string(definition)?]).await?;
+    }
     tx.commit().await?;
     Ok(receipt)
 }
@@ -155,18 +203,75 @@ pub async fn complete_invocation(
     result: Value,
     ok: bool,
 ) -> Result<()> {
+    complete_invocation_inner(
+        path,
+        id,
+        s,
+        receipt,
+        result,
+        if ok { "succeeded" } else { "failed" },
+        None,
+    )
+    .await
+}
+
+pub async fn complete_tool_invocation(
+    path: &Path,
+    id: &str,
+    s: &Checkpoint,
+    report: &crate::tools::ToolResult,
+    audit: Option<Value>,
+) -> Result<()> {
+    use crate::tools::ToolStatus;
+    ensure!(
+        report.task_id == id && report.revision == s.revision,
+        "工具结果归属不一致"
+    );
+    let Some(receipt) = report.receipt_id.as_deref() else {
+        let mut c = crate::db::connect(path).await?;
+        record_event_static(&mut c, id, "tool_rejected", serde_json::to_value(report)?).await?;
+        return save(path, id, s).await;
+    };
+    let result = report
+        .output
+        .as_ref()
+        .map(|out| serde_json::to_value(out).unwrap())
+        .unwrap_or_else(|| json!({"error":report.error.as_ref().map(|e|&e.message)}));
+    let state = match report.status {
+        ToolStatus::Succeeded => "succeeded",
+        ToolStatus::Unknown => "started",
+        _ => "failed",
+    };
+    complete_invocation_inner(path, id, s, receipt, result, state, Some((report, audit))).await
+}
+
+async fn complete_invocation_inner(
+    path: &Path,
+    id: &str,
+    s: &Checkpoint,
+    receipt: &str,
+    result: Value,
+    state: &str,
+    meta: Option<(&crate::tools::ToolResult, Option<Value>)>,
+) -> Result<()> {
     let mut c = crate::db::connect(path).await?;
     let mut tx = c.begin_immediate().await?;
-    tx.execute(
-        "UPDATE task_invocations SET state=?2,result=?3,finished_at=?4 WHERE id=?1",
+    let receipt_changed = tx.execute(
+        "UPDATE task_invocations SET state=?2,result=?3,finished_at=?4 WHERE id=?1 AND task_id=?5 AND revision=?6 AND state='started'",
         params![
             receipt,
-            if ok { "succeeded" } else { "failed" },
+            state,
             result.to_string(),
-            now_secs()
+            now_secs(),id,s.revision
         ],
     )
     .await?;
+    ensure!(receipt_changed == 1, "工具回执不存在、已完成或归属不一致");
+    if let Some((report, audit)) = meta {
+        let changed=tx.execute("UPDATE tool_invocation_records SET status=?2,error_json=?3,elapsed_ms=?4 WHERE invocation_id=?1 AND task_id=?5 AND revision=?6 AND call_id=?7 AND status='started'",params![receipt,serde_json::to_value(report.status)?.as_str().unwrap(),report.error.as_ref().map(|e|serde_json::to_string(e).unwrap()),report.elapsed_ms as i64,id,s.revision,report.call_id]).await?;
+        ensure!(changed == 1, "工具回执重复完成或调用编号不匹配");
+        record_event_static(&mut tx,id,"tool_result",json!({"call_id":report.call_id,"receipt_id":receipt,"revision":s.revision,"tool":report.name,"ok":report.status==crate::tools::ToolStatus::Succeeded,"status":report.status,"summary":report.output.as_ref().map(|o|&o.summary),"artifacts":report.output.as_ref().map(|o|&o.artifacts),"error":report.error,"details":audit})).await?;
+    }
     let changed=tx.execute("UPDATE task_runtime SET history=?3,no_progress=?4,updated_at=?5 WHERE task_id=?1 AND revision=?2 AND phase='executing'",
         params![id,s.revision,serde_json::to_string(&s.history)?,s.no_progress,now_secs()]).await?;
     tx.commit().await?;
