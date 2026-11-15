@@ -149,10 +149,22 @@ pub fn native(response: &Value, catalog: &[ToolDefinition]) -> Result<RoundOutpu
 pub fn transcript(history: &[Value]) -> Result<Vec<Value>, ProtocolError> {
     let mut out = vec![];
     let mut ids = HashSet::new();
-    for record in history
-        .iter()
-        .filter(|v| v["role"] == "tool_result" && v["protocol"] == json!(ToolProtocol::Native))
-    {
+    for record in history {
+        if record["role"] != "tool_result" || record["protocol"] != json!(ToolProtocol::Native) {
+            // Preserve chronology, including repair feedback after a result. The brief stays
+            // in a separate stable first user message; results remain typed data.
+            let role = if record["role"] == "assistant" {
+                "assistant"
+            } else {
+                "user"
+            };
+            let content = record["content"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| record.to_string());
+            out.push(json!({"role":role,"content":content}));
+            continue;
+        }
         let call = &record["call"];
         let result = &record["result"];
         let id = call["call_id"]
@@ -169,7 +181,4 @@ pub fn transcript(history: &[Value]) -> Result<Vec<Value>, ProtocolError> {
         out.push(json!({"role":"tool","tool_call_id":id,"content":result.to_string()}));
     }
     Ok(out)
-}
-pub fn json_history(history: &[Value], protocol: ToolProtocol) -> Vec<Value> {
-    history.iter().map(|r|if protocol==ToolProtocol::Native && r["role"]=="tool_result" && r["protocol"]==json!(ToolProtocol::Native){json!({"role":"tool_reference","call_id":r["call"]["call_id"],"receipt_id":r["result"]["receipt_id"],"status":r["result"]["status"]})}else{r.clone()}).collect()
 }

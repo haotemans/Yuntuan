@@ -269,12 +269,20 @@ async fn durable_receipts_reject_replay_foreign_context_and_duplicate_completion
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let wire = protocol::transcript(&cp.history).unwrap();
-    assert_eq!(wire.len(), 2);
-    assert_eq!(wire[0]["tool_calls"][0]["id"], "original_1");
-    assert_eq!(wire[1]["tool_call_id"], "original_1");
+    assert_eq!(wire.len(), 3);
+    assert_eq!(wire[1]["tool_calls"][0]["id"], "original_1");
+    assert_eq!(wire[2]["tool_call_id"], "original_1");
     assert_eq!(
-        serde_json::from_str::<Value>(wire[1]["content"].as_str().unwrap()).unwrap()["status"],
+        serde_json::from_str::<Value>(wire[2]["content"].as_str().unwrap()).unwrap()["status"],
         "succeeded"
+    );
+    let mut with_feedback = cp.history.clone();
+    with_feedback.push(json!({"role":"user","content":"latest repair instruction"}));
+    let extended = protocol::transcript(&with_feedback).unwrap();
+    assert_eq!(&extended[..wire.len()], wire.as_slice());
+    assert_eq!(
+        extended.last().unwrap()["content"],
+        "latest repair instruction"
     );
     let mut corrupted = cp.history.clone();
     corrupted.last_mut().unwrap()["result"]["call_id"] = json!("wrong");
@@ -491,14 +499,22 @@ async fn json_and_native_loops_share_execution_and_correlated_results() {
         assert_eq!(result["result"]["output"]["data"]["q"], 7);
         assert!(result["result"]["receipt_id"].is_string());
         if mode == ToolProtocol::Native {
+            assert_eq!(
+                requests[0]["messages"][1], requests[1]["messages"][1],
+                "stable task brief prefix"
+            );
+            assert_eq!(
+                requests[0]["messages"][2], requests[1]["messages"][2],
+                "append-only execution prefix"
+            );
             assert_eq!(requests[0]["parallel_tool_calls"], false);
             assert_eq!(requests[0]["tool_choice"], "auto");
             assert!(requests[0].get("response_format").is_none());
             assert_eq!(
-                requests[1]["messages"][2]["tool_calls"][0]["id"],
+                requests[1]["messages"][3]["tool_calls"][0]["id"],
                 "original_1"
             );
-            assert_eq!(requests[1]["messages"][3]["tool_call_id"], "original_1");
+            assert_eq!(requests[1]["messages"][4]["tool_call_id"], "original_1");
         } else {
             assert_eq!(requests[0]["tool_choice"], "none");
             assert_eq!(requests[0]["response_format"]["type"], "json_object");
