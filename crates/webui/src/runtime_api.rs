@@ -112,7 +112,8 @@ pub async fn control(
     Ok(Json(json!({"ok":true})))
 }
 pub async fn task(State(s): State<AppState>, Path(id): Path<String>) -> Response {
-    let mut c = s.open_db().await.map_err(error)?;
+    let mut conn = s.open_db().await.map_err(error)?;
+    let mut c = conn.transaction().await.map_err(error)?;
     let row = sqlx::query("SELECT * FROM task_runtime WHERE task_id=?")
         .bind(&id)
         .fetch_optional(&mut *c)
@@ -121,9 +122,14 @@ pub async fn task(State(s): State<AppState>, Path(id): Path<String>) -> Response
     let Some(r) = row else {
         return Ok(Json(json!({"runtime":null})));
     };
+    let brief = yuantuan_core::agent::brief::current(&mut c, &id)
+        .await
+        .map_err(error)?;
+    let rows=sqlx::query("SELECT revision,event_kind,source_msg_id,created_at FROM task_brief_versions WHERE task_id=? ORDER BY revision DESC LIMIT 10").bind(&id).fetch_all(&mut *c).await.map_err(error)?;
+    let versions:Result<Vec<_>,sqlx::Error>=rows.iter().map(|r|Ok(json!({"revision":r.try_get::<i64,_>("revision")?,"event_kind":r.try_get::<String,_>("event_kind")?,"source_msg_id":r.try_get::<Option<i64>,_>("source_msg_id")?,"created_at":r.try_get::<i64,_>("created_at")?}))).collect();
     let calls=sqlx::query("SELECT id,tool_name,state,started_at,finished_at FROM task_invocations WHERE task_id=? ORDER BY started_at LIMIT 100").bind(&id).fetch_all(&mut *c).await.map_err(error)?;
     let calls:Result<Vec<_>,sqlx::Error>=calls.iter().map(|r|Ok(json!({"id":r.try_get::<String,_>("id")?,"tool":r.try_get::<String,_>("tool_name")?,"state":r.try_get::<String,_>("state")?,"started_at":r.try_get::<i64,_>("started_at")?,"finished_at":r.try_get::<Option<i64>,_>("finished_at")?}))).collect();
     Ok(Json(
-        json!({"runtime":{"root_id":r.try_get::<String,_>("root_id").map_err(error)?,"parent_id":r.try_get::<Option<String>,_>("parent_id").map_err(error)?,"phase":r.try_get::<String,_>("phase").map_err(error)?,"revision":r.try_get::<i64,_>("revision").map_err(error)?,"budget_reserved":r.try_get::<i64,_>("spent_tokens").map_err(error)?,"budget_limit":r.try_get::<i64,_>("max_tokens").map_err(error)?,"delivery_state":r.try_get::<String,_>("delivery_state").map_err(error)?,"stop_reason":r.try_get::<Option<String>,_>("stop_reason").map_err(error)?,"final_text":r.try_get::<Option<String>,_>("final_text").map_err(error)?},"invocations":calls.map_err(error)?}),
+        json!({"runtime":{"root_id":r.try_get::<String,_>("root_id").map_err(error)?,"parent_id":r.try_get::<Option<String>,_>("parent_id").map_err(error)?,"phase":r.try_get::<String,_>("phase").map_err(error)?,"revision":r.try_get::<i64,_>("revision").map_err(error)?,"budget_reserved":r.try_get::<i64,_>("spent_tokens").map_err(error)?,"budget_limit":r.try_get::<i64,_>("max_tokens").map_err(error)?,"delivery_state":r.try_get::<String,_>("delivery_state").map_err(error)?,"stop_reason":r.try_get::<Option<String>,_>("stop_reason").map_err(error)?,"final_text":r.try_get::<Option<String>,_>("final_text").map_err(error)?},"brief":brief,"brief_versions":versions.map_err(error)?,"invocations":calls.map_err(error)?}),
     ))
 }

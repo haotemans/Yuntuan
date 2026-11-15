@@ -469,19 +469,41 @@ async fn execute_outcome(
                 && !control.request_quote.trim().is_empty()
                 && m.text.contains(control.request_quote.trim())
             {
-                let result = crate::agent::runtime::control(
-                    &deps.db_path,
-                    &control.task_id,
-                    &m.sender_pid,
-                    &m.chat_id,
-                    &m.chat_type,
-                    &control.action,
-                    &m.text,
-                )
-                .await;
+                let expected = snapshot
+                    .active_tasks
+                    .iter()
+                    .find(|v| v["task_id"] == control.task_id)
+                    .and_then(|v| v["revision"].as_i64());
+                let result = if expected.is_some()
+                    && control
+                        .expected_revision
+                        .is_none_or(|v| Some(v) == expected)
+                {
+                    crate::agent::runtime::control_from_message(
+                        &deps.db_path,
+                        &control.task_id,
+                        &control.action,
+                        m,
+                        expected,
+                        outcome.output.focus_context_id,
+                    )
+                    .await
+                } else {
+                    Err(anyhow::anyhow!("任务不在当前可见版本，先重新确认任务状态"))
+                };
                 snapshot.execution_results.push(serde_json::json!({"task_control":control.action,"ok":result.is_ok(),"error":result.err().map(|e|e.to_string())}));
+                outcome.output.focus_task_id = Some(control.task_id.clone());
             }
             outcome.output.action = DecisionAction::Reply;
+        }
+        snapshot.task_context.clear();
+        if let Some(id) = outcome.output.focus_task_id.as_deref() {
+            if let Ok(mut c) = crate::db::connect(&deps.db_path).await {
+                match crate::agent::brief::selected(&mut c, m, snapshot.cutoff, id).await {
+                    Ok(view) => snapshot.task_context.push(view),
+                    Err(e) => warn!(%e,"任务语境未选入本轮回复"),
+                }
+            }
         }
         // action=invoke_skill：Skill 执行（Q-S02）。Skill 内部默认渲染模板；
         // 插件可以 override invoke 自己调 chat LLM。Skill 输出经 bot_chat Bubbleizer 发送。
@@ -655,7 +677,7 @@ async fn execute_outcome(
             return;
         }
         // action=start_task：建 tasks 行 + TaskCreated 事件（agent::create_task 落两笔）；
-        // spawn_runner 订阅事件后立即起执行协程。静默：不发群消息（Q-A03）
+        // Success stays quiet; dispatch failures go through Chat without claiming execution.
         if outcome.output.action == DecisionAction::StartTask {
             let goal = outcome
                 .output
@@ -665,15 +687,18 @@ async fn execute_outcome(
             if let Err(e) = crate::agent::create_scoped_task(
                     &deps.db_path,&deps.bus,&m.chat_id,&m.chat_type,&m.sender_pid,Some(m.msg_id),&goal,
                     outcome.output.task_plan.clone().unwrap_or_default(),
-                    serde_json::json!({"anchor":snapshot.anchor,"quoted_messages":snapshot.quoted_messages,"recent_messages":snapshot.recent_messages,"person_profile":snapshot.profile,"group_profile":snapshot.group_profile,"history":snapshot.historical_messages,"working_context":snapshot.working_context,"dialogue":snapshot.dialogue,"visual_context":snapshot.visual_context,"execution_results":snapshot.execution_results}),
+                    serde_json::json!({"anchor":snapshot.anchor,"quoted_messages":snapshot.quoted_messages,"recent_messages":snapshot.recent_messages,"person_profile":snapshot.profile,"group_profile":snapshot.group_profile,"history":snapshot.historical_messages,"working_context":snapshot.working_context,"focus_context_id":outcome.output.focus_context_id,"dialogue":snapshot.dialogue,"visual_context":snapshot.visual_context,"execution_results":snapshot.execution_results,"task_context":snapshot.task_context}),
                 )
                 .await
                 {
                     warn!(chat_id = %m.chat_id, error = %e, "start_task 落地失败");
+                    snapshot.execution_results.push(serde_json::json!({"task_dispatch":{"goal":goal,"ok":false,"error":e.to_string()},"external_action_started":false}));
+                    outcome.output.action=DecisionAction::Reply;
+                    outcome.output.task_goal=None;
                 } else {
                     info!(chat_id = %m.chat_id, goal = %goal, "start_task 已建仓");
+                    return;
                 }
-            return;
         }
         if outcome.output.action != DecisionAction::Reply {
             return; // ignore 仅由 DecisionMade 事件记录

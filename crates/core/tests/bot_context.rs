@@ -1219,7 +1219,16 @@ async fn group_heat_and_public_continuity_use_typed_immutable_snapshot_end() {
     let old = capture_reply_snapshot(&rig.path, &early, latest.msg_id, &ContextCfg::default())
         .await
         .unwrap();
-    assert_eq!(old.scene, snapshot.scene);
+    // The message-derived scene is immutable; the independent wall clock may cross a second.
+    let mut old_scene = old.scene.clone();
+    let mut snapshot_scene = snapshot.scene.clone();
+    assert!(old_scene["current_time"].is_string());
+    old_scene.as_object_mut().unwrap().remove("current_time");
+    snapshot_scene
+        .as_object_mut()
+        .unwrap()
+        .remove("current_time");
+    assert_eq!(old_scene, snapshot_scene);
     let current = capture_reply_snapshot(&rig.path, &later, later.msg_id, &ContextCfg::default())
         .await
         .unwrap();
