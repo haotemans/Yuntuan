@@ -54,3 +54,6 @@ LLM网关的`LLM请求计时`日志区分成本闸/并发等待`queue_ms`和上�
 Agent模型绑定追加tool_protocol，可选json（缺省，兼容旧配置）和native（Chat Completions tool_calls）。模型页只在agent_exec卡片显示选择器，保存/回读/测试签名均核对协议；Decision与Chat不能开启native。原生请求声明当前可见工具、tool_choice=auto与parallel_tool_calls=false，不设置json_object；JSON兼容请求、Decision和Chat继续tool_choice=none。两种Agent路径共用原HTTP、成本闸、并发、思考强度和用量统计，不暗中切换模型、协议或权限。已开始任务沿用启动时获取的网关，后续任务使用热加载后的配置。
 
 “保存并测试”仍是无工具的最短连通请求，返回实际生效协议元数据以核对配置；成功不证明Provider支持原生工具执行，页面明确提示此边界。完整执行需独立任务验证，见[统一执行接口](../core/tasks.md#v18-统一工具执行接口)。额外配置API回归见[`pages_api.rs`](../../../crates/webui/tests/pages_api.rs)，浏览器覆盖协议保存、刷新和回读不一致时拒绝测试。
+
+
+模型热更新同时供夜间整理使用：[`config_api.rs`](../../../crates/webui/src/config_api.rs)重建归纳定时器时传递共享`llm_slot`，不再固定当时的网关；会话下一批/人物下一次读取当前Decision绑定，同批格式修复固定模型。该修复不增加模型角色或修改用户配置；测试入口见[记忆功能](../core/memory.md#v19近期增量历史补齐与整理诊断)。

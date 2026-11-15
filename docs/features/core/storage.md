@@ -57,3 +57,6 @@ V17新增task_brief_versions及原消息/动作唯一索引，SQL见[`brief_v17.
 
 
 V18仅追加tool_contracts和tool_invocation_records，SQL见[`tools_v18.sql`](../../../crates/core/src/db/tools_v18.sql)。前者保存当前注册工具契约；后者关联task_invocations、任务版本和call_id，保存所用协议、当次契约快照、结果状态、错误及耗时，(task_id,revision,call_id)唯一。原task_invocations结果平铺形状不变，unknown继续标旧started以阻止恢复重放；完整输出与模型有界预览分离。保留消息、画像、群记忆、任务说明、配置和旧回执。最新数据库版本18，迁移保留/幂等及调用事务回归见[任务功能](tasks.md#v18-统一工具执行接口)。
+
+
+V19追加`portrait_coverage`与`portrait_runs`，SQL见[`portrait_v19.sql`](../../../crates/core/src/db/portrait_v19.sql)。精确消息覆盖关联已有批次，运行诊断保存实际模型和安全错误类别；原消息、旧游标/baseline、人物版本、群记忆、摘要、配置均保留。旧数据不虚构覆盖记录，迁移可重放，最新数据库版本19。V18升级、保留和回滚回归见[`profile_refresh.rs`](../../../crates/core/tests/profile_refresh.rs)，行为详见[记忆功能](memory.md#v19近期增量历史补齐与整理诊断)。

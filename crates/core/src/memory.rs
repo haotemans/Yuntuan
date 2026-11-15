@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub mod material_cache;
 pub mod nightly;
+mod portrait_queue;
 pub mod processing;
 pub mod refresh;
 pub mod semantic;

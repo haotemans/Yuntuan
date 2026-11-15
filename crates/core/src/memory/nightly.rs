@@ -1,7 +1,7 @@
 //! A bounded nightly queue. Attempts, per-person markers and spacing survive restarts.
 use crate::{
     db::{self, params, SqliteExt},
-    llm::{LlmGateway, Role},
+    llm::Role,
 };
 use anyhow::Result;
 use std::{
@@ -53,27 +53,47 @@ async fn claim(path: &Path, options: &Options, at: i64) -> Result<Claim> {
         return Ok(Claim::Wait((next - at) as u64));
     }
     let prefix = format!("profile_nightly_person:v1:{}:", options.date);
+    let rotation = used >= options.limit.saturating_sub((options.limit / 5).max(1)) as u64;
     let person=sqlx::query_scalar::<_,String>(
         "SELECT m.sender_pid FROM messages m
          LEFT JOIN state_kv s ON s.key='profile_refresh:v1:'||m.sender_pid
          LEFT JOIN memory_progress progress ON progress.stage='portrait' AND progress.owner_id=m.sender_pid AND progress.chat_type=''
          WHERE m.sender_pid<>'self' AND m.chat_type IN ('group','private')
            AND length(trim(COALESCE(m.text,'')))>=4
+           AND m.msg_id>COALESCE(progress.cursor,0)
+           AND NOT EXISTS(SELECT 1 FROM portrait_coverage c WHERE c.person_id=m.sender_pid AND c.msg_id=m.msg_id)
            AND NOT EXISTS(SELECT 1 FROM state_kv done WHERE done.key=?1||m.sender_pid)
          GROUP BY m.sender_pid
          HAVING MAX(m.msg_id)>COALESCE(progress.cursor,0)
            AND COALESCE(json_extract(CASE WHEN json_valid(s.value) THEN s.value ELSE '{}' END,'$.attempt'),0)<=?2-300
-         ORDER BY CASE WHEN COALESCE(s.updated_at,0)<?2-604800 THEN 0 ELSE 1 END,
-         CASE WHEN EXISTS(SELECT 1 FROM memory_facts f WHERE f.owner_type='person' AND f.owner_id=m.sender_pid AND f.source_msg_id>COALESCE(progress.cursor,0)) THEN 0 ELSE 1 END,
-         COALESCE(s.updated_at,0),MAX(m.ts) DESC,m.sender_pid LIMIT 1")
-        .bind(prefix.clone()).bind(at).fetch_optional(&mut *tx).await?;
+         ORDER BY CASE WHEN ?3 THEN 0 ELSE CASE WHEN EXISTS(SELECT 1 FROM person_profile_versions v WHERE v.person_id=m.sender_pid AND v.source_msg_id>COALESCE(progress.cursor,0) AND NOT EXISTS(SELECT 1 FROM portrait_coverage c WHERE c.person_id=v.person_id AND c.msg_id=v.source_msg_id)) THEN 0 ELSE 1 END END,
+         CASE WHEN ?3 THEN 0 ELSE CASE WHEN EXISTS(SELECT 1 FROM memory_facts f WHERE f.owner_type='person' AND f.owner_id=m.sender_pid AND f.source_msg_id>COALESCE(progress.cursor,0)) THEN 0 ELSE 1 END END,
+         CASE WHEN ?3 THEN 0 ELSE CASE WHEN MAX(m.ts)>=?2-86400 THEN 0 ELSE 1 END END,
+         COALESCE(json_extract(CASE WHEN json_valid(s.value) THEN s.value ELSE '{}' END,'$.last_success_at'),json_extract(CASE WHEN json_valid(s.value) THEN s.value ELSE '{}' END,'$.completed_at'),0),MAX(m.ts) DESC,m.sender_pid LIMIT 1")
+        .bind(prefix.clone()).bind(at).bind(rotation).fetch_optional(&mut *tx).await?;
     let Some(person) = person else {
         return Ok(Claim::Done);
     };
     // Compare-and-swap the shared daily row before committing the person's attempt.
     // Unknown/cancelled work holds the queue for five minutes plus the configured gap.
-    let claimed=tx.execute("UPDATE state_kv SET value=?3,updated_at=?4 WHERE key=?1 AND value=?2",
-        params![key,stored,serde_json::json!({"used":used+1,"next_at":at+300+options.interval_secs.min(3600) as i64,"active_person":person}).to_string(),at]).await?;
+    let claimed = tx
+        .execute(
+            "UPDATE state_kv SET value=?3,updated_at=?4 WHERE key=?1 AND value=?2",
+            params![
+                key,
+                stored,
+                {
+                    let mut state = state.clone();
+                    state["used"] = serde_json::json!(used + 1);
+                    state["next_at"] =
+                        serde_json::json!(at + 300 + options.interval_secs.min(3600) as i64);
+                    state["active_person"] = serde_json::json!(person);
+                    state.to_string()
+                },
+                at
+            ],
+        )
+        .await?;
     if claimed == 0 {
         return Ok(Claim::Wait(1));
     }
@@ -86,12 +106,34 @@ async fn claim(path: &Path, options: &Options, at: i64) -> Result<Claim> {
     Ok(Claim::Person(person))
 }
 
-pub async fn run(path: &Path, gw: &LlmGateway, options: &Options) -> Result<()> {
-    if gw.role(Role::Decision).is_none() {
-        return Ok(());
-    }
+pub async fn run(path: &Path, slot: &crate::bot::SharedLlm, options: &Options) -> Result<()> {
     let _guard = RUNNING.lock().await;
     loop {
+        // Resolve after each gap, never retain a startup snapshot across the night.
+        let Some(gw) = slot.read().unwrap().clone() else {
+            return Ok(());
+        };
+        let Some(role) = gw.role(Role::Decision) else {
+            return Ok(());
+        };
+        let binding = format!(
+            "{}:{}:{:?}",
+            role.provider, role.model, role.reasoning_effort
+        );
+        let mut conn = db::connect(path).await?;
+        let circuit: Option<String> = sqlx::query_scalar("SELECT value FROM state_kv WHERE key=?1")
+            .bind(format!("profile_nightly:v1:{}", options.date))
+            .fetch_optional(&mut *conn)
+            .await?;
+        let circuit: serde_json::Value = circuit
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        if circuit["failure_streak"].as_u64().unwrap_or(0) >= 3
+            && circuit["failure_binding"].as_str() == Some(binding.as_str())
+        {
+            return Ok(());
+        }
+        drop(conn);
         match claim(path, options, now()).await? {
             Claim::Done => return Ok(()),
             Claim::Wait(seconds) => {
@@ -102,16 +144,47 @@ pub async fn run(path: &Path, gw: &LlmGateway, options: &Options) -> Result<()> 
                 tokio::time::sleep(Duration::from_secs(seconds.min(remaining))).await;
             }
             Claim::Person(person) => {
-                let result = tokio::time::timeout(
-                    Duration::from_secs(180),
-                    super::refresh::person(path, gw, &person, false),
-                )
-                .await;
-                if !matches!(result, Ok(Ok(_))) {
+                let result = super::refresh::person(path, &gw, &person, false).await;
+                if result.is_err() {
                     tracing::warn!(person_id=%person,"夜间画像整理失败或超时，保留现有资料");
                 }
                 let at = now();
                 let mut conn = db::connect(path).await?;
+                let error: Option<String> = sqlx::query_scalar(
+                    "SELECT json_extract(value,'$.error_kind') FROM state_kv WHERE key=?1",
+                )
+                .bind(format!("profile_refresh:v1:{person}"))
+                .fetch_optional(&mut *conn)
+                .await?
+                .flatten();
+                let error = if result.is_err() {
+                    error.or_else(|| Some("storage_failed".into()))
+                } else {
+                    None
+                };
+                let streak = if error.is_some()
+                    && circuit["failure_binding"].as_str() == Some(binding.as_str())
+                    && circuit["failure_kind"].as_str() == error.as_deref()
+                {
+                    circuit["failure_streak"].as_u64().unwrap_or(0) + 1
+                } else if error.is_some() {
+                    1
+                } else {
+                    0
+                };
+                conn.execute("UPDATE state_kv SET value=json_patch(value,?2) WHERE key=?1",params![format!("profile_nightly:v1:{}",options.date),serde_json::json!({"failure_streak":streak,"failure_binding":binding,"failure_kind":error}).to_string()]).await?;
+                conn.execute(
+                    "UPDATE state_kv SET value=?2,updated_at=?3 WHERE key=?1",
+                    params![
+                        format!("profile_nightly_person:v1:{}:{person}", options.date),
+                        match &result {
+                            Ok(r) => r.status,
+                            Err(_) => "failed",
+                        },
+                        at
+                    ],
+                )
+                .await?;
                 conn.execute("UPDATE state_kv SET value=json_set(value,'$.next_at',?3,'$.active_person',NULL),updated_at=?4 WHERE key=?1 AND json_extract(value,'$.active_person')=?2",
                     params![format!("profile_nightly:v1:{}",options.date),person,at+options.interval_secs.min(3600) as i64,at]).await?;
             }
@@ -157,5 +230,26 @@ mod tests {
             claim(&path, &more, 5000).await.unwrap(),
             Claim::Done
         ));
+    }
+
+    #[tokio::test]
+    async fn rotation_uses_last_success_not_last_failed_attempt() {
+        let path =
+            std::env::temp_dir().join(format!("nightly-priority-{}.db", rand::random::<u64>()));
+        let mut conn = db::connect(&path).await.unwrap();
+        db::migrate(&mut conn).await.unwrap();
+        conn.execute_batch("INSERT INTO persons(person_id,first_seen,last_seen) VALUES('new',1,1),('old',1,1);
+          INSERT INTO messages(chat_id,chat_type,sender_pid,text,ts) VALUES('g','group','new','我最近在做新项目',1000),('g','group','old','长期没有整理的发言',1);
+          INSERT INTO person_profile_facts(person_id,field,content,source_msg_id,evidence_quote,updated_at) VALUES('new','ongoing_projects','新项目',1,'我最近在做新项目',1000);
+          INSERT INTO state_kv(key,value,updated_at) VALUES('profile_refresh:v1:old','{\"attempt\":100,\"status\":\"failed\",\"completed_at\":1}',999),('profile_refresh:v1:new','{\"attempt\":100,\"completed_at\":900}',900);").await.unwrap();
+        let options = Options {
+            date: "test".into(),
+            deadline: 5000,
+            limit: 10,
+            interval_secs: 60,
+        };
+        assert!(matches!(claim(&path,&options,1000).await.unwrap(),Claim::Person(p) if p=="new"));
+        conn.execute_batch("DELETE FROM state_kv WHERE key LIKE 'profile_nightly_person:%'; UPDATE state_kv SET value='{\"used\":8,\"next_at\":0}' WHERE key='profile_nightly:v1:test';").await.unwrap();
+        assert!(matches!(claim(&path,&options,1000).await.unwrap(),Claim::Person(p) if p=="old"));
     }
 }

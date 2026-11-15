@@ -89,6 +89,7 @@
         "webui-frontend/src/views/Memories.vue",
         "crates/core/src/vision.rs",
         "crates/core/src/memory/refresh.rs",
+        "crates/core/src/memory/portrait_queue.rs",
         "crates/core/src/memory/nightly.rs",
         "crates/core/src/memory/processing.rs",
         "crates/core/src/memory/semantic.rs",

@@ -332,6 +332,30 @@ async fn activity_exposes_unprocessed_messages_without_pretending_the_portrait_c
 }
 
 #[tokio::test]
+async fn portrait_activity_counts_disjoint_coverage_and_exposes_safe_failure_details() {
+    let r = Rig::start().await;
+    let mut conn = db::connect(&r.dir.join("db.sqlite")).await.unwrap();
+    conn.execute_batch("INSERT INTO messages(msg_id,chat_id,chat_type,sender_pid,text,ts) VALUES
+       (5,'10','group','p_101','今天未读的真实消息',unixepoch()),(6,'10','group','p_101','今天已处理的消息',unixepoch());
+       INSERT INTO memory_progress(stage,owner_id,chat_type,cursor,baseline) VALUES('portrait','p_101','',1,0);
+       INSERT INTO memory_batches(id,stage,owner_id,chat_type,from_id,end_id,status,started_at,lease_until,finished_at) VALUES(76,'portrait','p_101','',2,6,'completed',90,690,100),(77,'portrait','p_101','',2,6,'failed',200,800,210);
+       INSERT INTO portrait_coverage(person_id,msg_id,batch_id,processed_at) VALUES('p_101',3,76,100),('p_101',6,76,100);
+       INSERT INTO portrait_runs(batch_id,provider,model,reasoning,status,error_kind,elapsed_ms,inspected_messages,source_start_ts,source_end_ts) VALUES(77,'mock','current-model','low','failed','invalid_evidence',10000,2,3,100);
+       INSERT INTO state_kv(key,value,updated_at) VALUES('profile_refresh:v1:p_101','{\"attempt\":200,\"status\":\"failed\",\"last_success_at\":101}',210);").await.unwrap();
+    let result = r.get("/api/memories/people/p_101/activity").await;
+    assert_eq!(result["pending_messages"], 2);
+    assert_eq!(result["processed_messages"], 3);
+    assert_eq!(result["recent_pending_messages"], 1);
+    assert_eq!(result["processed_through"], 1);
+    assert_eq!(result["profile_refresh"]["last_success_at"], 101);
+    assert_eq!(result["last_run"]["error_kind"], "invalid_evidence");
+    assert_eq!(result["last_run"]["model"], "current-model");
+    assert_eq!(result["last_run"]["source_end_ts"], 100);
+    assert_eq!(result["last_run"]["finished_at"], 210);
+    assert!(!result.to_string().contains("今天未读"));
+}
+
+#[tokio::test]
 async fn profile_refresh_requires_session_existing_person_and_configured_model() {
     let r = Rig::start().await;
     let endpoint = format!("{}/api/memories/people/p_101/refresh", r.base);
