@@ -145,7 +145,8 @@
         "crates/webui/src/runtime_api.rs",
         "crates/core/src/agent/brief.rs",
         "crates/core/src/agent/protocol.rs",
-        "crates/core/src/tools/executor.rs"
+        "crates/core/src/tools/executor.rs",
+        "crates/core/src/tools/discovery.rs"
       ],
       "tests": [
         "crates/core/tests/agent_loop.rs",
@@ -154,7 +155,8 @@
         "webui-frontend/tests/tasks-flow.spec.js",
         "crates/core/tests/task_brief.rs",
         "crates/webui/tests/pages_api.rs",
-        "crates/core/tests/tool_protocol.rs"
+        "crates/core/tests/tool_protocol.rs",
+        "crates/core/tests/tool_usability.rs"
       ],
       "module": "core"
     },
@@ -173,11 +175,14 @@
         "crates/webui/src/plugins_api.rs",
         "webui-frontend/src/views/Plugins.vue",
         "crates/plugin-api/src/membership.rs",
-        "crates/core/src/capabilities.rs"
+        "crates/core/src/capabilities.rs",
+        "crates/core/src/capabilities/schema.rs"
       ],
       "tests": [
         "crates/core/tests/plugin_host.rs",
-        "crates/core/tests/plugin_attachments.rs"
+        "crates/core/tests/plugin_attachments.rs",
+        "crates/core/tests/tool_usability.rs",
+        "webui-frontend/tests/plugins-flow.spec.js"
       ],
       "module": "extensions"
     },

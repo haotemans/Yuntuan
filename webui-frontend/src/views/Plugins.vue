@@ -72,8 +72,12 @@
             <p class="section-note" v-else>尚无已完成的调用记录。</p>
             <div class="runtime-secondary"><span>未接纳 {{ detail.invocations?.rejected || 0 }} 次</span><span>已取消 {{ detail.invocations?.cancelled || 0 }} 次</span></div>
             <n-collapse class="technical-details"><n-collapse-item title="能力与存储信息" name="capabilities">
-              <div v-for="skill in detail.skills || []" :key="skill.name" class="capability"><code>{{ skill.name }}</code><p>{{ skill.description }}</p><n-switch :value="capabilityEnabled(skill.name)" :disabled="busy" @update:value="value => toggleCapability(skill.name, value)" /><span> 累计调用 {{ capabilities.find(c => c.name === skill.name && c.kind === 'skill')?.calls || 0 }} 次</span></div>
-              <div class="command-chips" v-if="detail.tools?.length"><code v-for="tool in detail.tools" :key="tool.name">{{ tool.name }}</code></div>
+              <div v-for="skill in detail.skills || []" :key="skill.name" class="capability"><code>{{ skill.name }}</code><p>{{ skill.description }}</p><n-switch :value="capabilityEnabled(skill.name)" :disabled="busy || !capability(skill.name)" @update:value="value => toggleCapability(skill.name, value)" /><span> 累计调用 {{ capabilities.find(c => c.name === skill.name && c.kind === 'skill')?.calls || 0 }} 次</span></div>
+              <div v-for="tool in detail.tools || []" :key="`tool-${tool.name}`" class="capability tool-capability">
+                <code>{{ tool.name }}</code><p>{{ tool.description || capability(tool.name, 'tool')?.description }}</p>
+                <n-switch :value="capabilityEnabled(tool.name, 'tool')" :disabled="busy || !capability(tool.name, 'tool')" :aria-label="`工具 ${tool.name}`" @update:value="value => toggleCapability(tool.name, value, 'tool')" /><span> Agent 工具 · 累计调用 {{ capability(tool.name, 'tool')?.calls || 0 }} 次</span>
+                <n-collapse v-if="capability(tool.name, 'tool')?.tool_contract?.input_schema"><n-collapse-item title="调用参数" :name="tool.name"><pre class="tool-schema">{{ JSON.stringify(capability(tool.name, 'tool').tool_contract.input_schema, null, 2) }}</pre></n-collapse-item></n-collapse>
+              </div>
               <p v-if="!detail.skills?.length && !detail.tools?.length" class="section-note">启用后显示可调用的能力。</p>
               <p class="storage-path" v-if="detail.data_dir">数据目录 <code>{{ detail.data_dir }}</code></p>
               <p class="field-help">代码更新需要编译并更新云团服务；配置保存自动应用。</p>
@@ -97,12 +101,15 @@ import PluginCard from '../components/PluginCard.vue'
 const messages = useMessage()
 const plugins = ref([])
 const capabilities=ref([])
-function capabilityEnabled(name) { return capabilities.value.find(c=>c.kind==='skill' && c.name===name)?.enabled ?? true }
-async function toggleCapability(name,enabled) {
-  try {await api.post('/capabilities',{name,kind:'skill',enabled});const {data}=await api.get('/capabilities');capabilities.value=data.capabilities || []}
-  catch(e) {messages.error(e.response?.data?.error || '更新技能失败')}
+function capability(name, kind = 'skill') { return capabilities.value.find(c=>c.kind===kind && c.name===name) }
+function capabilityEnabled(name, kind = 'skill') { return capability(name, kind)?.enabled ?? true }
+async function toggleCapability(name,enabled,kind = 'skill') {
+  const current=capability(name,kind)
+  if (!current) {messages.error('能力状态尚未加载，请刷新后重试');return}
+  try {await api.post('/capabilities',{name,kind,enabled,scopes:current.scopes || []});const {data}=await api.get('/capabilities');capabilities.value=data.capabilities || []}
+  catch(e) {messages.error(e.response?.data?.error || '更新能力失败')}
 }
-onMounted(async()=>{try {const {data}=await api.get('/capabilities');capabilities.value=data.capabilities || []}catch(e){ messages.error('技能状态加载失败') }})
+onMounted(async()=>{try {const {data}=await api.get('/capabilities');capabilities.value=data.capabilities || []}catch(e){ messages.error('能力状态加载失败') }})
 const initialLoading = ref(true)
 const loadError = ref('')
 const actionError = ref('')
@@ -323,6 +330,7 @@ h3 { margin: 0 0 12px; font-size: 13px; font-weight: 600; color: var(--yt-ink-1)
 .runtime-grid dd { margin: 0; color: var(--yt-ink-1); font-size: 25px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .runtime-secondary { display: flex; gap: 24px; font-size: 12px; color: var(--yt-ink-3); margin: 20px 0 28px; }
 .technical-details { padding-top: 18px; border-top: 1px solid var(--yt-card-border); }
+.tool-schema { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; color:var(--yt-ink-2); }
 .capability { margin: 10px 0 18px; }
 .capability code { color: var(--yt-ink-1); font-size: 12px; overflow-wrap: anywhere; }
 .capability p { color: var(--yt-ink-3); font-size: 12px; line-height: 1.8; }

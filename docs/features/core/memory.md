@@ -159,3 +159,6 @@ Context为实际发送来源或精确文件命中附加registered_asset，包含
 回归入口：[`crates/core/tests/working_context.rs`](../../../crates/core/tests/working_context.rs)，覆盖条件延续、纠正版本、重复事件、归属、来源与快照上界；不代表真实模型提取已验收。
 
 任务过程记忆补充V17独立任务说明，目标/条件/补充不再只依赖可压缩历史。快照增加同一作者和会话的有界task_context候选；Router选中后才为Chat展开说明及回执预览，已结束任务仍可追问，未选中的旧任务不主动接入本轮。人物与群聊记忆及夜间整理规则不变，详细来源和恢复边界见[任务功能](tasks.md)。
+
+
+回复快照增加当前底层工具概览，渲染到capabilities.task_tools；tools_available综合Skill和实际Tool数量，不能因无Skill或概览被裁剪就否认工具能力。概览是可缩的临时辅助上下文，不写入人物画像、群记忆或原始消息，且优先于原话资料裁剪。具体内容与验证见[任务功能](tasks.md#工具发现与参数修正)。

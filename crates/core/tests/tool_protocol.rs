@@ -151,6 +151,13 @@ async fn preconditions_have_no_effect_and_registration_preserves_switches_and_sc
         rejected.result.error.as_ref().unwrap().kind,
         ToolErrorKind::InvalidArguments
     );
+    assert!(rejected
+        .result
+        .error
+        .as_ref()
+        .unwrap()
+        .message
+        .contains("/q"));
     assert!(!rejected.result.external_action_started);
     assert!(rejected.result.receipt_id.is_none());
     assert!(rejected.result.retryable);

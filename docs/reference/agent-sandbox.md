@@ -13,7 +13,7 @@
 - `cwd` 是 `/workspace` 内的相对目录。每次是新 shell，`cd`、`export` 和后台服务不跨调用保留；文件、Git 仓库、venv 和包缓存保留。
 - stdout/stderr 并行读取，各自限长，超限继续排空。返回退出码、超时标记、耗时和截断标记。非零退出码仍作为命令结果返回给模型，不能视为命令成功；124 按 GNU timeout 惯例表示超时，137 可能是强制终止或内存限制，不能据此唯一判断原因。
 - 任务回放 `tool_result.details` 保存命令和有界输出；不要在命令文本或打印输出中放凭据。其他工具默认不额外保存详情。
-- Tool trait 增加参数 JSON Schema，Agent 目录携带 schema，MCP 转发已有 `inputSchema`。这仍是项目现有 JSON 循环协议，不是新增原生 function-calling 通道。
+- Tool trait 增加参数 JSON Schema，Agent 目录携带 schema，MCP 转发已有 `inputSchema`。当前统一执行器同时支持JSON动作与显式原生tool_calls，完整规则以[任务功能](../features/core/tasks.md)为准。
 
 ## 配置
 
@@ -35,7 +35,7 @@ max_output_bytes = 16384
 
 默认 `enabled=false`：旧配置继续运行，不注册沙箱工具，也不调用 Docker。启用后启动检查 Docker daemon 与本地镜像均为 Linux；不可用则启动报错。执行时 `--pull=never`，镜像必须预先构建。修改配置重启生效；配置 API 在写文件前校验沙箱字段，明确返回 `requires_restart`。当前没有专用沙箱设置页面。
 
-`timeout_secs` 上限 90 秒，为 Docker 创建、停止和清理留出时间；Agent 原有 120 秒工具超时、10 轮预算、最多 3 个任务并发保持原值。每次命令可申请更短的超时，不能超过配置上限。
+`timeout_secs` 上限 90 秒，为 Docker 创建、停止和清理留出时间；Agent 原有 120 秒工具超时、10 轮预算、默认最多 2 个任务并发。每次命令可申请更短的超时，不能超过配置上限。
 
 `network="none"` 支持已有文件与预装工具，不支持克隆远端或下载包。管理员设为 `bridge` 后可以访问外网，也可能访问宿主/局域网服务；这里没有域名白名单或内网地址拦截。需要细粒度网络隔离时，在专用 Docker daemon 的网络层配置策略。模型不能改变此设置。
 

@@ -97,3 +97,12 @@ Router明确选中事项但材料缺失时，任务创建整体回滚，失败�
 两种协议共享根预算、2个任务槽、去重、版本屏障与回聊链路；parallel_safe是契约元数据，本阶段不增加单任务内并行工具。WebUI工具执行记录显示协议、调用编号、任务版本、状态、耗时和错误；任务完成、工具成功与QQ送达继续分开。模型原生函数格式参见[官方说明](https://developers.openai.com/api/docs/guides/function-calling?api-mode=chat)。
 
 验证入口：[`tool_protocol.rs`](../../../crates/core/tests/tool_protocol.rs) 用本地mock运行同一任务的双协议、调用配对、权限/来源、去重、错误分类及V17→V18保留回归；[`tasks-flow.spec.js`](../../../webui-frontend/tests/tasks-flow.spec.js) 与[`pages_api.rs`](../../../crates/webui/tests/pages_api.rs) 覆盖前后端状态。真实Provider原生执行、Docker依赖、浏览器和通用文件收发仍需后续验证，不能以这些mock或CI代替。
+
+
+## 工具发现与参数修正
+
+[`discovery.rs`](../../../crates/core/src/tools/discovery.rs) 复用执行器的当前就绪、SQLite启停及类型化范围过滤，为Router和Chat提供工具名、用途、参数名/类型及必填项概览。它不执行工具、不授予权限，也不要求用户知道工具ID或填写JSON；Skill可直接完成时仍走原入口，只有底层Tool或组合工作才交Agent。目录最多48项、条目约3600字符；超预算先缩工具提示，保留total/omitted标记，不把省略或读取失败冒充没有能力。完整Schema仍由Agent按实际任务范围读取。
+
+Agent对invalid_arguments依据字段路径和Schema修正，无法从任务说明或已有结果获得的业务条件才wait_input；不自动编造目标、默认时长或凭据。预检拒绝不启动工具，修正继续原任务的有界loop，不重启Router或重置预算。副作用未知时仍停止，不把调用方便理解为无限重试。
+
+验证：[`tool_usability.rs`](../../../crates/core/tests/tool_usability.rs) 覆盖无Skill但有Tool时的Chat能力、停用/范围/未就绪过滤和错误路径；[`dispatch_tests.rs`](../../../crates/core/src/bot/dispatch_tests.rs) 用本地mock跑Router→Agent→错误参数拒绝→修正→成功回执，仅实际执行一次，并检查周期入口读取当前开关。mock验证接口与宿主行为，不证明真实模型一定选对工具。

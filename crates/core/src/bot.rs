@@ -44,6 +44,7 @@ pub struct PipelineDeps {
     pub memes_dir: PathBuf,
     /// Skill 注册表（Q-S02 Decision 自-driven 调用 Skill）；None 时 Decision 不提供 invoke_skill 选项
     pub skill_registry: Option<crate::skills::SkillRegistry>,
+    pub tools_registry: Option<crate::tools::Registry>,
     /// Q52 per-chat mpsc 容量热应用槽（G008）；新 worker spawn 时读
     pub per_chat_cap: SharedPerChatCap,
 }
@@ -400,6 +401,13 @@ async fn handle_inner(
                     }
                 }
             }
+            crate::tools::discovery::refresh(
+                &deps.db_path,
+                deps.tools_registry.as_ref(),
+                &mut snapshot,
+                &m.sender_pid,
+            )
+            .await;
             let outcome = decision::decide(
                 &deps.db_path,
                 &gw,
@@ -437,6 +445,13 @@ async fn execute_outcome(
     ctx_cfg: crate::context_builder::ContextCfg,
 ) {
     for route_turn in 0..3 {
+        crate::tools::discovery::refresh(
+            &deps.db_path,
+            deps.tools_registry.as_ref(),
+            &mut snapshot,
+            &m.sender_pid,
+        )
+        .await;
         // Re-read the accepted source event, then project only the Router-selected topic.
         snapshot.working_context.clear();
         if let Ok(mut c) = crate::db::connect(&deps.db_path).await {
@@ -831,6 +846,7 @@ async fn handle_periodic(deps: &PipelineDeps, mut batch: crate::window::PendingB
             &deps.mood,
             &batch,
             deps.skill_registry.as_ref(),
+            deps.tools_registry.as_ref(),
             &cfg,
         )
         .await?;
@@ -1247,6 +1263,7 @@ mod tests {
             ctx_cfg: Arc::new(RwLock::new(Default::default())),
             memes_dir: PathBuf::new(),
             skill_registry: Some(skills),
+            tools_registry: None,
             per_chat_cap: Arc::new(RwLock::new(32)),
         };
         let mut message = MessageReceivedPayload {

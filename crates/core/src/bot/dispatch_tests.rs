@@ -18,6 +18,7 @@ struct Model {
     status: Arc<AtomicU16>,
     quiet: Arc<AtomicBool>,
     social: Arc<AtomicBool>,
+    tool_work: Arc<AtomicBool>,
 }
 
 async fn completion(
@@ -45,7 +46,32 @@ async fn completion(
         model.started.notify_one();
         model.release.notified().await;
     }
-    let content = if model.invalid.load(Ordering::SeqCst) {
+    let content = if model.tool_work.load(Ordering::SeqCst) {
+        if input["task_brief"].is_object() {
+            let history = input["execution_history"].as_array().unwrap();
+            if history.iter().any(|r| r["result"]["status"] == "succeeded") {
+                json!({"action":"done","text":"已根据真实工具结果完成检索"}).to_string()
+            } else {
+                let repaired = history
+                    .iter()
+                    .any(|r| r["result"]["error"]["kind"] == "invalid_arguments");
+                if repaired {
+                    assert!(history.iter().any(|r| r["result"]["error"]["message"]
+                        .as_str()
+                        .is_some_and(|s| s.contains("/query"))));
+                }
+                json!({"action":"tool_call","tool_name":"mcp:docs.search","tool_args":{"query":if repaired {json!("test-library release")}else{json!(5)}}}).to_string()
+            }
+        } else {
+            assert!(input["tool_capabilities"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["name"] == "mcp:docs.search"));
+            let anchor = &input["anchor"];
+            json!({"action":"start_task","mood":"calm","mention":false,"reply_len":"short","reason":"底层工具可以完成明确请求","task_goal":"检索 test-library 的发布并给出来源","request_quote":anchor["text"],"task_plan":{"max_calls":5,"allowed_tools":["mcp:docs.search"]},"assessment":{"audience":"bot","intent":"request","continuity":"new_topic","confidence":"high","benefit":"high","novelty":"new","evidence":"not_needed","evidence_msg_ids":[anchor["msg_id"]]}}).to_string()
+        }
+    } else if model.invalid.load(Ordering::SeqCst) {
         "invalid".into()
     } else if model.social.load(Ordering::SeqCst) {
         let id = input["pending_messages"]
@@ -112,6 +138,7 @@ async fn fixture(model: Model) -> PipelineDeps {
         ctx_cfg: Arc::new(RwLock::new(Default::default())),
         memes_dir: dir.join("memes"),
         skill_registry: None,
+        tools_registry: None,
         per_chat_cap: Arc::new(RwLock::new(32)),
     }
 }
@@ -439,5 +466,129 @@ async fn bare_mention_reads_ignored_question_and_does_not_duplicate_inflight_wor
         model.inputs.lock().unwrap().len(),
         1,
         "在途任务和无关联的招呼都不新增模型请求"
+    );
+}
+
+struct WorkProbe(Arc<std::sync::atomic::AtomicUsize>);
+#[async_trait::async_trait]
+impl crate::tools::Tool for WorkProbe {
+    fn name(&self) -> &'static str {
+        "mcp:docs.search"
+    }
+    fn description(&self) -> &'static str {
+        "检索项目发布并返回来源"
+    }
+    fn parameters_schema(&self) -> Value {
+        json!({"type":"object","required":["query"],"properties":{"query":{"type":"string","minLength":1}},"additionalProperties":false})
+    }
+    async fn call(
+        &self,
+        _: &crate::tools::ToolCtx,
+        args: Value,
+    ) -> anyhow::Result<crate::tools::ToolOutput> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(crate::tools::ToolOutput {
+            summary: "已完成mock检索".into(),
+            artifacts: vec![],
+            data: json!({"query":args["query"],"source":"https://example.invalid/releases"}),
+        })
+    }
+}
+
+#[tokio::test]
+async fn tool_only_request_reaches_agent_and_repairs_arguments_without_executing_bad_input() {
+    let model = Model::default();
+    model.tool_work.store(true, Ordering::SeqCst);
+    let mut deps = fixture(model.clone()).await;
+    let providers = deps.db_path.parent().unwrap().join("providers.toml");
+    let mut config = std::fs::read_to_string(&providers).unwrap();
+    config.push_str("agent_exec = { provider = \"mock\", model = \"m\" }\n");
+    std::fs::write(&providers, config).unwrap();
+    *deps.llm.write().unwrap() = Some(Arc::new(LlmGateway::load(&providers).unwrap()));
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let tools = crate::tools::Registry::new();
+    tools.register(WorkProbe(calls.clone()));
+    deps.tools_registry = Some(tools.clone());
+    let mut events = deps.bus.subscribe();
+    let runner = crate::agent::spawn_runner(crate::agent::TaskRunnerDeps {
+        db_path: deps.db_path.clone(),
+        llm: deps.llm.clone(),
+        tools,
+        bus: deps.bus.clone(),
+    });
+    let m = message(&deps, true, "p_1", "检索 test-library 的发布并给出来源").await;
+    assert!(handle_inner(&deps, &m, m.msg_id).await.is_none());
+    let finished = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            if let Event::TaskFinished(p) = events.recv().await.unwrap() {
+                break p;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        finished.final_state.as_deref(),
+        Some("finished"),
+        "{:?}",
+        finished.error
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        model.inputs.lock().unwrap().len(),
+        4,
+        "一次Router + 三轮Agent；参数修正不重新判断用户授权"
+    );
+    let mut c = crate::db::connect(&deps.db_path).await.unwrap();
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_invocations")
+        .fetch_one(&mut *c)
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+    runner.abort();
+    let _ = runner.await;
+}
+
+#[tokio::test]
+async fn periodic_router_gets_tool_overview_and_observes_disabled_switch() {
+    let model = Model::default();
+    model.quiet.store(true, Ordering::SeqCst);
+    let mut deps = fixture(model.clone()).await;
+    let tools = crate::tools::Registry::new();
+    tools.register(WorkProbe(Arc::new(std::sync::atomic::AtomicUsize::new(0))));
+    deps.tools_registry = Some(tools);
+    message(&deps, false, "p_1", "普通聊天").await;
+    handle_periodic(
+        &deps,
+        crate::window::pending(&deps.db_path)
+            .await
+            .unwrap()
+            .remove(0),
+    )
+    .await;
+    assert_eq!(
+        model.inputs.lock().unwrap()[0]["tool_capabilities"]["tools"][0]["name"],
+        "mcp:docs.search"
+    );
+    crate::db::connect(&deps.db_path)
+        .await
+        .unwrap()
+        .execute_batch("UPDATE capability_catalog SET enabled=0 WHERE kind='tool'")
+        .await
+        .unwrap();
+    message(&deps, false, "p_2", "新消息").await;
+    handle_periodic(
+        &deps,
+        crate::window::pending(&deps.db_path)
+            .await
+            .unwrap()
+            .remove(0),
+    )
+    .await;
+    assert!(
+        model.inputs.lock().unwrap()[1]["tool_capabilities"]["tools"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
 }

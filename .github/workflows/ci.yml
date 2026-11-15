@@ -52,6 +52,9 @@ jobs:
       - name: Decision scheduling browser tests
         working-directory: webui-frontend
         run: npm run test:trace
+      - name: Plugin tool controls browser tests
+        working-directory: webui-frontend
+        run: npm run test:plugins
       - name: Model configuration browser tests
         working-directory: webui-frontend
         run: npm run test:models
@@ -89,6 +92,7 @@ jobs:
           cargo test --locked -p yuantuan-adapter-qq --lib moderation
           cargo test --locked -p yuantuan-core --lib bot::dispatch_tests
           cargo test --locked -p yuantuan-core --lib engagement::tests
+          cargo test --locked -p yuantuan-core --test tool_usability
           cargo test --locked -p yuantuan-core --test tool_protocol
           cargo test --locked -p yuantuan-core --test task_brief
           cargo test --locked -p yuantuan-core --test bot_context

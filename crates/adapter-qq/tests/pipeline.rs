@@ -251,6 +251,7 @@ async fn check_dispatch(addressed: bool, image_flood: bool) {
         )),
         memes_dir: temp_dir("pipeline-memes"),
         skill_registry: None,
+        tools_registry: None,
         per_chat_cap: std::sync::Arc::new(std::sync::RwLock::new(32)),
     });
 
@@ -412,6 +413,7 @@ async fn decision_pipeline_fallback_retries() {
         )),
         memes_dir: temp_dir("pipeline-memes"),
         skill_registry: None,
+        tools_registry: None,
         per_chat_cap: std::sync::Arc::new(std::sync::RwLock::new(32)),
     });
 

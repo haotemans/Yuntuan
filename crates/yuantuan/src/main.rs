@@ -258,6 +258,7 @@ async fn main() -> Result<()> {
         ctx_cfg: ctx_slot.clone(),
         memes_dir: memes_dir.clone(),
         skill_registry: Some(skill_registry.clone()),
+        tools_registry: Some(tools_registry.clone()),
         per_chat_cap: per_chat_cap_slot.clone(),
     };
 
