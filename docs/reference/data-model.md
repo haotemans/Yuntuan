@@ -403,3 +403,8 @@ messages追加decision_error TEXT。pending/deciding之后可以进入failed，�
 ## V18：工具契约与调用关联（2026-11-15）
 
 新增tool_contracts(name,definition_json,updated_at)与tool_invocation_records(invocation_id,task_id,revision,call_id,protocol,definition_json,status,error_json,elapsed_ms)，仅追加元数据，旧调用结果不换格式。后者引用task_invocations和tasks，并按任务/版本/调用编号唯一。结果状态及恢复含义见[任务功能](../features/core/tasks.md#v18-统一工具执行接口)，迁移见[存储](../features/core/storage.md)。
+
+
+### V19 人物整理覆盖与诊断
+
+`portrait_coverage(person_id,msg_id,batch_id,processed_at)`以人物和消息为主键，原消息删除时联删；只在有效批次完成的同一事务中追加。`memory_progress`仍为连续边界，尚未闭合的历史缺口不会被近期覆盖跳过。`portrait_runs`以`batch_id`关联原`memory_batches`，保存实际provider/model/reasoning、status/error_kind、elapsed_ms/repairs、inspected_messages/updated_fields/rejected_updates及source_start_ts/source_end_ts；处理时间来自原批次started_at/finished_at。错误不存Provider正文或密钥。SQL定义为[`portrait_v19.sql`](../../crates/core/src/db/portrait_v19.sql)，原V18及更早数据保留。

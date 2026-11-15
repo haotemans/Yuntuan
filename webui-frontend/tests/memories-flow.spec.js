@@ -40,7 +40,7 @@ async function openMemories(page, options = {}) {
       return route.fulfill({ json: { people: found, page: 1, total: found.length, has_more: false } })
     }
     if (url.pathname === '/api/memories/conversations') return route.fulfill({ json: { conversations } })
-    if (url.pathname.endsWith('/activity')) return route.fulfill({ json: { today_count: 11, last_seen: 1700000100, pending: !state.refreshed, profile_refresh: state.refreshed ? { completed_at: 1700000200, status: 'updated' } : {} } })
+    if (url.pathname.endsWith('/activity')) return route.fulfill({ json: options.activity || { today_count: 11, last_seen: 1700000100, pending: !state.refreshed, profile_refresh: state.refreshed ? { completed_at: 1700000200, status: 'updated' } : {} } })
     if (url.pathname.endsWith('/profile-history')) {
       if (state.historyFail) return route.fulfill({status:500,json:{error:'变更读取失败'}})
       return route.fulfill({json:{total:2,page:1,versions:[
@@ -248,4 +248,26 @@ test('search, late-response isolation, retry and phone/dark layouts', async ({ p
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
   await page.screenshot({ path: path.join(artifacts, 'mobile.png'), fullPage: true, animations: 'disabled' })
   expect(errors).toEqual([])
+})
+
+
+test('portrait progress distinguishes checked messages, successful time and failed runs', async ({ page }) => {
+  await openMemories(page, { activity: { today_count: 22, last_seen: 1700000100, pending: true,
+    pending_messages: 341, processed_messages: 160, recent_pending_messages: 11,
+    profile_refresh: { status: 'failed', last_success_at: 1700000200 },
+    last_run: { status: 'failed', error_kind: 'invalid_evidence', model: 'test-model', elapsed_ms: 6800,
+      started_at: 1700000300, inspected_messages: 160, updated_fields: 0, repairs: 1, rejected_updates: 2,
+      source_start_ts: 1600000000, source_end_ts: 1700000100 } } })
+  await person(page, '101').click()
+  await expect(page.locator('.person-activity').first()).toContainText('待整理 341 条')
+  await expect(page.locator('.person-activity').first()).toContainText('近30天 11 条')
+  await expect(page.locator('.person-activity').first()).toContainText('最近成功整理')
+  await expect(page.locator('.person-activity').first()).toContainText('依据未通过校验')
+  await expect(page.locator('.portrait-run .person-activity')).not.toBeVisible()
+  await page.getByText('整理详情', { exact: true }).click()
+  await expect(page.locator('.portrait-run')).toContainText('test-model · 6.8 秒')
+  await expect(page.locator('.portrait-run')).toContainText('原始发言')
+  await expect(page.locator('.portrait-run')).toContainText('格式修复 1 次')
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })

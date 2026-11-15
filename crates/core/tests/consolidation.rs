@@ -172,7 +172,7 @@ async fn consolidation_end_to_end() {
     let _tracer = spawn_tracer(&bus, db_path.clone());
     let deps = ConsolidationDeps {
         db_path: db_path.clone(),
-        llm: Some(gateway),
+        llm: Arc::new(std::sync::RwLock::new(Some(gateway))),
         bus: bus.clone(),
         self_qq: Arc::new(AtomicU64::new(SELF_QQ)),
         cfg: ConsolidationCfg::default(),

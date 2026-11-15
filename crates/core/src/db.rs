@@ -424,7 +424,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ),
     ("V0.16 即时会话工作记忆", include_str!("db/working_v16.sql")),
     ("V0.17 版本化任务说明", include_str!("db/brief_v17.sql")),
-    ("V0.18 统一工具契约与调用关联", include_str!("db/tools_v18.sql")),
+    (
+        "V0.18 统一工具契约与调用关联",
+        include_str!("db/tools_v18.sql"),
+    ),
+    (
+        "V0.19 人物整理精确覆盖与运行诊断",
+        include_str!("db/portrait_v19.sql"),
+    ),
 ];
 
 pub async fn migrate(conn: &mut sqlx::SqliteConnection) -> Result<()> {

@@ -37,6 +37,30 @@ pub async fn write(
     end: i64,
     update: &Update,
 ) -> Result<bool> {
+    write_inner(conn, owner_type, owner, start, end, update, false).await
+}
+
+/// Nightly backfill validates evidence before deciding whether newer confirmed material wins.
+pub(super) async fn write_current(
+    conn: &mut sqlx::SqliteConnection,
+    owner: &str,
+    start: i64,
+    end: i64,
+    update: &Update,
+) -> Result<bool> {
+    write_inner(conn, "person", owner, start, end, update, true).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn write_inner(
+    conn: &mut sqlx::SqliteConnection,
+    owner_type: &str,
+    owner: &str,
+    start: i64,
+    end: i64,
+    update: &Update,
+    latest_only: bool,
+) -> Result<bool> {
     ensure!(
         ["person", "chat"].contains(&owner_type) && owner != "self",
         "记忆归属无效"
@@ -103,6 +127,13 @@ pub async fn write(
         ensure!(ids.len() >= 3 && times.len() >= 3, "归纳需多次独立互动");
     }
     let (chat, kind) = scope.unwrap();
+    if latest_only {
+        let newer:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM memory_items WHERE owner_type='person' AND owner_id=?1 AND item_key=?2 AND source_end_id>?3 AND ((source_chat_type='group' AND ?4='group') OR (source_chat_type=?4 AND source_chat_id=?5)) AND NOT EXISTS(SELECT 1 FROM json_each(memory_items.evidence) e LEFT JOIN messages m ON m.msg_id=json_extract(e.value,'$.msg_id') WHERE m.msg_id IS NULL OR m.sender_pid!=memory_items.owner_id OR m.chat_id!=memory_items.source_chat_id OR m.chat_type!=memory_items.source_chat_type OR instr(COALESCE(m.text,''),json_extract(e.value,'$.quote'))=0))")
+          .bind(owner).bind(&update.key).bind(latest).bind(&kind).bind(&chat).fetch_one(&mut *conn).await?;
+        if newer {
+            return Ok(false);
+        }
+    }
     Ok(conn.execute("INSERT OR IGNORE INTO memory_items(owner_type,owner_id,item_key,kind,content,status,source_chat_id,source_chat_type,source_end_id,evidence,valid_until,recorded_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,unixepoch())",
         params![owner_type,owner,update.key,update.kind,update.content,update.status,chat,kind,latest,serde_json::to_string(&update.evidence)?,update.valid_until]).await?>0)
 }

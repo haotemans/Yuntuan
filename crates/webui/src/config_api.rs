@@ -318,7 +318,7 @@ pub async fn post_config(
                 let h = yuantuan_core::consolidation::spawn_scheduler(
                     yuantuan_core::consolidation::ConsolidationDeps {
                         db_path: state.db_path.clone(),
-                        llm: state.extras.llm_slot.read().unwrap().clone(),
+                        llm: state.extras.llm_slot.clone(),
                         bus: state.extras.bus.clone(),
                         self_qq: state.extras.self_qq.clone(),
                         cfg: options,

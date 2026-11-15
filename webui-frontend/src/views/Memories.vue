@@ -45,9 +45,23 @@
         <div v-if="selectedPerson && activity" class="person-activity">
           <n-button text size="small" type="primary" @click="showToday">今天 {{ activity.today_count }} 条发言</n-button>
           <span v-if="activity.last_seen">最近发言 {{ fmtTs(activity.last_seen) }}</span>
-          <span>最近整理 {{ activity.profile_refresh.completed_at ? fmtTs(activity.profile_refresh.completed_at) : activity.legacy_baseline ? '时间未记录' : '尚未整理' }}</span>
-          <n-tag size="tiny" :bordered="false">{{ refreshState }}</n-tag>
+          <span>最近成功整理 {{ (activity.profile_refresh.last_success_at || activity.profile_refresh.completed_at) ? fmtTs((activity.profile_refresh.last_success_at || activity.profile_refresh.completed_at)!) : activity.legacy_baseline ? '时间未记录' : '尚未整理' }}</span>
+          <span v-if="activity.legacy_messages">旧基线 {{ activity.legacy_messages }} 条</span>
+          <n-tag size="tiny" :bordered="false" :type="refreshFailed ? 'error' : 'default'">{{ refreshState }}</n-tag>
+          <span v-if="activity.pending_messages !== undefined">已处理 {{ activity.processed_messages }} 条 · 待整理 {{ activity.pending_messages }} 条<span v-if="activity.recent_pending_messages">（近30天 {{ activity.recent_pending_messages }} 条）</span></span>
         </div>
+        <details v-if="selectedPerson && activity?.last_run" class="portrait-run">
+          <summary>整理详情</summary>
+          <div class="person-activity">
+            <span>处理时间 {{ fmtTs(activity.last_run.started_at) }}</span>
+            <span>{{ activity.last_run.model }} · {{ (activity.last_run.elapsed_ms / 1000).toFixed(1) }} 秒</span>
+            <span>读取 {{ activity.last_run.inspected_messages }} 条 · 更新 {{ activity.last_run.updated_fields }} 项</span>
+            <span v-if="activity.last_run.repairs">格式修复 {{ activity.last_run.repairs }} 次</span>
+            <span v-if="activity.last_run.rejected_updates">未通过校验 {{ activity.last_run.rejected_updates }} 项</span>
+            <span v-if="activity.last_run.source_start_ts && activity.last_run.source_end_ts">原始发言 {{ fmtTs(activity.last_run.source_start_ts) }} 至 {{ fmtTs(activity.last_run.source_end_ts) }}</span>
+            <span v-if="activity.last_run.error_kind" class="run-error">{{ refreshError(activity.last_run.error_kind) }}</span>
+          </div>
+        </details>
         <n-alert v-if="activityError" type="error" class="memory-alert">{{ activityError }} <n-button text size="tiny" @click="loadActivity">重试</n-button></n-alert>
         <n-tabs v-if="selectedPerson || tab !== 'profile'" :value="tab" type="line" @update:value="changeTab">
           <n-tab name="profile">人物画像</n-tab>
@@ -76,7 +90,7 @@
               <n-collapse class="portrait-evidence">
                 <n-collapse-item title="来源依据" name="evidence">
                   <div v-for="fact in profile" :key="fact.field" class="profile-evidence">
-                    <span class="record-time">{{ profileLabels[fact.field] || fact.field }} · {{ fmtTs(fact.updated_at) }}</span>
+                    <span class="record-time">{{ profileLabels[fact.field] || fact.field }} · 原始发言 {{ fmtTs(fact.updated_at) }}</span>
                     <blockquote>{{ fact.evidence_quote }}</blockquote>
                   </div>
                 </n-collapse-item>
@@ -88,7 +102,7 @@
                 <span v-if="person.portrait_preview" class="portrait-preview">{{ person.portrait_preview }}</span>
                 <span v-else-if="person.profile?.length" class="portrait-preview">{{ person.profile.map(f => f.content).join('；') }}</span>
                 <span v-else class="record-time">暂无画像</span>
-                <time v-if="person.profile_updated_at" class="record-time">{{ fmtTs(person.profile_updated_at) }}</time>
+                <time v-if="person.profile_updated_at" class="record-time">来源 {{ fmtTs(person.profile_updated_at) }}</time>
               </button>
             </div>
             <EmptyState v-if="!loading && !peopleLoading && !loadError && !peopleError && (selectedPerson ? !profile.length && !portrait.length : !people.length)" :title="selectedPerson ? '暂无人物画像' : '暂无匹配人物'" />
@@ -176,7 +190,8 @@ type Profile = { field: string; content: string; evidence_quote: string; updated
 type ProfileVersion = Omit<Profile, 'updated_at'> & { id: number; source_ts: number; source_valid: boolean; current: boolean; conversation?: Conversation }
 type Source = { conversation?: Conversation; is_window?: boolean; has_more?: boolean; messages: { msg_id: number; person_id: string; name?: string; text: string; ts: number; has_image: boolean }[] }
 type Message = { msg_id: number; text: string; ts: number; has_image: boolean; text_truncated?: boolean; conversation?: Conversation }
-type Activity = { legacy_baseline?: number; today_count: number; last_seen?: number; pending: boolean; profile_refresh: { status?: string; attempt?: number; completed_at?: number } }
+type PortraitRun = { status: string; error_kind?: string; model: string; elapsed_ms: number; started_at: number; inspected_messages: number; updated_fields: number; repairs: number; rejected_updates: number; source_start_ts?: number; source_end_ts?: number }
+type Activity = { legacy_baseline?: number; today_count: number; last_seen?: number; pending: boolean; pending_messages?: number; processed_messages?: number; legacy_messages?: number; recent_pending_messages?: number; last_run?: PortraitRun; profile_refresh: { status?: string; attempt?: number; completed_at?: number; last_success_at?: number } }
 type Tab = 'memories' | 'summaries' | 'profile' | 'messages'
 const router = useRouter()
 const search = ref('')
@@ -236,10 +251,18 @@ function sourceLabel(r: Memory) { return r.source_end_msg_id ? '窗口归纳' : 
 function displayContent(r: Memory) { return tab.value === 'summaries' && /^今日发言\s*\d+\s*条[。.]?$/.test(r.content.trim()) ? r.content.replace(/^今日发言/, '归纳窗口内发言') : r.content }
 function localDate() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 function timezone() { return String(-new Date().getTimezoneOffset()) }
+function refreshError(kind: string) {
+  const labels: Record<string,string> = { invalid_json: '模型返回格式无效', invalid_evidence: '依据未通过校验', timeout: '整理超时', interrupted: '整理中断，待重新处理', request_failed: '模型请求失败', request_blocked: '模型请求受限', storage_failed: '整理存储失败' }
+  return labels[kind] || (kind.startsWith('request_http_') ? `模型服务 HTTP ${kind.slice(13)}` : '失败原因未记录')
+}
+const refreshFailed = computed(() => activity.value?.last_run?.status === 'failed' || activity.value?.profile_refresh.status === 'failed')
 const refreshState = computed(() => {
-  const a = activity.value, status = a?.profile_refresh.status
+  const a = activity.value, status = a?.last_run?.status || a?.profile_refresh.status
   if (status === 'running' && (a?.profile_refresh.attempt || 0) > Date.now() / 1000 - 300) return '整理中'
-  if (status === 'failed') return '整理失败'
+  if (status === 'failed') return a?.last_run?.error_kind ? refreshError(a.last_run.error_kind) : '整理失败，原因未记录'
+  if (status === 'running') return '整理中断，待重新处理'
+  if (status === 'updated') return '画像已更新'
+  if (status === 'no_evidence') return '已检查，暂无新资料'
   if (a?.pending) return '有新发言待整理'
   return status === 'no_evidence' ? '暂无可确认新资料' : a?.profile_refresh.completed_at ? '已整理' : a?.legacy_baseline ? '已有整理记录' : '尚未整理'
 })

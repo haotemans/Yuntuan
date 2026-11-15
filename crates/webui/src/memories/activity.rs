@@ -95,16 +95,38 @@ pub async fn status(
     let refresh = raw
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .unwrap_or(json!({}));
-    let latest: i64 = row
-        .try_get::<Option<i64>, _>("latest_text_id")
-        .map_err(db_error)?
-        .unwrap_or(0);
     let cursor: i64 = row.try_get("cursor").map_err(db_error)?;
     let baseline: i64 = row.try_get("baseline").map_err(db_error)?;
+    let coverage=sqlx::query("SELECT COUNT(*) AS total, COUNT(CASE WHEN m.msg_id<=?3 THEN 1 END) AS legacy,
+      COUNT(CASE WHEN m.msg_id>?2 AND c.msg_id IS NULL THEN 1 END) AS pending,
+      COUNT(CASE WHEN m.msg_id>?2 AND c.msg_id IS NULL AND m.ts>=unixepoch()-2592000 THEN 1 END) AS recent_pending,
+      MIN(CASE WHEN m.msg_id>?2 AND c.msg_id IS NULL THEN m.ts END) AS oldest_pending_at
+      FROM messages m LEFT JOIN portrait_coverage c ON c.person_id=m.sender_pid AND c.msg_id=m.msg_id
+      WHERE m.sender_pid=?1 AND m.chat_type IN ('group','private') AND length(trim(COALESCE(m.text,'')))>=4")
+      .bind(&id).bind(cursor).bind(baseline).fetch_one(&mut *conn).await.map_err(db_error)?;
+    let pending: i64 = coverage.try_get("pending").map_err(db_error)?;
+    let eligible: i64 = coverage.try_get("total").map_err(db_error)?;
+    let last=sqlx::query("SELECT r.*,b.from_id,b.end_id,b.started_at,b.finished_at,b.lease_until FROM portrait_runs r JOIN memory_batches b ON b.id=r.batch_id WHERE b.owner_id=?1 ORDER BY b.id DESC LIMIT 1")
+      .bind(&id).fetch_optional(&mut *conn).await.map_err(db_error)?;
+    let last_run=last.map(|r|->sqlx::Result<Value>{
+        let status:String=r.try_get("status")?;
+        let interrupted=status=="running" && r.try_get::<i64,_>("lease_until")?<=yuantuan_core::memory::processing::now();
+        Ok(json!({"status":if interrupted {"failed"} else {&status},"error_kind":if interrupted {Some("interrupted".to_owned())} else {r.try_get::<Option<String>,_>("error_kind")?},
+          "provider":r.try_get::<String,_>("provider")?,"model":r.try_get::<String,_>("model")?,
+          "elapsed_ms":r.try_get::<i64,_>("elapsed_ms")?,"repairs":r.try_get::<i64,_>("repairs")?,"rejected_updates":r.try_get::<i64,_>("rejected_updates")?,
+          "from_id":r.try_get::<i64,_>("from_id")?+1,"end_id":r.try_get::<i64,_>("end_id")?,
+          "source_start_ts":r.try_get::<Option<i64>,_>("source_start_ts")?,"source_end_ts":r.try_get::<Option<i64>,_>("source_end_ts")?,
+          "started_at":r.try_get::<i64,_>("started_at")?,"finished_at":r.try_get::<Option<i64>,_>("finished_at")?,
+          "inspected_messages":r.try_get::<i64,_>("inspected_messages")?,"updated_fields":r.try_get::<i64,_>("updated_fields")?}))
+    }).transpose().map_err(db_error)?;
     Ok(Json(
         json!({"total":row.try_get::<i64,_>("total").map_err(db_error)?,"today_count":row.try_get::<i64,_>("today_count").map_err(db_error)?,
         "last_seen":row.try_get::<Option<i64>,_>("last_seen").map_err(db_error)?,
-        "profile_refresh":refresh,"processed_through":cursor,"legacy_baseline":baseline,"pending":latest>cursor}),
+        "profile_refresh":refresh,"processed_through":cursor,"legacy_baseline":baseline,"pending":pending>0,
+        "pending_messages":pending,"processed_messages":eligible-pending-coverage.try_get::<i64,_>("legacy").map_err(db_error)?,
+        "legacy_messages":coverage.try_get::<i64,_>("legacy").map_err(db_error)?,
+        "recent_pending_messages":coverage.try_get::<i64,_>("recent_pending").map_err(db_error)?,
+        "oldest_pending_at":coverage.try_get::<Option<i64>,_>("oldest_pending_at").map_err(db_error)?,"last_run":last_run}),
     ))
 }
 

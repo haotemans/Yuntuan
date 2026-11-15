@@ -67,6 +67,27 @@ pub async fn claim_limited(
     end_id: i64,
     daily_limit: Option<usize>,
 ) -> Result<Option<Batch>> {
+    claim_inner(conn, scope, from_id, end_id, daily_limit, true).await
+}
+
+/// Portraits record exact covered message IDs separately, so recent and old ranges may coexist.
+pub(super) async fn claim_portrait(
+    conn: &mut sqlx::SqliteConnection,
+    person: &str,
+    from_id: i64,
+    end_id: i64,
+) -> Result<Option<Batch>> {
+    claim_inner(conn, Scope::portrait(person), from_id, end_id, None, false).await
+}
+
+async fn claim_inner(
+    conn: &mut sqlx::SqliteConnection,
+    scope: Scope,
+    from_id: i64,
+    end_id: i64,
+    daily_limit: Option<usize>,
+    contiguous: bool,
+) -> Result<Option<Batch>> {
     ensure!(end_id > from_id, "归纳批次必须推进消息范围");
     let at = now();
     let mut tx = conn.begin_immediate().await?;
@@ -84,7 +105,7 @@ pub async fn claim_limited(
         }
     }
     tx.execute("INSERT INTO memory_progress(stage,owner_id,chat_type) VALUES(?1,?2,?3) ON CONFLICT DO NOTHING",params![scope.stage,scope.owner_id,scope.chat_type]).await?;
-    if cursor(&mut tx, &scope).await? != from_id {
+    if contiguous && cursor(&mut tx, &scope).await? != from_id {
         return Ok(None);
     }
     tx.execute("UPDATE memory_batches SET status='failed',finished_at=?4 WHERE stage=?1 AND owner_id=?2 AND chat_type=?3 AND status='running' AND lease_until<=?4",

@@ -337,7 +337,7 @@ async fn main() -> Result<()> {
         let h = yuantuan_core::consolidation::spawn_scheduler(
             yuantuan_core::consolidation::ConsolidationDeps {
                 db_path: db_path.clone(),
-                llm: llm.clone(),
+                llm: llm_slot.clone(),
                 bus: bus.clone(),
                 self_qq: self_qq.clone(),
                 cfg: cfg.consolidation.clone(),

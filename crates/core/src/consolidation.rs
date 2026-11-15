@@ -81,7 +81,7 @@ impl ConsolidationCfg {
 pub struct ConsolidationDeps {
     pub db_path: PathBuf,
     /// 无 decision 角色 → LLM 提炼整轮跳过（仅 @统计照旧跑不起作用？不——纯统计独立于 LLM，照常执行）
-    pub llm: Option<Arc<LlmGateway>>,
+    pub llm: crate::bot::SharedLlm,
     pub bus: EventBus,
     pub self_qq: Arc<AtomicU64>,
     pub cfg: ConsolidationCfg,
@@ -103,7 +103,7 @@ pub fn spawn_scheduler(deps: ConsolidationDeps) -> JoinHandle<()> {
             let (start, end) = night_window(now_secs(), &deps.cfg.daily_time);
             if (start..end).contains(&now_secs()) {
                 run_once(&deps).await;
-                if let Some(gateway) = &deps.llm {
+                {
                     let options = crate::memory::nightly::Options {
                         date: today_str(&deps.db_path).await,
                         deadline: end,
@@ -111,7 +111,7 @@ pub fn spawn_scheduler(deps: ConsolidationDeps) -> JoinHandle<()> {
                         interval_secs: deps.cfg.portrait_interval_secs,
                     };
                     if let Err(e) =
-                        crate::memory::nightly::run(&deps.db_path, gateway, &options).await
+                        crate::memory::nightly::run(&deps.db_path, &deps.llm, &options).await
                     {
                         warn!(error=%e,"夜间人物画像整理失败，保留现有资料");
                     }
@@ -296,14 +296,15 @@ async fn process_chat(
         let rows=load_window(&mut conn,&scope,WINDOW,upper).await?;
         if rows.is_empty() {outcome.status="skipped_done".into();return Ok(());}
         outcome.msg_start=rows[0].msg_id;outcome.msg_end=rows.last().unwrap().msg_id;
-        if !deps.llm.as_ref().is_some_and(|gw|gw.role(Role::Decision).is_some()) {outcome.status="llm_unavailable".into();return Ok(());}
+        let gateway=deps.llm.read().unwrap().clone();
+        if !gateway.as_ref().is_some_and(|gw|gw.role(Role::Decision).is_some()) {outcome.status="llm_unavailable".into();return Ok(());}
         let Some(batch)=processing::claim_limited(&mut conn,scope,previous,outcome.msg_end,Some(deps.cfg.conversation_daily_limit)).await? else {outcome.status="deferred".into();return Ok(());};
         let visual_rows=sqlx::query("SELECT i.msg_id,i.observation FROM message_images i JOIN messages m ON m.msg_id=i.msg_id WHERE m.chat_id=?1 AND m.chat_type=?2 AND i.status='ready' AND i.msg_id BETWEEN ?3 AND ?4 ORDER BY i.msg_id LIMIT 6")
             .bind(chat_id).bind(chat_type).bind(outcome.msg_start).bind(outcome.msg_end).fetch_all(&mut *conn).await?;
         let visuals:Vec<Value>=visual_rows.iter().map(|r|->sqlx::Result<Value>{Ok(json!({"source_msg_id":r.try_get::<i64,_>("msg_id")?,"observation":r.try_get::<String,_>("observation")?}))}).collect::<sqlx::Result<_>>()?;
         let current_memory=crate::memory::semantic::current(&mut conn,"chat",chat_id,chat_id,chat_type,outcome.msg_end,rows.last().unwrap().ts).await?;
         drop(conn);
-        let distilled=tokio::time::timeout(Duration::from_secs(180),distill(deps.llm.as_ref().unwrap(),chat_id,chat_type,&rows,&visuals,&current_memory)).await.ok().flatten();
+        let distilled=tokio::time::timeout(Duration::from_secs(180),distill(gateway.as_ref().unwrap(),chat_id,chat_type,&rows,&visuals,&current_memory)).await.ok().flatten();
         let mut conn=crate::db::connect(&deps.db_path).await?;
         match distilled {
             Some(data)=>match write_distilled(&mut conn,chat_id,chat_type,&rows[0].date,&data,&outcome,&batch).await {

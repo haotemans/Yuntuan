@@ -206,7 +206,9 @@ async fn incremental_conversations_resume_failed_batches_without_losing_older_me
     std::fs::write(&provider,format!("[provider.mock]\nbase_url=\"http://{address}\"\n[roles]\ndecision={{provider=\"mock\",model=\"test\"}}\n")).unwrap();
     let deps = ConsolidationDeps {
         db_path: path.clone(),
-        llm: Some(Arc::new(LlmGateway::load(&provider).unwrap())),
+        llm: Arc::new(std::sync::RwLock::new(Some(Arc::new(
+            LlmGateway::load(&provider).unwrap(),
+        )))),
         bus: EventBus::new(16),
         self_qq: Arc::new(AtomicU64::new(0)),
         cfg: ConsolidationCfg::default(),
