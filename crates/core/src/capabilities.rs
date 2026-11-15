@@ -1,10 +1,12 @@
 //! Persistent capability switches and invocation receipts; plugin permission checks still apply.
+mod schema;
 use crate::{
     db::{self, params, SqliteExt},
     skills::Skill,
     tools::{ToolCtx, ToolOutput},
 };
 use anyhow::{ensure, Result};
+pub use schema::validate;
 use serde_json::{json, Value};
 use sqlx::Row;
 use std::{path::Path, sync::Arc};
@@ -54,53 +56,6 @@ pub async fn visible_skills(
         }
     }
     Ok(result)
-}
-pub fn validate(schema: &Value, args: &Value) -> Result<()> {
-    if let Some(kind) = schema["type"].as_str() {
-        ensure!(
-            match kind {
-                "object" => args.is_object(),
-                "array" => args.is_array(),
-                "string" => args.is_string(),
-                "integer" => args.is_i64() || args.is_u64(),
-                "number" => args.is_number(),
-                "boolean" => args.is_boolean(),
-                "null" => args.is_null(),
-                _ => false,
-            },
-            "工具参数类型不匹配"
-        );
-    }
-    if let Some(values) = schema["enum"].as_array() {
-        ensure!(values.contains(args), "参数不在允许值中");
-    }
-    if let Some(required) = schema["required"].as_array() {
-        for k in required {
-            ensure!(args.get(k.as_str().unwrap_or("")).is_some(), "缺少必填参数");
-        }
-    }
-    if let Some(properties) = schema["properties"].as_object() {
-        for (k, s) in properties {
-            if let Some(v) = args.get(k) {
-                validate(s, v)?;
-            }
-        }
-    }
-    if let Some(values) = args.as_array() {
-        if schema.get("items").is_some() {
-            for v in values {
-                validate(&schema["items"], v)?;
-            }
-        }
-    }
-    if let Some(v) = args.as_f64() {
-        ensure!(
-            schema["minimum"].as_f64().is_none_or(|n| v >= n)
-                && schema["maximum"].as_f64().is_none_or(|n| v <= n),
-            "参数超出范围"
-        );
-    }
-    Ok(())
 }
 pub async fn check_tool(
     path: &Path,

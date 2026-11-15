@@ -40,7 +40,7 @@
 
 ## Agent 架构
 
-后续改造采用 [ADR-0018：轻量通用 Agent](docs/adr/0018-lightweight-agent-runtime.md) 作为目标契约：Chat对接用户、Router分配上下文/记忆与任务、Agent执行细节，补齐工作记忆、统一工具协议和Docker浏览器/文件闭环。第一阶段已增加带原话来源的版本化工作记忆、Router选择事项及Chat/Agent语境投影，并限制过时闲聊发送；V17进一步独立保存版本化任务说明，补充要求可进入原任务；Agent按JSON读取说明与执行记录，工具目录按当前范围过滤，任务页显示条件、来源和版本。V18已将JSON动作和可选原生tool_calls接入统一工具执行器、类型化结果与持久关联回执；Docker浏览器/文件闭环和完整任务归档仍待后续实现。实际行为与验证边界见[记忆](docs/features/core/memory.md)及[回复时效](docs/features/core/replies.md)，不以设计替代验收。
+后续改造采用 [ADR-0018：轻量通用 Agent](docs/adr/0018-lightweight-agent-runtime.md) 作为目标契约：Chat对接用户、Router分配上下文/记忆与任务、Agent执行细节，补齐工作记忆、统一工具协议和Docker浏览器/文件闭环。第一阶段已增加带原话来源的版本化工作记忆、Router选择事项及Chat/Agent语境投影，并限制过时闲聊发送；V17进一步独立保存版本化任务说明，补充要求可进入原任务；Agent按JSON读取说明与执行记录，工具目录按当前范围过滤，任务页显示条件、来源和版本。V18已将JSON动作和可选原生tool_calls接入统一工具执行器、类型化结果与持久关联回执；Router和Chat现在也接收实际底层工具概览，无Skill不再等同于无工具；参数错误按字段路径修正，插件页可独立启停Tool并保留会话范围。Docker浏览器/文件闭环和完整任务归档仍待后续实现。实际行为与验证边界见[记忆](docs/features/core/memory.md)及[回复时效](docs/features/core/replies.md)，不以设计替代验收。
 
 攸宁当前采用 **自研 Rust 运行时 + 事件驱动 + 三角色模型分工 + 对话／任务双路径**。模型负责理解意图、生成内容和选择下一步；宿主代码负责上下文、动作校验、能力调用、执行预算与状态落库，而不是让一个模型直接包办整个系统。
 

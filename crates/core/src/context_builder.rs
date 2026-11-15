@@ -116,6 +116,7 @@ pub struct ReplySnapshot {
     pub working_context: Vec<Value>,
     pub historical_messages: Vec<ContextMessage>,
     pub execution_request: Option<Value>,
+    pub tool_capabilities: Value,
     pub execution_results: Vec<Value>,
     pub delivery_task: Option<(String, i64)>,
     pub chat_id: String,
@@ -515,6 +516,7 @@ pub async fn capture_reply_snapshot(
         person_memory: person_memory.into_iter().take(4).collect(),
         historical_messages: vec![],
         execution_request: None,
+        tool_capabilities: json!({"known":false,"tools":[]}),
         execution_results: vec![],
         delivery_task: None,
         chat_id: anchor.chat_id.clone(),
@@ -564,6 +566,7 @@ pub fn render_bot_context_with_skills(
     let mut meme_categories = snapshot.meme_categories.clone();
     let mut historical = snapshot.historical_messages.clone();
     let mut dialogue = snapshot.dialogue.clone();
+    let mut tool_capabilities = snapshot.tool_capabilities.clone();
     let mut pruned = false;
     loop {
         let body = json!({
@@ -580,7 +583,7 @@ pub fn render_bot_context_with_skills(
             "person_profile":{"person_id":snapshot.anchor.person_id,"facts":profile},
             "topic_memories":memories, "recent_messages":recent, "participants":participants,
             "limitations":snapshot.limitations, "optional_context_pruned":pruned,
-            "capabilities":{"tools_available":!skill_catalog.is_empty(),
+            "capabilities":{"tools_available":!skill_catalog.is_empty() || snapshot.tool_capabilities["total"].as_u64().unwrap_or(0)>0,"task_tools":tool_capabilities,
                 "available_skills":skill_catalog.iter().map(|(name,description)|
                     json!({"name":name,"description":description})).collect::<Vec<_>>(),
                 "cross_chat_history_available":false,"execution_results":snapshot.execution_results},
@@ -619,7 +622,9 @@ pub fn render_bot_context_with_skills(
             });
         }
         pruned = true;
-        if !historical.is_empty() {
+        if crate::tools::discovery::shrink(&mut tool_capabilities) {
+            // Tool hints may shrink; source messages and actual permissions do not.
+        } else if !historical.is_empty() {
             historical.pop();
         } else if recent.len() > 5 {
             recent.remove(0);

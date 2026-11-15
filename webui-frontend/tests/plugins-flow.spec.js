@@ -27,11 +27,23 @@ function catalog() {
 }
 
 async function openPlugins(page, { deferred = false, error = false } = {}) {
-  const state = { plugins: catalog(), reads: 0, writes: [], released: false }
+  const state = { plugins: catalog(), reads: 0, writes: [], capabilityWrites: [], released: false }
+  state.capabilities=state.plugins.flatMap(p=>[
+    ...p.skills.map(s=>({name:s.name,kind:'skill',enabled:true,scopes:['group:42'],calls:3})),
+    ...p.tools.map(t=>({name:t.name,kind:'tool',description:'按给定提示词生成图片',enabled:true,scopes:['group:42'],calls:2,tool_contract:{input_schema:{type:'object',required:['prompt'],properties:{prompt:{type:'string'}}}}})),
+  ])
   await page.addInitScript(() => localStorage.setItem('yt_token', 'test-only'))
   await page.routeWebSocket('**/ws**', () => {})
   await page.route('**/api/**', async route => {
     const pathname = new URL(route.request().url()).pathname
+    if (pathname === '/api/capabilities') {
+      if (route.request().method()==='POST') {
+        const body=route.request().postDataJSON();state.capabilityWrites.push(body)
+        Object.assign(state.capabilities.find(c=>c.name===body.name && c.kind===body.kind),body)
+        return route.fulfill({json:{ok:true}})
+      }
+      return route.fulfill({json:{capabilities:state.capabilities}})
+    }
     if (pathname === '/api/plugins/list') {
       state.reads++
       if (state.released) state.plugins[0].updating = false
@@ -115,4 +127,21 @@ test('background updates preserve drafts and failed saves explain the problem', 
   await expect(page.locator('.n-drawer')).toContainText('API 地址必须是有效的 HTTP(S) 链接')
   await expect(secret).toHaveValue('unsaved-test-only')
   await expect(page.getByRole('button', { name: '保存并应用' })).toBeEnabled()
+})
+
+
+test('tool toggles are independent from skills and preserve configured scopes', async ({ page }) => {
+  const state=await openPlugins(page)
+  await openConfig(page)
+  await page.getByText('调用状态',{exact:true}).click()
+  await page.getByText('能力与存储信息',{exact:true}).click()
+  const tool=page.locator('.tool-capability').filter({has:page.getByText('nai-image.generate',{exact:true})})
+  await expect(tool).toContainText('累计调用 2 次')
+  await tool.getByText('调用参数',{exact:true}).click()
+  await expect(tool.locator('.tool-schema')).toContainText('prompt')
+  await tool.getByRole('switch',{name:'工具 nai-image.generate'}).click()
+  await expect.poll(()=>state.capabilityWrites.length).toBe(1)
+  expect(state.capabilityWrites[0]).toEqual({name:'nai-image.generate',kind:'tool',enabled:false,scopes:['group:42']})
+  expect(state.capabilities.find(c=>c.name==='nai-image.generate' && c.kind==='skill').enabled).toBe(true)
+  await expect(tool.getByRole('switch')).toHaveAttribute('aria-checked','false')
 })

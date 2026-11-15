@@ -1643,7 +1643,7 @@ pub async fn prepare_and_enqueue(
     } else if social {
         "本轮只输出自然接话正文，尽量100字内、最多240字，一泡。不输出执行需求、工具JSON或内部决策；不合适开口可以留空，不输出‘忽略’等解释。"
     } else {
-        "通常直接输出聊天正文。确需技能或多步操作且 execution_results 尚无所需结果时，可以只输出严格 JSON：{\"type\":\"execution_request\",\"goal\":\"具体需求\"}。宿主会交回 Decision 核对授权，不直接执行。已经执行过但失败的需求不得重复请求，说明结果或追问。不得输出 send_message 调用。"
+        "通常直接输出聊天正文。capabilities.task_tools是当前可见底层Tool，不能因没有Skill就宣称不会联网或执行；需要工具结果时提出具体执行需求，不让用户填写工具名或JSON。确需技能、底层Tool或多步操作且 execution_results 尚无所需结果时，可以只输出严格 JSON：{\"type\":\"execution_request\",\"goal\":\"具体需求\"}。宿主会交回 Decision 核对授权，不直接执行。已经执行过但失败的需求不得重复请求，说明结果或追问。不得输出 send_message 调用。"
     };
     let reserve =
         length_hint.chars().count() + mode_hint.chars().count() + routing_hint.chars().count() + 3;

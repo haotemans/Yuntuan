@@ -346,6 +346,7 @@ async fn build_rig(
         )),
         memes_dir: temp_dir("reply-memes"),
         skill_registry: None,
+        tools_registry: None,
         per_chat_cap: std::sync::Arc::new(std::sync::RwLock::new(32)),
     });
     Rig {

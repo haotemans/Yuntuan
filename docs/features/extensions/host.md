@@ -48,3 +48,8 @@ Decision和Chat能力目录也读取持久启停/范围，避免把已禁用能�
 V18在plugin-api的Tool trait追加有默认实现的available_in_chat、policy和output_schema，并增加ToolDefinition、ToolCall、ToolResult、ToolError和ToolProtocol等共享类型。旧插件无需同时改写即可编译，默认效果未知、120秒、取消后等待结果；这是源码接口，不宣称动态ABI兼容。HostedTool转发可用性、契约、附件保留和audit_details；插件停止/范围拒绝/繁忙返回类型化前置错误，超时/panic保留错误种类并脱敏，不再只剩无类型字符串。宿主仍保留插件自身限流、输出/路径限制与secret redaction。
 
 Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统一工具执行接口)为准。Skill仍保留技能匹配、权限和来源幂等入口，共享ToolOutput，不因接口统一改变其调度职责；管理面板手工MCP诊断仍为已有原始stdio请求，不冒充Agent任务回执。SQLite工具契约仅描述实际注册实现，不凭一条数据库记录生成执行器。
+
+
+工具调用易用性补充：基础Schema检查移到[`schema.rs`](../../../crates/core/src/capabilities/schema.rs)，错误包含JSON Pointer字段路径和期望类型/范围，不回显用户实参。支持type（含类型数组）、required、enum、properties、additionalProperties、items、min/maxItems、min/maxLength及minimum/maximum；递归检查限32层，$ref/组合Schema等完整标准仍不支持，业务校验继续由Tool负责。回归见[`tool_usability.rs`](../../../crates/core/tests/tool_usability.rs)。
+
+插件页“调用状态→能力与存储信息”增加Tool独立开关、持久调用计数与折叠输入Schema；同名Skill和Tool按kind分别控制。切换任一能力都携带原scopes，避免开关操作清空会话范围。这里只开关已注册实现，不绕过插件总开关、业务权限或底层依赖。浏览器回归[`plugins-flow.spec.js`](../../../webui-frontend/tests/plugins-flow.spec.js)验证Tool/Skill独立、范围保留及参数查看，加入Linux前端CI。
