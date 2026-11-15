@@ -677,7 +677,7 @@ async fn execute_outcome(
             return;
         }
         // action=start_task：建 tasks 行 + TaskCreated 事件（agent::create_task 落两笔）；
-        // spawn_runner 订阅事件后立即起执行协程。静默：不发群消息（Q-A03）
+        // Success stays quiet; dispatch failures go through Chat without claiming execution.
         if outcome.output.action == DecisionAction::StartTask {
             let goal = outcome
                 .output
@@ -687,15 +687,18 @@ async fn execute_outcome(
             if let Err(e) = crate::agent::create_scoped_task(
                     &deps.db_path,&deps.bus,&m.chat_id,&m.chat_type,&m.sender_pid,Some(m.msg_id),&goal,
                     outcome.output.task_plan.clone().unwrap_or_default(),
-                    serde_json::json!({"anchor":snapshot.anchor,"quoted_messages":snapshot.quoted_messages,"recent_messages":snapshot.recent_messages,"person_profile":snapshot.profile,"group_profile":snapshot.group_profile,"history":snapshot.historical_messages,"working_context":snapshot.working_context,"dialogue":snapshot.dialogue,"visual_context":snapshot.visual_context,"execution_results":snapshot.execution_results,"task_context":snapshot.task_context}),
+                    serde_json::json!({"anchor":snapshot.anchor,"quoted_messages":snapshot.quoted_messages,"recent_messages":snapshot.recent_messages,"person_profile":snapshot.profile,"group_profile":snapshot.group_profile,"history":snapshot.historical_messages,"working_context":snapshot.working_context,"focus_context_id":outcome.output.focus_context_id,"dialogue":snapshot.dialogue,"visual_context":snapshot.visual_context,"execution_results":snapshot.execution_results,"task_context":snapshot.task_context}),
                 )
                 .await
                 {
                     warn!(chat_id = %m.chat_id, error = %e, "start_task 落地失败");
+                    snapshot.execution_results.push(serde_json::json!({"task_dispatch":{"goal":goal,"ok":false,"error":e.to_string()},"external_action_started":false}));
+                    outcome.output.action=DecisionAction::Reply;
+                    outcome.output.task_goal=None;
                 } else {
                     info!(chat_id = %m.chat_id, goal = %goal, "start_task 已建仓");
+                    return;
                 }
-            return;
         }
         if outcome.output.action != DecisionAction::Reply {
             return; // ignore 仅由 DecisionMade 事件记录

@@ -223,6 +223,20 @@ async fn invalid_sources_stale_versions_and_oversize_updates_do_not_mutate_task(
     )
     .await;
     assert!(invalid.is_err());
+    let source = message(&p, "另一个明确任务").await;
+    let incomplete = agent::create_scoped_task(
+        &p,
+        &EventBus::default(),
+        "42",
+        "group",
+        "p_a",
+        Some(source.msg_id),
+        "不能遗失条件",
+        TaskPlan::default(),
+        json!({"focus_context_id":first.msg_id,"working_context":[]}),
+    )
+    .await;
+    assert!(incomplete.is_err(), "已选事项缺失时不能创建缩水任务");
     let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
         .fetch_one(&mut *c)
         .await

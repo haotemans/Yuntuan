@@ -59,6 +59,15 @@ pub(crate) async fn initialize(
     anchor: Option<i64>,
     context: &Value,
 ) -> Result<()> {
+    if !context["focus_context_id"].is_null() {
+        let focus = context["focus_context_id"].as_i64();
+        ensure!(
+            anchor.is_some()
+                && focus.is_some_and(|v| v > 0)
+                && context["working_context"][0]["context_id"] == context["focus_context_id"],
+            "选中的事项资料缺失，不能按不完整条件启动任务"
+        );
+    }
     let mut body = json!({"goal":goal,"initial_goal":goal,"origin":"router_handoff","request":null,"working_context":[],"changes":[]});
     if let Some(anchor) = anchor {
         let m = source(c, anchor, actor, chat, kind).await?;
