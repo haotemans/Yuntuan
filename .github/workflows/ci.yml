@@ -90,6 +90,7 @@ jobs:
           cargo test --locked -p yuantuan-core --lib bot::dispatch_tests
           cargo test --locked -p yuantuan-core --lib engagement::tests
           cargo test --locked -p yuantuan-core --test bot_context
+          cargo test --locked -p yuantuan-core --test task_brief
           cargo test --locked -p yuantuan-core --test working_context
           cargo test --locked -p yuantuan-core --lib reply_engine::freshness
           cargo test --locked -p yuantuan-core --lib window::tests
@@ -97,6 +98,7 @@ jobs:
           cargo test --locked -p yuantuan-core --lib owned_
           cargo test --locked -p yuantuan-core --test visual_context --test visual_followup --test visual_registered
           cargo test --locked -p yuantuan-core --test context_runtime --test agent_loop --test profile_refresh --test consolidation --test memory_storage
+          cargo test --locked -p yuantuan-webui --test pages_api task_runtime_exposes_versioned_requirements
           cargo test --locked -p yuantuan-webui --test memories_api
           cargo test --locked -p yuantuan-webui --test memes_api
           cargo test --locked -p yuantuan-adapter-qq --test meme --test reply

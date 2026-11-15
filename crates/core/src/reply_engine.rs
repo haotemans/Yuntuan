@@ -1655,6 +1655,11 @@ pub async fn prepare_and_enqueue(
     focused_snapshot
         .working_context
         .retain(|v| out.focus_context_id.is_some_and(|id| v["context_id"] == id));
+    focused_snapshot.task_context.retain(|v| {
+        out.focus_task_id
+            .as_deref()
+            .is_some_and(|id| v["task_id"] == id)
+    });
     let mut ctx = context_builder::render_bot_context_with_skills(
         &focused_snapshot,
         mood.get(),

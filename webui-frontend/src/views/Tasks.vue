@@ -39,6 +39,20 @@
             </div>
             <p v-if="runtime?.stop_reason">{{ runtime.stop_reason }}</p>
             <p v-if="runtime?.final_text">{{ runtime.final_text }}</p>
+            <section v-if="brief" class="task-brief">
+              <div class="brief-head"><strong>任务说明</strong><n-tag size="small">v{{ brief.revision }}</n-tag></div>
+              <p>{{ brief.goal }}</p>
+              <template v-for="work in brief.working_context || []" :key="work.context_id">
+                <div v-for="condition in work.conditions || []" :key="condition.key" class="brief-condition">
+                  <strong>{{ condition.key }}</strong><span>{{ condition.quote }}</span><span class="mono source">#{{ condition.source_msg_id }}</span>
+                </div>
+              </template>
+              <n-collapse>
+                <n-collapse-item v-if="brief.request" title="原始要求" name="request"><p class="brief-text">{{ brief.request.text }}</p><span class="mono source">#{{ brief.request.msg_id }} · {{ fmtTs(brief.request.ts) }}</span></n-collapse-item>
+                <n-collapse-item v-if="brief.changes?.length" :title="`补充要求（${brief.changes.length}）`" name="changes"><div v-for="(change,index) in brief.changes" :key="index"><p class="brief-text">{{ change.text }}</p><span class="source">{{ change.source ? `#${change.source.msg_id}` : '管理员调整' }}</span></div></n-collapse-item>
+                <n-collapse-item v-if="briefVersions.length" title="版本记录" name="versions"><p v-for="version in briefVersions" :key="version.revision">v{{ version.revision }} · {{ changeLabel(version.event_kind) }} <span v-if="version.source_msg_id" class="mono source">#{{ version.source_msg_id }}</span></p></n-collapse-item>
+              </n-collapse>
+            </section>
             <n-collapse v-if="invocations.length"><n-collapse-item title="工具执行记录" name="calls"><p v-for="call in invocations" :key="call.id">{{ call.tool }} · {{ call.state }} · {{ fmtTs(call.started_at) }}</p></n-collapse-item></n-collapse>
             <n-timeline v-if="events.length">
               <n-timeline-item v-for="e in events" :key="e.id" :title="`#${e.seq} ${e.kind}`" :content="textOf(e)" :time="fmtTs(e.ts)" />
@@ -64,6 +78,8 @@ const events = ref([])
 const state = ref(null)
 const runtime=ref(null)
 const invocations=ref([])
+const brief=ref(null)
+const briefVersions=ref([])
 const loadError=ref('')
 const controlling=ref(false)
 let requestVersion=0
@@ -88,6 +104,7 @@ async function load() {
 }
 function phaseLabel(value) { return ({queued:'排队中',executing:'执行中',waiting_input:'等待补充',waiting_children:'等待子任务',paused:'已暂停',cancelled:'已取消',finished:'已完成',failed:'已停止'})[value] || value }
 function deliveryLabel(value) { return ({none:'尚无待发送结果',pending:'等待整理回复',preparing:'整理回复中',sent:'已发送',failed:'回复失败',unknown:'送达待核实'})[value] || value }
+function changeLabel(value) { return ({create:'创建',amend:'补充要求',pause:'暂停',resume:'继续',cancel:'取消',delegate:'子任务',ancestor_control:'父任务变更'})[value] || value }
 async function control(action) {
   if (!cur.value || controlling.value) return
   controlling.value=true;loadError.value=''
@@ -96,11 +113,11 @@ async function control(action) {
   finally {controlling.value=false}
 }
 async function open(t) {
-  cur.value=t;const version=++requestVersion;runtime.value=null;invocations.value=[];events.value=[];loadError.value=''
+  cur.value=t;const version=++requestVersion;runtime.value=null;invocations.value=[];events.value=[];brief.value=null;briefVersions.value=[];loadError.value=''
   try {
     const [eventResponse,runtimeResponse]=await Promise.all([api.get(`/tasks/${t.task_id}/events`),api.get(`/tasks/${t.task_id}/runtime`)])
     if(version!==requestVersion)return
-    events.value=eventResponse.data.events || [];runtime.value=runtimeResponse.data.runtime;invocations.value=runtimeResponse.data.invocations || []
+    events.value=eventResponse.data.events || [];runtime.value=runtimeResponse.data.runtime;invocations.value=runtimeResponse.data.invocations || [];brief.value=runtimeResponse.data.brief || null;briefVersions.value=runtimeResponse.data.brief_versions || []
   } catch(e) {if(version===requestVersion)loadError.value=e.response?.data?.error || '加载失败'}
 }
 onMounted(load)
@@ -144,4 +161,10 @@ onMounted(load)
   font-size: 12px;
   color: var(--yt-ink-3);
 }
+.task-brief { margin: 16px 0; padding: 14px; border: 1px solid var(--yt-card-border); border-radius: 8px; }
+.brief-head,.brief-condition { display: flex; align-items: baseline; gap: 10px; }
+.brief-condition { margin: 8px 0; flex-wrap: wrap; }
+.brief-head { align-items: center; }
+.brief-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.source { font-size: 12px; color: var(--yt-ink-3); }
 </style>

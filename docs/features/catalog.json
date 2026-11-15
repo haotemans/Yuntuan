@@ -132,7 +132,7 @@
     {
       "id": "tasks",
       "title": "Agent 任务与工具执行",
-      "status": "已实现基础闭环（自动回聊未完成）",
+      "status": "已实现持久任务说明与结果回聊（需真实服务验收）",
       "doc": "docs/features/core/tasks.md",
       "source": [
         "crates/core/src/agent.rs",
@@ -142,13 +142,16 @@
         "webui-frontend/src/views/Tasks.vue",
         "crates/core/src/agent/runtime.rs",
         "crates/core/src/agent/delivery.rs",
-        "crates/webui/src/runtime_api.rs"
+        "crates/webui/src/runtime_api.rs",
+        "crates/core/src/agent/brief.rs"
       ],
       "tests": [
         "crates/core/tests/agent_loop.rs",
         "crates/core/tests/sandbox_docker.rs",
         "crates/core/tests/context_runtime.rs",
-        "webui-frontend/tests/tasks-flow.spec.js"
+        "webui-frontend/tests/tasks-flow.spec.js",
+        "crates/core/tests/task_brief.rs",
+        "crates/webui/tests/pages_api.rs"
       ],
       "module": "core"
     },

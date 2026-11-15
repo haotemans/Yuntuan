@@ -11,6 +11,58 @@ use yuantuan_core::db;
 use yuantuan_core::db::SqliteExt;
 use yuantuan_webui::{serve, Extras};
 
+#[tokio::test]
+async fn task_runtime_exposes_versioned_requirements_and_preserves_legacy_tasks() {
+    let rig = start().await;
+    let mut c = db::connect(&rig.db_path).await.unwrap();
+    let anchor: i64 = sqlx::query_scalar(
+        "SELECT msg_id FROM messages WHERE sender_pid='p_2001' ORDER BY msg_id LIMIT 1",
+    )
+    .fetch_one(&mut *c)
+    .await
+    .unwrap();
+    let id = yuantuan_core::agent::create_scoped_task(
+        &rig.db_path,
+        &yuantuan_core::event::EventBus::default(),
+        "555666",
+        "group",
+        "p_2001",
+        Some(anchor),
+        "核对资料",
+        Default::default(),
+        json!({}),
+    )
+    .await
+    .unwrap();
+    yuantuan_core::agent::runtime::control(
+        &rig.db_path,
+        &id,
+        "p_2001",
+        "555666",
+        "group",
+        "amend",
+        "增加来源列",
+    )
+    .await
+    .unwrap();
+    let (status, body) = rig.get(&format!("/api/tasks/{id}/runtime")).await;
+    assert_eq!(status, 200);
+    assert_eq!(body["runtime"]["revision"], 2);
+    assert_eq!(body["brief"]["revision"], 2);
+    assert_eq!(body["brief"]["request"]["msg_id"], anchor);
+    assert_eq!(body["brief"]["changes"][0]["text"], "增加来源列");
+    assert_eq!(body["brief_versions"][0]["event_kind"], "amend");
+    let response = rig
+        .http
+        .get(format!("{}/api/tasks/{id}/runtime", rig.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 401);
+    let (_, legacy) = rig.get("/api/tasks/t1/runtime").await;
+    assert!(legacy["runtime"].is_null());
+}
+
 fn temp_dir(prefix: &str) -> PathBuf {
     // nanos + 进程 id + 原子序号：Windows 上 SystemTime 精度只到 ~100ns，同进程两测试并发起 start 可能撞值
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
