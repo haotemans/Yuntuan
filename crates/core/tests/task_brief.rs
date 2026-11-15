@@ -340,6 +340,51 @@ async fn explicit_goal_change_invalidates_children_and_new_child_inherits_curren
 }
 
 struct ProbeTool(&'static str, std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+#[tokio::test]
+async fn pending_external_action_blocks_amend_then_confirmed_recovery_applies_saved_goal() {
+    let p = fixture().await;
+    let m = message(&p, "比较A和B").await;
+    let work = working(&p, &m, json!({"goal_quote":"比较A和B"})).await;
+    let mut c = db::connect(&p).await.unwrap();
+    let view = working_context::view(&mut c, &m, m.msg_id).await.unwrap();
+    let id = create(&p, &m, json!({"working_context":view})).await;
+    let cp = runtime::load(&p, &id).await.unwrap().unwrap();
+    runtime::reserve(&p, &id, &cp, 100).await.unwrap();
+    let receipt = runtime::begin_invocation(&p, &id, &cp, "inspect", &json!({}))
+        .await
+        .unwrap();
+    let change = message(&p, "改成比较A和C").await;
+    working(
+        &p,
+        &change,
+        json!({"context_id":work,"expected_revision":1,"goal_quote":"比较A和C"}),
+    )
+    .await;
+    assert!(
+        runtime::control_from_message(&p, &id, "amend", &change, Some(1), Some(work))
+            .await
+            .is_err()
+    );
+    assert_eq!(brief::current(&mut c, &id).await.unwrap()["revision"], 1);
+    runtime::complete_invocation(&p, &id, &cp, &receipt, json!({"verified":true}), true)
+        .await
+        .unwrap();
+    let resume = message(&p, "按刚才的修改继续").await;
+    runtime::control_from_message(&p, &id, "amend", &resume, Some(1), Some(work))
+        .await
+        .unwrap();
+    assert_eq!(
+        brief::current(&mut c, &id).await.unwrap()["goal"],
+        "比较A和C"
+    );
+    let used: i64 = sqlx::query_scalar("SELECT used_calls FROM tasks WHERE task_id=?")
+        .bind(&id)
+        .fetch_one(&mut *c)
+        .await
+        .unwrap();
+    assert_eq!(used, 1);
+}
 #[async_trait::async_trait]
 impl yuantuan_core::tools::Tool for ProbeTool {
     fn name(&self) -> &'static str {

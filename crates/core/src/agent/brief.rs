@@ -133,7 +133,10 @@ pub(crate) async fn control(
                 .find(|v| v["context_id"] == focus);
             ensure!(selected.is_some(), "任务补充的事项来源不可用");
             let selected = selected.unwrap();
-            if selected["goal"]["source_msg_id"] == m.msg_id {
+            let previous_goal = &body["working_context"][0]["goal"]["quote"];
+            if (previous_goal.is_string() && previous_goal != &selected["goal"]["quote"])
+                || (previous_goal.is_null() && selected["goal"]["source_msg_id"] == m.msg_id)
+            {
                 body["goal"] = selected["goal"]["quote"].clone();
             }
             body["working_context"] = json!([selected]);
@@ -200,7 +203,7 @@ pub async fn candidates(
         if !visible(&b, cutoff) {
             continue;
         }
-        out.push(json!({"task_id":id,"goal":clip(&r.try_get::<String,_>("goal")?,240),"revision":r.try_get::<i64,_>("revision")?,"phase":r.try_get::<String,_>("phase")?,"delivery_state":r.try_get::<String,_>("delivery_state")?,"used_calls":r.try_get::<i64,_>("used_calls")?,"working_context_id":b["working_context"][0]["context_id"],"last_change":b["changes"].as_array().and_then(|a|a.last()).map(|v|clip(v["text"].as_str().unwrap_or(""),240)),"result_preview":r.try_get::<Option<String>,_>("final_text")?.map(|s|clip(&s,600)),"stop_reason":r.try_get::<Option<String>,_>("stop_reason")?.map(|s|clip(&s,240))}));
+        out.push(json!({"task_id":id,"goal":clip(&r.try_get::<String,_>("goal")?,240),"revision":r.try_get::<i64,_>("revision")?,"phase":r.try_get::<String,_>("phase")?,"delivery_state":r.try_get::<String,_>("delivery_state")?,"used_calls":r.try_get::<i64,_>("used_calls")?,"working_context_id":b["working_context"][0]["context_id"],"working_context_revision":b["working_context"][0]["revision"],"last_change":b["changes"].as_array().and_then(|a|a.last()).map(|v|clip(v["text"].as_str().unwrap_or(""),240)),"result_preview":r.try_get::<Option<String>,_>("final_text")?.map(|s|clip(&s,600)),"stop_reason":r.try_get::<Option<String>,_>("stop_reason")?.map(|s|clip(&s,240))}));
         if out.len() == 3 {
             break;
         }
