@@ -72,7 +72,7 @@ pub async fn test(
         .and_then(|binding| binding.reasoning_effort);
     match gateway.test_chat(role).await {
         Ok((model, latency_ms)) => Ok(Json(
-            json!({ "ok": true, "latency_ms": latency_ms, "model": model, "reasoning_effort": effort }),
+            json!({ "ok": true, "latency_ms": latency_ms, "model": model, "reasoning_effort": effort, "tool_protocol":gateway.role(role).map(|r|r.tool_protocol) }),
         )),
         Err(e) => Err(bad(&format!("连通测试失败：{e}"))),
     }

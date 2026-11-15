@@ -398,3 +398,8 @@ messages追加decision_error TEXT。pending/deciding之后可以进入failed，�
 ## V15：图片缓存与纠正（2026-11-08）
 
 `message_images`追加`content_hash TEXT`与`meme_id INTEGER`（可空、关联图库），原url/observation保持；新增`image_corrections(source_msg_id,image_index,correction_msg_id,description,evidence_quote)`，前三列组成主键，关联图片与纠正原消息。纠正追加保存、读取时按实际会话/原话/上界核对，原观察不覆盖。迁移SQL为[`vision_v15.sql`](../../crates/core/src/db/vision_v15.sql)，完整行为集中在[记忆功能](../features/core/memory.md)。
+
+
+## V18：工具契约与调用关联（2026-11-15）
+
+新增tool_contracts(name,definition_json,updated_at)与tool_invocation_records(invocation_id,task_id,revision,call_id,protocol,definition_json,status,error_json,elapsed_ms)，仅追加元数据，旧调用结果不换格式。后者引用task_invocations和tasks，并按任务/版本/调用编号唯一。结果状态及恢复含义见[任务功能](../features/core/tasks.md#v18-统一工具执行接口)，迁移见[存储](../features/core/storage.md)。

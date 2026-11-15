@@ -45,9 +45,15 @@ async fn task_runtime_exposes_versioned_requirements_and_preserves_legacy_tasks(
     )
     .await
     .unwrap();
+    c.execute("INSERT INTO task_invocations(id,task_id,revision,tool_name,args,state,started_at) VALUES('i_protocol',?1,2,'probe','{}','started',100)",yuantuan_core::db::params![id]).await.unwrap();
+    c.execute(r#"INSERT INTO tool_invocation_records(invocation_id,task_id,revision,call_id,protocol,definition_json,status,error_json,elapsed_ms) VALUES('i_protocol',?1,2,'original_42','native','{}','unknown','{"kind":"timeout","message":"needs verification"}',120000)"#,yuantuan_core::db::params![id]).await.unwrap();
     let (status, body) = rig.get(&format!("/api/tasks/{id}/runtime")).await;
     assert_eq!(status, 200);
     assert_eq!(body["runtime"]["revision"], 2);
+    assert_eq!(body["invocations"][0]["call_id"], "original_42");
+    assert_eq!(body["invocations"][0]["state"], "started");
+    assert_eq!(body["invocations"][0]["status"], "unknown");
+    assert_eq!(body["invocations"][0]["error"]["kind"], "timeout");
     assert_eq!(body["brief"]["revision"], 2);
     assert_eq!(body["brief"]["request"]["msg_id"], anchor);
     assert_eq!(body["brief"]["changes"][0]["text"], "增加来源列");
@@ -818,4 +824,39 @@ async fn provider_save_preserves_masked_key_and_selected_role_model() {
     );
     assert_eq!(config["providers"]["provider"]["mock"]["models"][1], "m2");
     assert_eq!(config["providers"]["roles"]["decision"]["model"], "m2");
+}
+
+#[tokio::test]
+async fn native_tool_protocol_is_saved_only_for_agent() {
+    let rig = start().await;
+    let provider =
+        json!({"mock":{"base_url":"http://127.0.0.1:9/v1","api_key_env":"","models":["m"]}});
+    let payload = json!({"providers":{"provider":provider,"roles":{"agent_exec":{"provider":"mock","model":"m","tool_protocol":"native"},"bot_chat":{"provider":"mock","model":"m"}}}});
+    let response = rig
+        .http
+        .post(format!("{}/api/config", rig.base))
+        .bearer_auth(&rig.token)
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    let (_, config) = rig.get("/api/config").await;
+    assert_eq!(
+        config["providers"]["roles"]["agent_exec"]["tool_protocol"],
+        "native"
+    );
+    let mut invalid = payload.clone();
+    invalid["providers"]["roles"]["bot_chat"]["tool_protocol"] = json!("native");
+    let response = rig
+        .http
+        .post(format!("{}/api/config", rig.base))
+        .bearer_auth(&rig.token)
+        .json(&invalid)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 400);
+    let (_, config) = rig.get("/api/config").await;
+    assert!(config["providers"]["roles"]["bot_chat"]["tool_protocol"].is_null());
 }

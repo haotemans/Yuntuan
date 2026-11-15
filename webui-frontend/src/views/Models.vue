@@ -64,6 +64,11 @@
                           placeholder="服务商默认" clearable />
                 <span class="field-label">{{ reasoningHints[r] }}；实际效果取决于模型和服务商。</span>
               </div>
+              <div v-if="r === 'agent_exec'" class="field-item">
+                <label class="field-label">工具协议</label>
+                <n-select v-model:value="roles[r].tool_protocol" :options="toolProtocolOptions" size="small" />
+                <span class="field-label">原生模式需要服务商支持 tool_calls；连通测试不验证工具执行。</span>
+              </div>
             </div>
 
             <div class="role-foot">
@@ -117,10 +122,11 @@ import axios from 'axios'
 /** @type {import('vue').Ref<Record<string, { base_url: string, modelsText: string, api_key_env: string, api_key_present: boolean, protocol: string }>>} */
 const providers = ref({})
 const roles = ref({
-  decision: { provider: null, model: '', reasoning_effort: null },
-  bot_chat: { provider: null, model: '', reasoning_effort: null },
-  agent_exec: { provider: null, model: '', reasoning_effort: null },
+  decision: { provider: null, model: '', reasoning_effort: null, tool_protocol: 'json' },
+  bot_chat: { provider: null, model: '', reasoning_effort: null, tool_protocol: 'json' },
+  agent_exec: { provider: null, model: '', reasoning_effort: null, tool_protocol: 'json' },
 })
+const toolProtocolOptions = [{ label: 'JSON 动作（兼容）', value: 'json' }, { label: '原生 tool_calls', value: 'native' }]
 const reasoningOptions = [
   { label: 'low · 轻量思考', value: 'low' },
   { label: 'medium · 平衡', value: 'medium' },
@@ -202,8 +208,8 @@ function applyConfig(data) {
   const rs = data.providers?.roles || {}
   for (const r of roleNames) {
     roles.value[r] = rs[r]
-      ? { provider: rs[r].provider, model: rs[r].model, reasoning_effort: rs[r].reasoning_effort ?? null }
-      : { provider: null, model: '', reasoning_effort: null }
+      ? { provider: rs[r].provider, model: rs[r].model, reasoning_effort: rs[r].reasoning_effort ?? null, tool_protocol: rs[r].tool_protocol || 'json' }
+      : { provider: null, model: '', reasoning_effort: null, tool_protocol: 'json' }
   }
   savedSignature.value = JSON.stringify(configPayload())
   loaded.value = true
@@ -235,6 +241,7 @@ async function testRole(r) {
   }
   const model = roles.value[r].model
   const effort = roles.value[r].reasoning_effort
+  const protocol = roles.value[r].tool_protocol
   const epoch = ++testEpoch[r]
   tests.value[r] = { state: 'loading', latency: null, model: '', error: '' }
   try {
@@ -242,6 +249,7 @@ async function testRole(r) {
     if (epoch !== testEpoch[r]) return
     if (data.ok && data.model !== model) throw new Error(`实际测试模型 ${data.model} 与所选模型 ${model} 不一致`)
     if (data.ok && (data.reasoning_effort ?? null) !== effort) throw new Error('实际测试的思考强度与所选配置不一致')
+    if (data.ok && (data.tool_protocol || 'json') !== protocol) throw new Error('实际测试的工具协议与所选配置不一致')
     tests.value[r] = {
       state: data.ok ? 'ok' : 'fail',
       latency: data.latency_ms ?? null,
@@ -293,6 +301,7 @@ function configPayload() {
     if (roles.value[r].provider) {
       rolesOut[r] = { provider: roles.value[r].provider, model: roles.value[r].model }
       if (roles.value[r].reasoning_effort) rolesOut[r].reasoning_effort = roles.value[r].reasoning_effort
+      if (r === 'agent_exec' && roles.value[r].tool_protocol === 'native') rolesOut[r].tool_protocol = 'native'
     }
   }
   return { provider, roles: rolesOut }
@@ -310,6 +319,7 @@ function routingSignature(config) {
     if (bind) {
       bindings[r] = { provider: bind.provider, model: bind.model }
       if (bind.reasoning_effort) bindings[r].reasoning_effort = bind.reasoning_effort
+      if (bind.tool_protocol === 'native') bindings[r].tool_protocol = 'native'
     }
   }
   return JSON.stringify({ provider, roles: bindings })

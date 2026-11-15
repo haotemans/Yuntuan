@@ -247,6 +247,16 @@ impl Tool for SandboxExecTool {
         "在 Linux Docker 沙箱中执行 Bash 命令；可用 git、python、pip、bun、rg。当前任务的 /workspace 文件跨调用保留；每次调用是新进程，cd/export 不会保留。网络由服务器配置，默认禁用。检查 exit_code；超时后先检查文件状态，避免盲目重试副作用。"
     }
 
+    fn available_in_chat(&self, _ctx: &ToolCtx) -> bool {
+        self.config.enabled
+    }
+    fn policy(&self) -> super::ToolPolicy {
+        super::ToolPolicy {
+            effect: super::ToolEffect::WorkspaceWrite,
+            ..Default::default()
+        }
+    }
+
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object", "additionalProperties": false,

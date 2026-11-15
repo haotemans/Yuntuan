@@ -43,3 +43,8 @@ V12增加SQLite能力目录与技能调用记录；能力启停和类型化会�
 Decision和Chat能力目录也读取持久启停/范围，避免把已禁用能力继续推荐给模型。
 
 回放/测试合成消息的非正数编号不作为真实来源幂等键；真实消息编号仍确保同一技能不重复执行。
+
+
+V18在plugin-api的Tool trait追加有默认实现的available_in_chat、policy和output_schema，并增加ToolDefinition、ToolCall、ToolResult、ToolError和ToolProtocol等共享类型。旧插件无需同时改写即可编译，默认效果未知、120秒、取消后等待结果；这是源码接口，不宣称动态ABI兼容。HostedTool转发可用性、契约、附件保留和audit_details；插件停止/范围拒绝/繁忙返回类型化前置错误，超时/panic保留错误种类并脱敏，不再只剩无类型字符串。宿主仍保留插件自身限流、输出/路径限制与secret redaction。
+
+Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统一工具执行接口)为准。Skill仍保留技能匹配、权限和来源幂等入口，共享ToolOutput，不因接口统一改变其调度职责；管理面板手工MCP诊断仍为已有原始stdio请求，不冒充Agent任务回执。SQLite工具契约仅描述实际注册实现，不凭一条数据库记录生成执行器。

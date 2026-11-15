@@ -53,7 +53,7 @@
                 <n-collapse-item v-if="briefVersions.length" title="版本记录" name="versions"><p v-for="version in briefVersions" :key="version.revision">v{{ version.revision }} · {{ changeLabel(version.event_kind) }} <span v-if="version.source_msg_id" class="mono source">#{{ version.source_msg_id }}</span></p></n-collapse-item>
               </n-collapse>
             </section>
-            <n-collapse v-if="invocations.length"><n-collapse-item title="工具执行记录" name="calls"><p v-for="call in invocations" :key="call.id">{{ call.tool }} · {{ call.state }} · {{ fmtTs(call.started_at) }}</p></n-collapse-item></n-collapse>
+            <n-collapse v-if="invocations.length"><n-collapse-item title="工具执行记录" name="calls"><p v-for="call in invocations" :key="call.id">{{ call.tool }} · {{ toolStatus(call.status || call.state) }} · {{ fmtTs(call.started_at) }}<span v-if="call.call_id" class="mono source"> · {{ call.protocol }} / {{ call.call_id }} / v{{ call.revision }} · {{ call.elapsed_ms }}ms</span><span v-if="call.error?.message" class="tool-error">{{ call.error.message }}</span></p></n-collapse-item></n-collapse>
             <n-timeline v-if="events.length">
               <n-timeline-item v-for="e in events" :key="e.id" :title="`#${e.seq} ${e.kind}`" :content="textOf(e)" :time="fmtTs(e.ts)" />
             </n-timeline>
@@ -107,6 +107,7 @@ async function load() {
   if(selected) await open(selected)
   else {++requestVersion;cur.value=null;runtime.value=null;brief.value=null;briefVersions.value=[];events.value=[];invocations.value=[]}
 }
+function toolStatus(value) { return ({started:'执行结果待确认',succeeded:'执行成功',rejected:'未执行',failed:'执行失败',unknown:'结果待核实',cancelled:'已中止'})[value] || value }
 function phaseLabel(value) { return ({queued:'排队中',executing:'执行中',waiting_input:'等待补充',waiting_children:'等待子任务',paused:'已暂停',cancelled:'已取消',finished:'已完成',failed:'已停止'})[value] || value }
 function deliveryLabel(value) { return ({none:'尚无待发送结果',pending:'等待整理回复',preparing:'整理回复中',sent:'已发送',failed:'回复失败',unknown:'送达待核实'})[value] || value }
 function changeLabel(value) { return ({create:'创建',amend:'补充要求',pause:'暂停',resume:'继续',cancel:'取消',delegate:'子任务',ancestor_control:'父任务变更'})[value] || value }
@@ -129,6 +130,7 @@ onMounted(load)
 </script>
 
 <style scoped>
+.tool-error { display:block; color:var(--yt-ink-2); overflow-wrap:anywhere; }
 .task-list {
   display: flex;
   flex-direction: column;

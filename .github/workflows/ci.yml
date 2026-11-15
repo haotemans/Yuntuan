@@ -89,6 +89,7 @@ jobs:
           cargo test --locked -p yuantuan-adapter-qq --lib moderation
           cargo test --locked -p yuantuan-core --lib bot::dispatch_tests
           cargo test --locked -p yuantuan-core --lib engagement::tests
+          cargo test --locked -p yuantuan-core --test tool_protocol
           cargo test --locked -p yuantuan-core --test task_brief
           cargo test --locked -p yuantuan-core --test bot_context
           cargo test --locked -p yuantuan-core --test working_context
