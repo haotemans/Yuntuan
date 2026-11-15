@@ -28,7 +28,7 @@
       </n-gi>
 
       <n-gi>
-        <n-card :title="cur ? `${cur.task_id} · ${cur.goal}` : '执行时间轴'" size="small">
+        <n-card :title="cur ? `${cur.task_id} · ${brief?.goal || cur.goal}` : '执行时间轴'" size="small">
           <template v-if="cur">
             <n-alert v-if="loadError" type="error">{{ loadError }}</n-alert>
             <div v-if="runtime" class="yt-toolbar">
@@ -83,6 +83,7 @@ const briefVersions=ref([])
 const loadError=ref('')
 const controlling=ref(false)
 let requestVersion=0
+let listVersion=0
 const firstLoaded = ref(false)
 const stateOptions = ['pending', 'running', 'finished', 'failed', 'archived'].map((s) => ({ label: s, value: s }))
 
@@ -95,12 +96,16 @@ function textOf(e) {
 }
 
 async function load() {
+  const version=++listVersion
   const params = new URLSearchParams({ limit: '100' })
   if (state.value) params.set('state', state.value)
   const { data } = await api.get(`/tasks?${params}`)
+  if(version!==listVersion)return
   list.value = data.tasks || []
   firstLoaded.value = true
-  if (list.value.length && !cur.value) open(list.value[0])
+  const selected=list.value.find(t=>t.task_id===cur.value?.task_id) || list.value[0]
+  if(selected) await open(selected)
+  else {++requestVersion;cur.value=null;runtime.value=null;brief.value=null;briefVersions.value=[];events.value=[];invocations.value=[]}
 }
 function phaseLabel(value) { return ({queued:'排队中',executing:'执行中',waiting_input:'等待补充',waiting_children:'等待子任务',paused:'已暂停',cancelled:'已取消',finished:'已完成',failed:'已停止'})[value] || value }
 function deliveryLabel(value) { return ({none:'尚无待发送结果',pending:'等待整理回复',preparing:'整理回复中',sent:'已发送',failed:'回复失败',unknown:'送达待核实'})[value] || value }
@@ -108,7 +113,7 @@ function changeLabel(value) { return ({create:'创建',amend:'补充要求',paus
 async function control(action) {
   if (!cur.value || controlling.value) return
   controlling.value=true;loadError.value=''
-  try { await api.post(`/tasks/${cur.value.task_id}/control`,{action}); await load(); await open(cur.value) }
+  try { await api.post(`/tasks/${cur.value.task_id}/control`,{action}); await load() }
   catch(e) {loadError.value=e.response?.data?.error || '操作失败'}
   finally {controlling.value=false}
 }

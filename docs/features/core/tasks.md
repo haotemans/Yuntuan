@@ -72,3 +72,5 @@ Agent请求按task_brief在前、execution_history在后组织JSON；用户补�
 Router可用focus_task_id选择同一作者/同一会话的运行中或近30天已结束任务；Chat仅接收所选任务说明、状态和有界回执预览。旧版本回执标明matches_current_revision，不把已完成当作已交付。任务回聊不重放旧原消息的画像、工作记忆或图片纠正副作用。运行API返回brief及最近10版元数据，任务页显示条件、来源和补充，保持独立的执行/投递状态。管理页只读取当前说明，未增加任意SQL或扩大工具权限。
 
 回归：[`crates/core/tests/task_brief.rs`](../../../crates/core/tests/task_brief.rs)覆盖来源/隔离、版本更新、压缩后恢复、预算保留、已结束任务检索、V16升级、真实mock Runner参数修正与工具可见集合；[`crates/webui/tests/pages_api.rs`](../../../crates/webui/tests/pages_api.rs)验证认证及API，现有tasks-flow验证当前要求与控制回显。mock不代表真实模型、浏览器或QQ文件闭环验收。
+
+任务页刷新同时更新当前详情与版本，控制成功后复用同一刷新路径，避免列表更新而条件仍停留在旧版。
