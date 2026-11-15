@@ -496,6 +496,57 @@ async fn an_expired_interrupted_batch_is_diagnosed_and_its_unread_sources_can_re
 }
 
 #[tokio::test]
+async fn backfill_cannot_replace_newer_semantic_memory_but_fresh_evidence_can() {
+    let update = |id, quote, content| {
+        json!({"key":"project:bot","kind":"fact","content":content,
+        "status":"current","evidence":[{"msg_id":id,"quote":quote}]})
+    };
+    let r = Rig::outputs(vec![
+        json!({"updates":[],"memory_updates":[update(1,"我以前在做旧项目","以前的旧项目")]})
+            .to_string(),
+        json!({"updates":[],"memory_updates":[update(6,"我后来完成了新项目","新项目已完成")]})
+            .to_string(),
+    ])
+    .await;
+    let mut conn = db::connect(&r.path).await.unwrap();
+    conn.execute_batch(
+        "INSERT INTO persons(person_id,first_seen,last_seen) VALUES('a',1,1);
+       INSERT INTO messages(msg_id,chat_id,chat_type,sender_pid,text,ts) VALUES
+       (1,'g','group','a','我以前在做旧项目',1),(5,'g','group','a','我现在在做新项目',5);",
+    )
+    .await
+    .unwrap();
+    let newer: memory::semantic::Update =
+        serde_json::from_value(update(5, "我现在在做新项目", "正在做新项目")).unwrap();
+    memory::semantic::write(&mut conn, "person", "a", 1, 5, &newer)
+        .await
+        .unwrap();
+    let result = refresh::person(&r.path, &r.gw, "a", true).await.unwrap();
+    assert_eq!(result.status, "no_evidence");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM memory_items")
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap(),
+        1
+    );
+    conn.execute_batch("UPDATE state_kv SET value=json_set(value,'$.attempt',0) WHERE key='profile_refresh:v1:a';
+        INSERT INTO messages(msg_id,chat_id,chat_type,sender_pid,text,ts) VALUES(6,'g','group','a','我后来完成了新项目',6)").await.unwrap();
+    assert_eq!(
+        refresh::person(&r.path, &r.gw, "a", true)
+            .await
+            .unwrap()
+            .status,
+        "updated"
+    );
+    let current = memory::semantic::current(&mut conn, "person", "a", "g", "group", 6, 6)
+        .await
+        .unwrap();
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0]["content"], "新项目已完成");
+}
+
+#[tokio::test]
 async fn nightly_reloads_binding_after_spacing_and_circuits_repeated_failures() {
     let r = Rig::new(json!({"updates":[]}).to_string()).await;
     let mut conn = db::connect(&r.path).await.unwrap();
