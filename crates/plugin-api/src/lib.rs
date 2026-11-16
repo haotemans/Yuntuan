@@ -117,6 +117,11 @@ pub trait HostServices: Send + Sync {
         bail!("宿主未提供群管理服务")
     }
     async fn chat(&self, ctx: &ToolCtx, system: &str, user: &str) -> Result<String>;
+    /// Check registered Tool availability, persisted capability switch, scope and schema.
+    /// Skills must call this before invoking the same connector directly.
+    async fn authorize_tool_for_skill(&self, _ctx: &ToolCtx, _name: &str, _args: &Value) -> Result<()> {
+        bail!("宿主未提供 Tool 权限检查")
+    }
     async fn read_data(&self, key: &str) -> Result<Option<Value>>;
     async fn write_data(&self, key: &str, value: Value) -> Result<()>;
     fn log(&self, message: &str);

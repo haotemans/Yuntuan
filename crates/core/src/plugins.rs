@@ -289,9 +289,24 @@ struct Services {
     policy: PluginSettings,
     io: Mutex<()>,
     moderation: Option<Arc<dyn GroupModeration>>,
+    tools: crate::tools::Registry,
+    db_path: PathBuf,
 }
 #[async_trait]
 impl HostServices for Services {
+    async fn authorize_tool_for_skill(&self, ctx: &ToolCtx, name: &str, args: &Value) -> Result<()> {
+        if !name.starts_with(&format!("{}.", self.id)) {
+            bail!("Skill 不得调用其他插件的工具");
+        }
+        if self.policy.allowed_chats.as_ref().is_some_and(|a| !a.contains(&ctx.chat_id)) {
+            bail!("会话不在插件授权范围内");
+        }
+        let tool = self.tools.get(name).context("Tool 未注册或已经被停用")?;
+        if !tool.available_in_chat(ctx) {
+            bail!("Tool 在当前会话不可用");
+        }
+        crate::capabilities::check_tool(&self.db_path, name, ctx, &tool.parameters_schema(), args).await
+    }
     async fn membership(&self, ctx: &ToolCtx, action: MembershipAction) -> Result<Value> {
         if self.id != "moderator" { bail!("此插件不能管理好友或入群申请"); }
         self.moderation.as_ref().context("QQ申请审核服务未启用")?
@@ -437,6 +452,7 @@ pub struct PluginManager {
     stopped: AtomicBool,
     llm: crate::bot::SharedLlm,
     moderation: Option<Arc<dyn GroupModeration>>,
+    db_path: PathBuf,
 }
 
 enum Change {
@@ -493,6 +509,7 @@ impl PluginManager {
             stopped: AtomicBool::new(false),
             llm: llm.clone(),
             moderation: moderation.clone(),
+            db_path: data_root.join("yuantuan.db"),
         };
         // Validate the complete catalog before starting any plugin.
         let mut ids = std::collections::HashSet::new();
@@ -553,6 +570,8 @@ impl PluginManager {
                     llm: llm.clone(),
                     policy: settings.clone(),
                     io: Mutex::new(()),
+                    tools: manager.tools.clone(),
+                    db_path: manager.db_path.clone(),
                     moderation: if plugin.uses_group_moderation() {
                         moderation.clone()
                     } else {
@@ -918,6 +937,8 @@ impl PluginManager {
             llm: self.llm.clone(),
             policy: settings.clone(),
             io: Mutex::new(()),
+            tools: self.tools.clone(),
+            db_path: self.db_path.clone(),
             moderation: if entry.plugin.uses_group_moderation() {
                 self.moderation.clone()
             } else {

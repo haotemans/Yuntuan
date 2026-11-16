@@ -61,3 +61,6 @@ Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统
 管理端现以 `/plugins/:name` 提供插件独立页面，包含概览、连接配置、Skills/Tools 和运行状态。页面仍复用 `/api/plugins/list`、`/api/plugins/config`、`/api/plugins/toggle` 与 `/api/capabilities`，没有新增插件专用配置数据库或上传式动态安装。
 
 首批服务连接见 [腾讯文档](plugins/tencent-docs.md) 和 [夸克网盘](plugins/quark-drive.md)。两者只把官方能力包装成 Tool / Skill；宿主统一做会话范围、参数门控和日志。当前原生 Plugin 是编译期依赖，`SKILL.md` 被编译为使用说明而不是可在生产中从外部目录任意安装的 Skill 包。
+
+
+为了避免 Skill 直接调用共享 Connector 时绕过 Tool 开关，V20 新增 `HostServices::authorize_tool_for_skill(ctx,name,args)`：宿主校验该 Tool 属于当前插件、确实在 Registry 注册、对会话开放，并复用已有持久 `capabilities::check_tool` 对启停、作用域及 JSON 参数做检查。Skill 只能在授权通过后调用对应连接器；避免重入 HostedTool 导致单并发插件死锁。此检查是预执行门控，外部调用仍由插件自身负责写权限与平台返回验证。

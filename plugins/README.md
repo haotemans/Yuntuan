@@ -90,3 +90,7 @@ cargo check -p yuantuan --no-default-features
 - [夸克网盘](quark-drive/README.md)：官方 CLI + OAuth，受限 argv 白名单，Tool + Skill 共用通道。
 
 安装新插件依然需要源码编译。WebUI 每个插件已有独立路由 `/plugins/:name`；所有配置和授权限制复用当前插件宿主，未完成的账户连通性不可显示为通过。
+
+### Skill 与 Tool 复用同一个执行权限
+
+通过 `HostServices::authorize_tool_for_skill(ctx,name,args)` 检查同一插件的工具已注册、启用、当前会话可用、参数有效后，Skill 才可委托共享 Connector。宿主只检查授权，不重入同插件 `HostedTool::call`（插件默认并发 1，递归进入会死锁）。独立工具和 Skill 开关都实际生效；适配器仍负责对应服务副作用的业务级确认。

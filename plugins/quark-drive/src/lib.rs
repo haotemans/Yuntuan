@@ -115,7 +115,7 @@ impl Op {
     }
     fn schema(self) -> Value {
         match self {
-            Op::UserInfo|Op::ShareUpdates => json!({"type":"object","properties":{},"additionalProperties":false}),
+            Op::UserInfo|Op::ShareUpdates => json!({"type":"object","properties":{"session_input":{"type":"string","maxLength":2000}},"additionalProperties":false}),
             Op::Search=> json!({"type":"object","properties":{"keyword":{"type":"string","maxLength":100},"session_input":{"type":"string"}},"required":["keyword"]}),
             Op::InspectShare|Op::UpdatedFiles=> json!({"type":"object","properties":{"url":{"type":"string","maxLength":1024},"session_input":{"type":"string"}},"required":["url"]}),
             Op::CreateShare=> json!({"type":"object","properties":{

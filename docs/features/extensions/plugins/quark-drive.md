@@ -31,3 +31,6 @@
 测试：[插件源码内的单元测试](../../../../plugins/quark-drive/src/lib.rs)。
 
 维护时同步 `docs/features/catalog.json` 和 [`plugins/quark-drive/README.md`](../../../../plugins/quark-drive/README.md)。
+
+
+`quark-drive.assist` 执行任一官方 CLI 子命令之前，均通过共享宿主的 `authorize_tool_for_skill` 复核对应 Tool 开关、会话范围和参数 Schema，不允许 Skill 绕过工具总开关。

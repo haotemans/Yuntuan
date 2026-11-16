@@ -34,3 +34,6 @@
 测试：[插件源码内的单元测试](../../../../plugins/tencent-docs/src/lib.rs)。
 
 维护时同步 `docs/features/catalog.json` 和 [`plugins/tencent-docs/README.md`](../../../../plugins/tencent-docs/README.md)。
+
+
+技能直选工具时先调用宿主的 `authorize_tool_for_skill` 检查 `tencent-docs.call` 已启用和允许当前会话，再执行官方 MCP；不允许 Skill 绕过 Tool 开关。

@@ -232,6 +232,7 @@ impl Skill for DocsSkill {
             .context("当前请求需要更多信息或官方 MCP 暂不支持")?;
         let arguments = value.get("arguments").filter(|v| v.is_object()).cloned()
             .context("缺少有效的工具参数")?;
+        self.host.authorize_tool_for_skill(ctx, "tencent-docs.call", &json!({"name":name,"arguments":arguments})).await?;
         let data = self.connector.invoke(ctx, name, arguments).await?;
         Ok(ToolOutput { summary:format!("腾讯文档已调用官方工具：{name}"), artifacts:vec![], data })
     }
