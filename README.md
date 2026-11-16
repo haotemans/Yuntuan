@@ -1,16 +1,18 @@
-# 攸宁 · Youning
+# 云团 · Yuntuan
 
-[![CI](https://github.com/haotemans/youning/actions/workflows/ci.yml/badge.svg)](https://github.com/haotemans/youning/actions/workflows/ci.yml)
+[![CI](https://github.com/haotemans/Yuntuan/actions/workflows/ci.yml/badge.svg)](https://github.com/haotemans/Yuntuan/actions/workflows/ci.yml)
 
 > 从一句回应开始，成为日常里可靠的帮手。
 
-**攸宁（Youning）** 是一个以 Rust 构建的可扩展个人智能助手。它从 QQ 私聊与群聊出发，将对话、记忆、参与判断与工具调用连接起来：在需要时回应，在有事时帮忙，也知道什么时候保持安静。
+**云团（Youning）** 是一个以 Rust 构建的可扩展个人智能助手。它从 QQ 私聊与群聊出发，将对话、记忆、参与判断与工具调用连接起来：在需要时回应，在有事时帮忙，也知道什么时候保持安静。
 
-聊天是入口，而不是边界。攸宁希望逐步走向桌面端与更多平台，让信息整理和日常任务也能自然地融入对话。
+聊天是入口，而不是边界。云团希望逐步走向桌面端与更多平台，让信息整理和日常任务也能自然地融入对话。
 
-项目原名 **云团bot（yuantuanbot）**。「攸宁」是项目名，不要求每个使用者都把自己的助手叫作「云团」；你可以在管理面板中编辑人格，塑造属于自己的交流方式。
+本项目曾使用「云团bot」和「攸宁」作为名称，现在统一以 **Yuntuan（云团）** 对外展示。项目名称与助手人格相互独立，部署者仍可在管理面板中配置自己的角色和交流方式。
 
-> **更名与兼容性**：仓库与项目展示名称已改为 `youning` / 攸宁。当前 Cargo 包、可执行文件、发布产物及默认数据库仍沿用 `yuantuan` 命名，下面的运行命令与文件路径因此保留原名。升级时继续沿用这些名称和既有数据路径。
+> **请区分两个项目**：本仓库 **Yuntuan** 是以 QQ 私聊、群聊为主要入口的个人助手；另一个独立仓库 [yuantuan](https://github.com/haotemans/yuantuan) 是面向跨平台的全新 AI Agent 运行时。两者代码、发布与数据目录相互独立。
+
+> **命名与运行兼容性**：本仓库名称已改为 `Yuntuan`，但当前 Cargo 包、可执行文件、发布产物和默认 SQLite 数据库仍使用历史技术标识 `yuantuan`。它们属于**本仓库的旧运行时命名**，并不代表上述独立的 `yuantuan` 项目。为避免破坏现有配置与数据，下面保留真实可用的命令和路径；仓库更名不会自动修改程序内部名称。
 
 架构概览见下文；详细行为与验证边界见[上下文与记忆](docs/features/core/memory.md)、[任务调度](docs/features/core/tasks.md)及 [ADR-0012](docs/adr/0012-context-memory-task-runtime.md)。
 
@@ -42,7 +44,7 @@
 
 后续改造采用 [ADR-0018：轻量通用 Agent](docs/adr/0018-lightweight-agent-runtime.md) 作为目标契约：Chat对接用户、Router分配上下文/记忆与任务、Agent执行细节，补齐工作记忆、统一工具协议和Docker浏览器/文件闭环。第一阶段已增加带原话来源的版本化工作记忆、Router选择事项及Chat/Agent语境投影，并限制过时闲聊发送；V17进一步独立保存版本化任务说明，补充要求可进入原任务；Agent按JSON读取说明与执行记录，工具目录按当前范围过滤，任务页显示条件、来源和版本。V18已将JSON动作和可选原生tool_calls接入统一工具执行器、类型化结果与持久关联回执；Router和Chat现在也接收实际底层工具概览，无Skill不再等同于无工具；参数错误按字段路径修正，插件页可独立启停Tool并保留会话范围。Docker浏览器/文件闭环和完整任务归档仍待后续实现。实际行为与验证边界见[记忆](docs/features/core/memory.md)及[回复时效](docs/features/core/replies.md)，不以设计替代验收。
 
-攸宁当前采用 **自研 Rust 运行时 + 事件驱动 + 三角色模型分工 + 对话／任务双路径**。模型负责理解意图、生成内容和选择下一步；宿主代码负责上下文、动作校验、能力调用、执行预算与状态落库，而不是让一个模型直接包办整个系统。
+云团当前采用 **自研 Rust 运行时 + 事件驱动 + 三角色模型分工 + 对话／任务双路径**。模型负责理解意图、生成内容和选择下一步；宿主代码负责上下文、动作校验、能力调用、执行预算与状态落库，而不是让一个模型直接包办整个系统。
 
 这里的「三角色」是同一运行时中的三种模型职责，可以分别绑定 provider 和 model，并不要求使用三个不同模型，也不是三个互相聊天的独立 Agent。对话路径面向即时交流与技能调用，任务路径面向需要多轮工具执行的工作。
 
@@ -175,13 +177,13 @@ Docker 开发沙箱是可选工具能力，默认关闭，配置见[开发沙箱
 
 ### 准备条件
 
-QQ 接入需要一个已能正常登录的 NapCat 实例；对话与任务执行需要配置可用的 LLM provider。当前 QQ 接入采用 **OneBot 11 反向 WebSocket**：攸宁监听，NapCat 主动连接。
+QQ 接入需要一个已能正常登录的 NapCat 实例；对话与任务执行需要配置可用的 LLM provider。当前 QQ 接入采用 **OneBot 11 反向 WebSocket**：云团监听，NapCat 主动连接。
 
 从源码构建还需要 **Rust stable** 与 **Node.js 24 + npm**，与仓库 CI 的工具链选择保持一致。Node.js 仅用于前端构建。
 
 ### 方式一：下载二进制
 
-不想本地编译，可以到 [Releases](https://github.com/haotemans/youning/releases) 查看发布包。CI 会在 `v*` tag 构建成功后发布；普通分支提交的构建产物可在 [Actions](https://github.com/haotemans/youning/actions/workflows/ci.yml) 对应运行的 Artifacts 中获取。
+不想本地编译，可以到 [Releases](https://github.com/haotemans/Yuntuan/releases) 查看发布包。CI 会在 `v*` tag 构建成功后发布；普通分支提交的构建产物可在 [Actions](https://github.com/haotemans/Yuntuan/actions/workflows/ci.yml) 对应运行的 Artifacts 中获取。
 
 | 平台 | 发布产物 |
 | --- | --- |
@@ -206,8 +208,8 @@ Windows PowerShell（在解压目录中）：
 ### 方式二：从源码构建
 
 ```bash
-git clone https://github.com/haotemans/youning.git
-cd youning
+git clone https://github.com/haotemans/Yuntuan.git
+cd Yuntuan
 
 # 构建前端，产物将嵌入 Rust 二进制
 cd webui-frontend
@@ -223,7 +225,7 @@ cargo run --locked -p yuantuan
 
 ### 完成配置与 QQ 连接
 
-配置和数据文件以运行时的工作目录为基准。首次准备配置时，先停止攸宁，检查以下内容，再重新启动：
+配置和数据文件以运行时的工作目录为基准。首次准备配置时，先停止云团，检查以下内容，再重新启动：
 
 | 文件 | 用途与注意事项 |
 | --- | --- |
@@ -233,30 +235,30 @@ cargo run --locked -p yuantuan
 
 从源码运行时，仓库中已有的配置同样需要检查。请为 `[napcat].token` 设置自己的随机 Token，不要沿用示例值。
 
-1. **启动攸宁**，确认正在监听配置中的反向 WebSocket 地址，默认是 `ws://127.0.0.1:6199/ws`。
-2. **在 NapCat WebUI 中添加连接**：进入「网络配置」，新建 **Websockets 客户端**，名称可填「攸宁」，URL 填 `ws://127.0.0.1:6199/ws`，Token 与 `config.toml` 中 `[napcat].token` 保持一致，启用并保存。
+1. **启动云团**，确认正在监听配置中的反向 WebSocket 地址，默认是 `ws://127.0.0.1:6199/ws`。
+2. **在 NapCat WebUI 中添加连接**：进入「网络配置」，新建 **Websockets 客户端**，名称可填「云团」，URL 填 `ws://127.0.0.1:6199/ws`，Token 与 `config.toml` 中 `[napcat].token` 保持一致，启用并保存。
 3. **打开管理面板**：访问 `http://127.0.0.1:8085/`，首次登录时设置管理员密码，再到「配置 / 模型」页配置 providers，并绑定 `decision`、`bot_chat`、`agent_exec` 角色。
 4. **检查连接与模型状态**：日志出现 `NapCat WS 已连接` 和 `get_login_info 完成 self_qq=...` 表示 QQ 链路已建立；模型角色尚未配置时，不能据此认为助手已经可以正常回复。
 
-上述 `127.0.0.1` 地址适用于两个进程处于同一主机网络环境的情况。NapCat 位于容器或另一台机器时，需要改为它实际可访问的地址，并同步检查攸宁的监听地址与防火墙；部署配置可参考 [deploy/compose.yml](deploy/compose.yml)。
+上述 `127.0.0.1` 地址适用于两个进程处于同一主机网络环境的情况。NapCat 位于容器或另一台机器时，需要改为它实际可访问的地址，并同步检查云团的监听地址与防火墙；部署配置可参考 [deploy/compose.yml](deploy/compose.yml)。
 
 ## 地址与端口速查
 
 | 用途 | 地址 / 端口 | 说明 |
 | --- | --- | --- |
-| 管理面板 | `http://127.0.0.1:8085/` | 攸宁提供，首次登录设置管理员密码。 |
+| 管理面板 | `http://127.0.0.1:8085/` | 云团提供，首次登录设置管理员密码。 |
 | 后端 API 与事件推送 | `http://127.0.0.1:8085/api/*`、`ws://127.0.0.1:8085/ws` | 与管理面板同源。 |
-| NapCat 反向 WebSocket | `ws://127.0.0.1:6199/ws` | 攸宁监听，NapCat 的 Websockets 客户端主动连接。 |
+| NapCat 反向 WebSocket | `ws://127.0.0.1:6199/ws` | 云团监听，NapCat 的 Websockets 客户端主动连接。 |
 | NapCat WebUI | `http://127.0.0.1:6099/webui` | NapCat 自身的管理面板，以实际部署配置为准。 |
 | 前端开发服务 | `http://127.0.0.1:5173/` | 在 `webui-frontend/` 中执行 `npm run dev`，仅用于前端开发。 |
 
 管理面板和 OneBot 接口不要直接暴露到公网。需要远程访问时，使用受控网络或带 TLS 与访问控制的反向代理，并在开放访问前完成管理员密码和 Token 配置。插件、MCP 与开发沙箱可能访问外部服务或执行操作，仅启用你信任且确有需要的能力。
 
-更新攸宁服务时应保留现有数据库、配置、插件状态和 NapCat 登录数据；不要为了更新攸宁而顺带重建或重启 NapCat。
+更新云团服务时应保留现有数据库、配置、插件状态和 NapCat 登录数据；不要为了更新云团而顺带重建或重启 NapCat。
 
 ### 忘记管理员密码
 
-先停止攸宁，备份实际数据目录，再仅清除管理员密码哈希：
+先停止云团，备份实际数据目录，再仅清除管理员密码哈希：
 
 ```bash
 sqlite3 data/yuantuan.db "DELETE FROM state_kv WHERE key='admin_pass_hash';"
@@ -324,12 +326,14 @@ CI 还包含表情库、关系图谱、记忆库、任务控制和模型配置�
 
 ## 修订记录
 
+- 2026-11-16：项目名由「攸宁」恢复为 **Yuntuan（云团）**；更新仓库徽章、下载与克隆链接，并说明与独立项目 `yuantuan` 的区别，保留历史 Cargo / 二进制 / 数据库名称以保障兼容。
+
 - 2026-11-08：普通群聊改为 30 秒增量判断，与 @/私聊即时入口分离；同步批次覆盖、失败退避和重启恢复边界。
 - 2026-11-08：同步首页功能、三角色循环图、按需上下文与长期记忆、2 并发任务调度、恢复和投递边界，替换过时的任务说明。
 
 - 2026-11-04：将功能文档按模块拆分为层级目录，增加模块 README 与功能变更同步校验。
 - 2026-11-04：新增功能—代码—测试索引入口及持续同步检查，明确未实现知识库和多模态识图边界。
 - 2026-10-26：新增 Agent 架构概览、流程图与源码入口，说明三角色分工、对话与任务双路径、上下文和记忆、扩展机制、任务执行限制及当前实现边界。
-- 2026-10-26：项目首页更名为「攸宁 · Youning」，明确个人智能助手定位，区分当前能力与未来方向；更新仓库链接与安装说明，保留兼容现有程序和数据的名称。
+- 2026-10-26：当时项目首页更名为「攸宁 · Youning」，明确个人智能助手定位，区分当前能力与未来方向；更新仓库链接与安装说明，保留兼容现有程序和数据的名称。
 
 普通群聊按30秒增量判断，@即时处理；补发单独@会结合同一人最近未答问题，连续文字追问不再误套主动插话门槛。上下文来源、已答去重与执行边界见[会话调度](docs/features/core/conversation.md)。
