@@ -12,6 +12,8 @@ use std::{
     },
     time::{SystemTime, UNIX_EPOCH},
 };
+/// Administrator onboarding; never registered as a model tool.
+pub mod auth;
 mod process;
 use yuantuan_plugin_api::*;
 

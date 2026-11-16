@@ -349,7 +349,10 @@ async fn start() -> Rig {
     let mut extras = Extras::for_test(cfg_path, prov_path);
     extras.plugin_manager = Some(
         yuantuan_core::plugins::PluginManager::load(
-            vec![yuantuan_plugin_moderator::plugin()],
+            vec![
+                yuantuan_plugin_moderator::plugin(),
+                yuantuan_plugin_quark_drive::plugin(),
+            ],
             dir.clone(),
             dir.join("plugin-sources"),
             extras.tools_registry.clone(),
@@ -987,4 +990,144 @@ async fn connector_probe_reports_account_owner_changes_as_requiring_restart() {
         .any(|v| v
             .as_str()
             .is_some_and(|s| s.contains("security.super_admin_qq"))));
+}
+
+#[tokio::test]
+async fn connector_auth_private_quark_onboarding_persists_settings_without_leaking_callback() {
+    let rig = start().await;
+    let path = rig
+        .db_path
+        .parent()
+        .unwrap()
+        .join("connectors/fixture/scripts/quark-drive.cjs");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path,r#"
+const fs=require('fs'),args=process.argv.slice(2);
+const done=(code,msg)=>{console.log(JSON.stringify({type:'result',code,msg}));process.exit(code===0?0:1)};
+if(args[0]==='get-user-info') done(fs.existsSync('authorized')?0:-1408,'private fixture');
+if(args.includes('--token')) {fs.writeFileSync('authorized','fixture');done(0,'ok')}
+done(-123,'[前往授权]https://pan.quark.cn/oauth?client_id=official&page_code=opaque');
+"#).unwrap();
+    let unauth = rig
+        .http
+        .post(format!("{}/api/plugins/auth/quark-drive", rig.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unauth.status().as_u16(), 401);
+    assert_eq!(
+        rig.post("/api/plugins/auth/not-a-plugin", json!({}))
+            .await
+            .0,
+        400
+    );
+    let (_, catalog) = rig.get("/api/plugins/list").await;
+    let mut settings = catalog["plugins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "quark-drive")
+        .unwrap()["settings"]
+        .clone();
+    settings["config"]["cli_script"] = json!(path);
+    settings["allowed_chats"] = json!(["group:42"]);
+    settings["timeout_ms"] = json!(23456);
+    assert_eq!(
+        rig.post(
+            "/api/plugins/config",
+            json!({"name":"quark-drive","settings":settings})
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(
+        rig.post("/api/plugins/auth/quark-drive", json!({})).await.0,
+        200
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let (_, status) = rig.get("/api/plugins/auth/quark-drive").await;
+        if status["phase"] == "waiting" {
+            assert!(status["authorization_url"]
+                .as_str()
+                .unwrap()
+                .starts_with("https://pan.quark.cn/"));
+            break;
+        }
+        assert!(Instant::now() < deadline, "{status}");
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    let login: Value = rig
+        .http
+        .post(format!("{}/api/auth/login", rig.base))
+        .json(&json!({"password":"pw"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let other = rig
+        .http
+        .post(format!(
+            "{}/api/plugins/auth/quark-drive/complete",
+            rig.base
+        ))
+        .bearer_auth(login["token"].as_str().unwrap())
+        .json(&json!({"value":"private-code"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(other.status().as_u16(), 400);
+    assert_eq!(
+        rig.post(
+            "/api/plugins/auth/quark-drive/complete",
+            json!({"value":"https://localhost/?state=missing"})
+        )
+        .await
+        .0,
+        400
+    );
+    assert_eq!(
+        rig.post(
+            "/api/plugins/auth/quark-drive/complete",
+            json!({"value":"https://localhost/?code=private-code"})
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(
+        rig.post(
+            "/api/plugins/auth/quark-drive/complete",
+            json!({"value":"private-code"})
+        )
+        .await
+        .0,
+        400
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let (_, status) = rig.get("/api/plugins/auth/quark-drive").await;
+        assert!(!status.to_string().contains("private-code"));
+        if status["phase"] == "connected" {
+            assert!(status["authorization_url"].is_null());
+            break;
+        }
+        assert!(Instant::now() < deadline, "{status}");
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    let (_, catalog) = rig.get("/api/plugins/list").await;
+    let plugin = catalog["plugins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "quark-drive")
+        .unwrap();
+    assert_eq!(plugin["enabled"], true);
+    assert_eq!(plugin["loaded"], true);
+    assert_eq!(plugin["settings"]["allowed_chats"], json!(["group:42"]));
+    assert_eq!(plugin["settings"]["timeout_ms"], 23456);
+    assert_eq!(plugin["settings"]["config"]["allow_share_creation"], false);
 }

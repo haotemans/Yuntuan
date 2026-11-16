@@ -80,3 +80,12 @@ Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统
 
 
 服务插件的展示名采用与采薇、采苓、敬之、琼华一致的两字雅名：子衿（腾讯文档）、卷耳（夸克网盘）、鹿鸣（QQ空间）。卡片和详情页均读取宿主 display_name，副标题说明平台及用途；内部注册 ID、配置和权限不随显示名更换。现有插件页面回归沿真实显示名检查跳转、配置与调用入口。
+
+
+## 账号连接向导
+
+[`ConnectorAuth.vue`](../../../webui-frontend/src/components/ConnectorAuth.vue) 和 [`connector_auth.rs`](../../../crates/webui/src/connector_auth.rs) 提供独立于聊天工具的管理员连接向导：`GET/POST /api/plugins/auth/{name}` 查询/发起，`POST .../complete` 私密回填。仅接受 `quark-drive`、`tencent-docs` 且必须已编译注册，沿用全部 API 的 Bearer 会话检查；无公共授权回调、任意命令或任意远端地址入口。
+
+每插件仅一项有界后台操作，等待流程绑定发起会话并在10分钟后失效。状态仅返回阶段、经过限制的官方授权链接和脱敏结果；不返回凭据、CLI 原始输出或授权码。配置变更使用 PluginManager 同一更新锁内的字段补丁：不根据掩码目录重建设置，保留旧密钥、会话范围和限额，拒绝未知配置键，授权成功才启用。该入口本身不发 QQ 消息、不扩大群成员权限；现有聊天/Agent 执行仍检查超级管理员和能力范围。
+
+卷耳的组件与 OAuth 细节见[夸克文档](plugins/quark-drive.md)，子衿的个人 Token 细节见[腾讯文档](plugins/tencent-docs.md)。自动化覆盖 Node fixture、真实 WebUI 认证/回填/防重复及前端模拟流程；没有真实账号同意时不声称实服连接成功。

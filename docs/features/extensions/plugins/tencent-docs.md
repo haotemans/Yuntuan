@@ -17,7 +17,9 @@
 
 固定端点 `https://docs.qq.com/openapi/mcp`，Token 通过 `Authorization` 请求头发送；禁止自定义域名、重定向及将凭据放在 URL。配置页 `/plugins/tencent-docs` 复用公共表单与能力权限，新增插件默认关闭。
 
-先在[腾讯文档授权页](https://docs.qq.com/open/auth/mcp.html)获取个人 Token，再选择一种来源：
+配置页的连接向导直接提供[腾讯文档授权页](https://docs.qq.com/open/auth/mcp.html)入口。管理员回填个人 Token，后台先向固定官方端点执行 MCP 初始化和 `tools/list`，成功后保存并启用，保留调用限制、范围和写入开关。此方式明确将 `token_env` 清空，切换到刚回填的 Token；失败不替换原配置，页面不回显 Token。后台单次检查有总超时，不自动重试。腾讯文档目前使用官方个人 Token，不能把它称为已经实现 OAuth 自动回调。
+
+高级配置仍可选择以下来源：
 
 1. 在运行云团的进程/容器设置 `TENCENT_DOCS_TOKEN`，插件 `token_env` 填该变量名。必须把变量实际传入容器，宿主 shell 中存在不等于容器可读取。
 2. `token_env` 留空时，可使用面板的 `token` secret 字段。沿用已有存储与掩码，不声称已引入加密 Vault。

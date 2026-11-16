@@ -90,6 +90,7 @@ pub struct AppState {
     sessions: Arc<Mutex<HashMap<String, Instant>>>,
     pub started: Instant,
     pub extras: Extras,
+    pub(crate) connector_auth: crate::connector_auth::AuthState,
 }
 
 impl AppState {
@@ -105,6 +106,7 @@ impl AppState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             started: Instant::now(),
             extras,
+            connector_auth: Default::default(),
         }
     }
 

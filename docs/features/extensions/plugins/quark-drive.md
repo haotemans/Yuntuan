@@ -17,21 +17,19 @@
 | `quark-drive.updated_files` | `get-share-update-files` | 指定已转存分享的更新文件 |
 | `quark-drive.create_share` | `share` | ExternalWrite，需开启创建分享且仅限私聊 |
 
-Skill 在执行所选工具前复核同名 Tool 的持久开关、会话范围及最终参数；不能绕过宿主。只读与写入各自声明超时和取消策略。白名单不包含删除、自动登录、安装更新、批量修改或异常后自动换链。
+Skill 在执行所选工具前复核同名 Tool 的持久开关、会话范围及最终参数；不能绕过宿主。只读与写入各自声明超时和取消策略。聊天工具白名单不包含删除、自动登录、安装更新、批量修改或异常后自动换链；管理页授权是独立入口。
 
-## Docker 安装与授权
+## 管理页授权与持久配置
 
-配置页 `/plugins/quark-drive` 使用公共表单，`cli_script` 必须是**应用容器内**已存在的 `quark-drive.cjs` 绝对路径；仅填写 Windows/宿主机路径不能使容器访问该文件。新插件默认关闭。
+`/plugins/quark-drive?tab=config` 提供“开始授权登录 → 打开夸克授权页 → 回填跳转链接或授权码 → 保存并连接”。未启用、未填写脚本路径时也能开始。登录和账号同意由管理员本人在夸克官方页面完成；授权入口不是模型 Tool，云团不索取账号密码，也不让群聊代收授权码。
 
-仓库 Docker 运行时提供 Node.js 22。管理员依[官方 Skill](https://github.com/quark-clouddrive/quarkclouddrive_offical)安装并授权，建议把完整官方 Skill 目录放到已持久挂载的 `/app/data/connectors/quark/`，配置示例：
+首次开始时，后台从官方 CDN 下载固定的 Skill 1.0.25，验证 SHA-256 后安全解压到当前持久 data 目录的 `connectors/quark/`。镜像提供 Node.js 22；不执行远程安装 shell、不改系统包、不覆盖已有组件或登录。每包最多8MiB、解压总量32MiB/100项，拒绝路径越界、符号链接及覆盖文件。已有 `cli_script` 则直接复用，不替换自定义安装。组件根目录在 Unix 上设为0700。高级配置仍可指定应用容器内的 `quark-drive.cjs` 绝对路径。
 
-```text
-/app/data/connectors/quark/scripts/quark-drive.cjs
-```
+官方 CLI `login` 生成实际 OAuth 链接；后台仅提取官方 HTTPS `quark.cn` 域链接，不编造 client_id 或 redirect_uri。无桌面容器不能接收浏览器跳转时，管理员把完整跳转链接中的唯一 `code`/`agent_auth_code`（或授权页显示的裸码）粘贴回管理页。回填链接仅在本地解析，不请求其地址；目前不实现自动公开回调端点。链接仍受官方有效期约束，本地流程最多保留10分钟，刷新可恢复同一管理会话，云团重启后须重新开始。
 
-安装、登录须在云团容器的实际运行用户下操作，保证 CLI、其 `config.json`/OAuth 文件及查询输出目录可写并随 data 持久保存；不可仅在宿主机或另一用户下登录后假定容器已授权。浏览器回调无法到达容器时，依[官方授权说明](https://github.com/quark-clouddrive/quarkclouddrive_offical/blob/main/skills/quarkclouddrive/references/auth.md)完成管理员授权，不把授权码或 Token 发到群聊。插件不在聊天请求中静默执行安装脚本或自动登录。
+授权准备、回填及检查在后台执行，管理页轮询进度；每插件只允许一项操作，流程绑定当前 WebUI 登录会话。回填码使用一次，不因失败自动重试；官方 `-118` 已授权状态通过 `get-user-info` 复核后复用。成功检查后原子写入脚本路径并启用插件，保留会话范围、调用限制及分享开关。官方凭据由 CLI 保存于持久安装目录，不回显到接口、日志或模型。
 
-保存、启用后点“检查连接”，通过已注册 `quark-drive.account` 实际调用 CLI；未安装 Node、路径错误或未授权会失败。检查身份为 `private:plugin-check`，受限会话范围需明确允许。Node 运行时烟测只证明镜像内可以执行 Node，不证明官方 CLI 已安装或账号可用。
+之后可在高级配置点击“检查连接”，通过已注册 `quark-drive.account` 执行只读检查；此探针还受 `private:plugin-check` 与持久能力开关限制。授权向导仅核实账号并保存连接，不证明具体文件或分享已读取，也不扩大聊天调用权限。
 
 ## 调用、输出和状态
 
@@ -53,9 +51,11 @@ stdout/stderr 分别有界（256KB/16KB），总执行100秒，超时/输出过�
 
 - [`plugins/quark-drive/src/lib.rs`](../../../../plugins/quark-drive/src/lib.rs)：配置、工具白名单、Schema、共享 Skill/Tool 权限和参数构造。
 - [`plugins/quark-drive/src/process.rs`](../../../../plugins/quark-drive/src/process.rs)：有界进程、NDJSON 和受限 JSONL 读取。
+- [`plugins/quark-drive/src/auth.rs`](../../../../plugins/quark-drive/src/auth.rs)：固定组件安装、OAuth 链接提取及回填；[`auth/tests.rs`](../../../../plugins/quark-drive/src/auth/tests.rs) 使用 Node fixture 验证非零退出、授权码、已有登录和解压边界。
 - [`plugins/quark-drive/src/tests.rs`](../../../../plugins/quark-drive/src/tests.rs)：真实 Node fixture 验证 argv 不经 shell、会话复用、能力停用不执行、结果文件/notice/敏感字段与无效分享输入。
 - [`crates/core/src/scheduler.rs`](../../../../crates/core/src/scheduler.rs)：内含真实 SQLite + fake Tool 的持久、权限、租约和失败状态回归。
 - [`webui-frontend/tests/plugins-flow.spec.js`](../../../../webui-frontend/tests/plugins-flow.spec.js)：独立配置、连接检查和分享守护 API 流程。
+- [`crates/webui/tests/pages_api.rs`](../../../../crates/webui/tests/pages_api.rs)：真实管理页会话、授权回填、重复提交和原配置保留（使用 Node fixture，非真实夸克账号）。
 
 验证命令：`cargo test -p yuantuan-plugin-quark-drive`；实际账号及服务器行为另行验收，不由绿色构建代替。
 

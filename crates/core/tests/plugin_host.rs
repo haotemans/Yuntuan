@@ -71,6 +71,57 @@ struct TestTool {
     name: &'static str,
     greeting: String,
 }
+
+#[tokio::test]
+async fn onboarding_patch_preserves_secrets_scopes_limits_and_rejects_unknown_keys() {
+    let f = Fixture::new();
+    let original = PluginSettings {
+        enabled: false,
+        allowed_chats: Some(vec!["group:42".into()]),
+        timeout_ms: 9876,
+        max_concurrency: 2,
+        config: json!({"secret":"kept-private"}),
+        ..Default::default()
+    };
+    f.settings("one", original.clone());
+    let host = f
+        .load(
+            vec![plugin("one", "one.tool")],
+            Registry::new(),
+            SkillRegistry::new(),
+        )
+        .await;
+    host.patch_config("one", serde_json::Map::new(), Some(true))
+        .await
+        .unwrap();
+    let saved: PluginSettings =
+        serde_json::from_slice(&std::fs::read(f.root.join("plugins/one/settings.json")).unwrap())
+            .unwrap();
+    assert!(saved.enabled);
+    assert_eq!(saved.allowed_chats, original.allowed_chats);
+    assert_eq!(saved.timeout_ms, 9876);
+    assert_eq!(saved.max_concurrency, 2);
+    assert_eq!(saved.config["secret"], "kept-private");
+    assert!(!host.list()[0].to_string().contains("kept-private"));
+    assert!(host
+        .patch_config(
+            "one",
+            json!({"unknown":"bad"}).as_object().unwrap().clone(),
+            None
+        )
+        .await
+        .is_err());
+    // Invalid patch releases the update guard and leaves settings unchanged.
+    host.patch_config(
+        "one",
+        json!({"secret":"changed"}).as_object().unwrap().clone(),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(host.list()[0]["enabled"], true);
+    host.shutdown().await;
+}
 #[async_trait]
 impl Tool for TestTool {
     fn name(&self) -> &'static str {

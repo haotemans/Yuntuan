@@ -14,6 +14,17 @@ async fn bounded<R: AsyncRead + Unpin>(reader: R, limit: u64) -> Result<Vec<u8>>
     Ok(bytes)
 }
 pub(super) async fn run(script: &Path, args: &[String]) -> Result<Value> {
+    let (success, out) = capture(script, args).await?;
+    ensure!(success, "夸克 CLI 非正常退出，请检查官方安装和授权");
+    let root = script
+        .parent()
+        .and_then(Path::parent)
+        .context("官方 CLI 目录无效")?;
+    parse_output(root, &out).await
+}
+
+/// Auth inspects business codes even on nonzero exits. Raw output stays private.
+pub(super) async fn capture(script: &Path, args: &[String]) -> Result<(bool, Vec<u8>)> {
     let root = script
         .parent()
         .and_then(Path::parent)
@@ -36,11 +47,7 @@ pub(super) async fn run(script: &Path, args: &[String]) -> Result<Value> {
             tokio::try_join!(bounded(stdout, 256_000), bounded(stderr, 16_000), async {
                 child.wait().await.map_err(anyhow::Error::from)
             })?;
-        ensure!(
-            status.success(),
-            "夸克 CLI 非正常退出，请检查官方安装和授权"
-        );
-        parse_output(root, &out).await
+        Ok((status.success(), out))
     };
     tokio::time::timeout(Duration::from_secs(100), work)
         .await
