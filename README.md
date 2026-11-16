@@ -162,6 +162,14 @@ Docker 开发沙箱是可选工具能力，默认关闭，配置见[开发沙箱
 
 本节与 [ADR-0012](docs/adr/0012-context-memory-task-runtime.md) 及[功能主文档](docs/features/README.md)保持对应。自动化测试覆盖 mock 模型、SQLite 状态与浏览器交互；真实模型归纳质量、QQ 媒体投递和部署配置仍需在目标环境验收。后续设计与当前实现边界分别记录在 [docs/README.md](docs/README.md) 的对应入口。
 
+## 扩展：定时任务与云端 Skills（实验阶段）
+
+- **知时（scheduler）**：为 Agent 新增持久化定时任务 Tool，可创建一次任务、按固定 24 小时/7 天间隔重复执行，查看、暂停、继续与取消。后台使用现有 Agent 任务队列，结果默认私聊创建者。插件默认关闭，当前代码尚需 Rust CI 与 QQ 实测；仅提供 LLM 自身或经明确许可的 AnySearch 只读查询，不支持任意自动写入操作。详见[功能契约](docs/features/extensions/plugins/scheduler.md)。
+- **腾讯文档 Skill**：[规范](skills/tencent-docs/SKILL.md)。采用腾讯文档官方 MCP 与凭证授权；远程 MCP 适配器尚未完成，不能仅凭 SKILL.md 就读取或写入文档。
+- **夸克网盘 Skill**：[规范](skills/quark-drive/SKILL.md)。以夸克官方 CLI/Skill 为基础；仍需受控进程执行器、平台兼容性与授权测试，尚未实现真实文件操作。
+
+[Skills 总入口](skills/README.md) · [执行桥接设计](docs/design/skill-execution-bridge.md) · [定时任务后续规划](docs/design/scheduled-tasks-plugin.md)
+
 ## 接下来想走的方向
 
 以下是演进方向，不代表当前版本已经完整支持。
