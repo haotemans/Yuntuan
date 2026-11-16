@@ -39,10 +39,10 @@
             <section class="panel">
               <h2>连接与授权</h2>
               <p v-if="detail.name === 'tencent-docs'">使用腾讯文档官方 MCP。先获取个人 Token，再到「连接配置」填写。开启插件不代表已完成远端联通测试。</p>
-              <p v-else-if="detail.name === 'quark-drive'">在 Linux / WSL 中安装并登录夸克官方 Skill CLI，填写 quark-drive.cjs 的绝对路径。OAuth 凭据保留在官方 CLI 中，不存储到云团 Skill。</p>
+              <p v-else-if="detail.name === 'quark-drive'">在云团应用容器或进程内安装、授权官方 CLI，填写容器内 quark-drive.cjs 的绝对路径。脚本和 OAuth 配置应放在持久 data 目录。</p>
+              <p v-else-if="detail.name === 'qzone'">使用 NapCat 当前登录的 QQ 账号，无需另填 Cookie。仅云团超级管理员可发布；默认可见范围和每日额度可在连接配置中调整。</p>
               <p v-else>使用云团现有插件配置、权限和调用状态管理。</p>
               <a v-if="officialUrl" :href="officialUrl" target="_blank" rel="noopener noreferrer" class="official-link">查看官方授权及安装说明 ↗</a>
-              <p class="connection-tip">云团提供统一宿主和会话权限；插件只负责具体服务连接。</p>
             </section>
           </div>
         </n-tab-pane>
@@ -57,7 +57,7 @@
                 <div v-else class="field-input">
                   <n-input v-model:value="configDraft[field.key]" :type="field.secret ? 'password' : 'text'"
                     :placeholder="field.secret ? (field.has_value ? '已保存，留空保持不变' : '尚未配置') : ''"
-                    :autocomplete="field.secret ? 'off' : 'on'" :aria-label="field.label" />
+                    :autocomplete="field.secret ? 'off' : 'on'" :input-props="{'aria-label':field.label}" />
                   <div v-if="field.secret" class="field-help">
                     {{ field.has_value ? '密钥已保存（不显示明文）' : '尚未设置密钥' }}
                     <n-checkbox v-if="field.has_value" v-model:checked="clearSecrets[field.key]">清除密钥</n-checkbox>
@@ -76,20 +76,28 @@
             </n-form>
             <div class="settings-actions">
               <span aria-live="polite">{{ saved }}</span>
+              <n-button v-if="['tencent-docs','quark-drive'].includes(detail.name)" :loading="checkingConnection" :disabled="busy || checkingConnection || formDirty || !detail.loaded || !detail.enabled || detail.updating" @click="checkConnection">检查连接</n-button>
               <n-button :disabled="busy || detail.updating || !formDirty" @click="resetDraft(detail)">撤销修改</n-button>
               <n-button type="primary" :loading="busy" :disabled="busy || detail.updating || !formDirty" @click="saveConfig">保存并应用</n-button>
             </div>
+            <n-alert v-if="connectionResult" :type="connectionFailed ? 'error' : 'success'" :bordered="false" class="connection-result">{{ connectionResult }}</n-alert>
           </section>
         </n-tab-pane>
         <n-tab-pane name="skills" tab="Skills / Tools">
           <section class="panel">
-            <h2>已注册能力</h2><p>以下能力共享云团统一权限和调用记录；禁用后聊天与命令入口都会受到限制。</p>
+            <h2>已注册能力</h2><p>管理技能与工具的启用状态和适用范围。</p>
             <div v-for="skill in detail.skills || []" :key="skill.name" class="capability">
               <div><code>{{ skill.name }}</code><p>{{ skill.description }}</p><small>{{ (skill.commands || []).join(' · ') || '自然语言调用' }}</small></div>
               <n-switch :value="capabilityEnabled(skill.name,'skill')" :disabled="busy || !capability(skill.name,'skill')" :aria-label="`技能 ${skill.name}`" @update:value="value => toggleCapability(skill.name,'skill',value)" />
             </div>
             <div v-for="tool in detail.tools || []" :key="tool.name" class="capability">
-              <div><code>{{ tool.name }}</code><p>{{ tool.description }}</p><small>Tool · 共享统一执行器</small></div>
+              <div><code>{{ tool.name }}</code><p>{{ tool.description }}</p><small>Tool · 累计调用 {{ capability(tool.name,'tool')?.calls || 0 }} 次</small>
+                <details v-if="capability(tool.name,'tool')?.tool_contract" class="tool-contract">
+                  <summary>调用参数</summary>
+                  <pre class="tool-schema">{{ JSON.stringify(capability(tool.name,'tool').tool_contract.input_schema,null,2) }}</pre>
+                  <small>{{ capability(tool.name,'tool').tool_contract.policy?.effect || 'unknown' }} · {{ capability(tool.name,'tool').tool_contract.policy?.timeout_ms || 0 }} ms</small>
+                </details>
+              </div>
               <n-switch :value="capabilityEnabled(tool.name,'tool')" :disabled="busy || !capability(tool.name,'tool')" :aria-label="`工具 ${tool.name}`" @update:value="value => toggleCapability(tool.name,'tool',value)" />
             </div>
             <p v-if="!detail.skills?.length && !detail.tools?.length">启用插件并完成配置后，将在这里看到工具和 Skill。</p>
@@ -139,7 +147,7 @@
         </n-tab-pane>
       </n-tabs>
     </template>
-    <n-empty v-else-if="!loadError" description="该插件不存在或未编译安装" />
+    <EmptyState v-else-if="!loadError" title="该插件不存在或未编译安装" />
   </div>
 </template>
 
@@ -149,6 +157,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import { pluginDuration } from '../plugin-ui'
+import EmptyState from '../components/EmptyState.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -160,6 +169,23 @@ const busy = ref(false)
 const loadError = ref('')
 const actionError = ref('')
 const saved = ref('')
+const checkingConnection = ref(false)
+const connectionResult = ref('')
+const connectionFailed = ref(false)
+async function checkConnection() {
+  if (checkingConnection.value || !detail.value || formDirty.value) return
+  checkingConnection.value = true
+  connectionResult.value = ''
+  try {
+    const {data} = await api.post('/plugins/connection/check',{name:detail.value.name})
+    connectionResult.value = data.summary || '连接检查已完成'
+    connectionFailed.value = false
+  } catch(e) {
+    connectionResult.value = e.response?.data?.error || '连接失败，请检查安装、授权、网络及调用范围'
+    connectionFailed.value = true
+  } finally { checkingConnection.value = false }
+}
+
 const watches = ref([])
 const watchTitle = ref('')
 const watchUrl = ref('')
@@ -272,7 +298,7 @@ async function load() {
     if (!disposed) loadError.value=e.response?.data?.error || '无法获取插件详情'
   } finally { loading.value=false; fetching=false }
 }
-watch(() => route.params.name, () => {baseline.value='';void load()})
+watch(() => route.params.name, () => {baseline.value='';connectionResult.value='';void load()})
 watch(activeTab, tab => { router.replace({query:{...route.query,tab}}); if (tab === 'links') void loadWatches() })
 async function saveConfig() {
   const plugin=detail.value
@@ -318,6 +344,7 @@ onUnmounted(() => {disposed=true;clearTimeout(timer)})
 </script>
 
 <style scoped>
+.connection-result {white-space:pre-wrap;overflow-wrap:anywhere}
 .plugin-settings {max-width:1180px;margin:0 auto;padding-bottom:58px}
 .topbar {display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}
 .eyebrow {font-size:11px;letter-spacing:.13em;color:var(--yt-ink-3)}
@@ -344,6 +371,7 @@ onUnmounted(() => {disposed=true;clearTimeout(timer)})
 .settings-actions {display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:30px}
 .settings-actions span {color:var(--yt-ink-3);font-size:12px;margin-right:auto}
 .capability {display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 0;border-bottom:1px solid var(--yt-card-border)}
+.tool-contract {margin-top:10px}.tool-contract summary {cursor:pointer;font-size:12px}.tool-schema {white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-width:100%;max-height:320px;overflow:auto}
 .capability code {overflow-wrap:anywhere;color:var(--yt-ink-1)}
 .capability p {margin:7px 0}
 .capability small {color:var(--yt-ink-3)}
@@ -358,6 +386,6 @@ onUnmounted(() => {disposed=true;clearTimeout(timer)})
 .watch-info small,.watch-caution,.watch-empty {font-size:12px;color:var(--yt-ink-3);line-height:1.6}
 .watch-actions {display:flex;align-items:center;gap:10px;flex-shrink:0}
 .watch-empty {padding:22px 0}
-@media(max-width:760px) { .watch-form {grid-template-columns:1fr} .watch-item {flex-direction:column} .watch-actions {flex-wrap:wrap} } 
+@media(max-width:760px) { .watch-form {grid-template-columns:1fr} .watch-item {flex-direction:column} .watch-actions {flex-wrap:wrap} }
 @media(max-width:760px) {.plugin-heading{align-items:start;flex-direction:column}.section-grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}.panel{padding:18px}}
 </style>

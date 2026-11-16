@@ -16,3 +16,5 @@ description: Use when the user asks to search their Quark cloud drive, inspect s
 7. 每次执行读写都使用官方 CLI，不允许 Agent 构造 shell 命令。官方 CLI 需要安装、登录授权、手动更新与版本验证；云团不在后台静默运行 install.sh。
 
 官方操作规范见该项目 `skills/quarkclouddrive/SKILL.md` 及 `references/file-search.md`、`file-share.md`，当前插件只支持已显式映射的命令。动态官方更新需重新核对兼容性。
+
+搜索和更新查询必须保留list/file及安全JSONL预览，items_truncated为true时不能声称完整展示。私有Token/Cookie不作为结果传递。分享回执未确认时先核对，不自动重发。Docker脚本及OAuth资料位于应用容器持久目录；不把宿主路径误当容器路径。

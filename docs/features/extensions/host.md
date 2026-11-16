@@ -51,16 +51,26 @@ V18在plugin-api的Tool trait追加有默认实现的available_in_chat、policy�
 Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统一工具执行接口)为准。Skill仍保留技能匹配、权限和来源幂等入口，共享ToolOutput，不因接口统一改变其调度职责；管理面板手工MCP诊断仍为已有原始stdio请求，不冒充Agent任务回执。SQLite工具契约仅描述实际注册实现，不凭一条数据库记录生成执行器。
 
 
-工具调用易用性补充：基础Schema检查移到[`schema.rs`](../../../crates/core/src/capabilities/schema.rs)，错误包含JSON Pointer字段路径和期望类型/范围，不回显用户实参。支持type（含类型数组）、required、enum、properties、additionalProperties、items、min/maxItems、min/maxLength及minimum/maximum；递归检查限32层，$ref/组合Schema等完整标准仍不支持，业务校验继续由Tool负责。回归见[`tool_usability.rs`](../../../crates/core/tests/tool_usability.rs)。
+工具调用易用性补充：基础Schema检查移到[`schema.rs`](../../../crates/plugin-api/src/schema.rs)，错误包含JSON Pointer字段路径和期望类型/范围，不回显用户实参。支持type（含类型数组）、required、enum、properties、additionalProperties、items、min/maxItems、min/maxLength及minimum/maximum；递归检查限32层，$ref/组合Schema等完整标准仍不支持，业务校验继续由Tool负责。回归见[`tool_usability.rs`](../../../crates/core/tests/tool_usability.rs)。
 
 插件页“调用状态→能力与存储信息”增加Tool独立开关、持久调用计数与折叠输入Schema；同名Skill和Tool按kind分别控制。切换任一能力都携带原scopes，避免开关操作清空会话范围。这里只开关已注册实现，不绕过插件总开关、业务权限或底层依赖。浏览器回归[`plugins-flow.spec.js`](../../../webui-frontend/tests/plugins-flow.spec.js)验证Tool/Skill独立、范围保留及参数查看，加入Linux前端CI。
 
 
-## 独立插件详情页面与官方 Skill 配合
+## 独立配置页与共享执行权限
 
-管理端现以 `/plugins/:name` 提供插件独立页面，包含概览、连接配置、Skills/Tools 和运行状态。页面仍复用 `/api/plugins/list`、`/api/plugins/config`、`/api/plugins/toggle` 与 `/api/capabilities`，没有新增插件专用配置数据库或上传式动态安装。
+插件中心导航到 `/plugins/:name`，通用 [`PluginSettings.vue`](../../../webui-frontend/src/views/PluginSettings.vue) 承载概览、配置、Skills/Tools和运行状态；不为每个插件复制表单、启停或授权存储。保留工具参数契约、各类型独立开关、原会话范围及调用数；加载状态不等于账号连通或写入成功。页面来自同仓库独立插件页公共实现，新增插件由真实编译目录提供元数据，没有安装的服务不伪造为可用。
 
-首批服务连接见 [腾讯文档](plugins/tencent-docs.md) 和 [夸克网盘](plugins/quark-drive.md)。两者只把官方能力包装成 Tool / Skill；宿主统一做会话范围、参数门控和日志。当前原生 Plugin 是编译期依赖，`SKILL.md` 被编译为使用说明而不是可在生产中从外部目录任意安装的 Skill 包。
+`HostServices::authorize_tool_for_skill` 核验本插件已注册 Tool、可用性、SQLite 持久开关、类型化会话范围和最终参数，随后 Skill 委托共享业务连接器；不递归进入同插件 Tool Gate，以免单并发死锁。QQ空间在每个实际操作前采用此入口。它是可复用的委托接口，不是加载任意SKILL.md就能获得执行权。
+
+`Skill::accepts_empty_command` 默认false；状态/列表类 Skill 可显式声明接受无参命令，宿主包装透传此标记。它只解除公共空参数提示，Skill/Tool权限与业务校验仍执行。SDK共享QQ空间动作见 [`qzone.rs`](../../../crates/plugin-api/src/qzone.rs)；仅qzone插件获得对应宿主服务，账号发布边界由适配器核验，详见[QQ空间](plugins/qzone.md)。
+
+回归见 [`qzone_host.rs`](../../../crates/core/tests/qzone_host.rs)、[`plugins-flow.spec.js`](../../../webui-frontend/tests/plugins-flow.spec.js) 与会话命令测试。独立页面的只读运行统计继续沿用原接口，不声明为完整的历史审计库；QQ空间发布的持久回执由该插件复用宿主数据服务保存。
 
 
-为了避免 Skill 直接调用共享 Connector 时绕过 Tool 开关，V20 新增 `HostServices::authorize_tool_for_skill(ctx,name,args)`：宿主校验该 Tool 属于当前插件、确实在 Registry 注册、对会话开放，并复用已有持久 `capabilities::check_tool` 对启停、作用域及 JSON 参数做检查。Skill 只能在授权通过后调用对应连接器；避免重入 HostedTool 导致单并发插件死锁。此检查是预执行门控，外部调用仍由插件自身负责写权限与平台返回验证。
+## 服务连接检查与共享 Schema
+
+腾讯文档、夸克与QQ空间复用上述页面及授权入口，分别见[腾讯文档](plugins/tencent-docs.md)、[夸克](plugins/quark-drive.md)和[QQ空间](plugins/qzone.md)。通用操作契约是源码内注册的 Skill，外部 SKILL.md 不会自行变成执行器。
+
+新增认证接口 `POST /api/plugins/connection/check {name}` 只允许腾讯文档 catalog、夸克 account 两个已注册只读探针。它通过原 ToolRegistry、HostedTool、SQLite 能力开关及参数验证后调用连接器，使用明确系统域 `private:plugin-check`；没有伪装成群成员绕开会话范围，也不把加载成功当作账号连接成功。页面有未保存更改时不能检查旧配置。验证见 [`pages_api.rs`](../../../crates/webui/tests/pages_api.rs) 及上述浏览器测试。
+
+公共 Schema 校验器已移入 `crates/plugin-api/src/schema.rs`，通过 `validate_tool_arguments` 提供给宿主和连接器；原 `yuantuan_core::capabilities::validate` 继续重导出，保留旧调用接口。仍只支持本页列出的有界子集，完整远端 Schema 由服务端校验，不另加一个不一致的实现。

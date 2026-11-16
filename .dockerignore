@@ -15,3 +15,6 @@ docs/
 Dockerfile
 .dockerignore
 deploy/
+
+# Compiled plugin operation contracts are Rust include_str! inputs.
+!plugins/**/SKILL.md

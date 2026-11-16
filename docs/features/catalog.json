@@ -177,14 +177,16 @@
         "webui-frontend/src/views/Plugins.vue",
         "crates/plugin-api/src/membership.rs",
         "crates/core/src/capabilities.rs",
-        "crates/core/src/capabilities/schema.rs",
+        "crates/plugin-api/src/schema.rs",
+        "crates/plugin-api/src/qzone.rs",
         "webui-frontend/src/views/PluginSettings.vue"
       ],
       "tests": [
         "crates/core/tests/plugin_host.rs",
         "crates/core/tests/plugin_attachments.rs",
         "crates/core/tests/tool_usability.rs",
-        "webui-frontend/tests/plugins-flow.spec.js"
+        "webui-frontend/tests/plugins-flow.spec.js",
+        "crates/core/tests/qzone_host.rs"
       ],
       "module": "extensions"
     },
@@ -406,6 +408,27 @@
       "module": "extensions/plugins"
     },
     {
+      "id": "qzone",
+      "title": "QQ空间说说发布与回执",
+      "status": "代码入口已实现（需真实QQ空间发布验收）",
+      "doc": "docs/features/extensions/plugins/qzone.md",
+      "source": [
+        "plugins/qzone/src/lib.rs",
+        "plugins/qzone/src/publisher.rs",
+        "plugins/qzone/src/tools.rs",
+        "crates/core/src/plugins/qzone.rs",
+        "crates/adapter-qq/src/qzone.rs"
+      ],
+      "tests": [
+        "plugins/qzone/src/tests.rs",
+        "crates/core/tests/qzone_host.rs",
+        "crates/core/src/plugins/qzone.rs",
+        "crates/adapter-qq/src/qzone.rs",
+        "webui-frontend/tests/plugins-flow.spec.js"
+      ],
+      "module": "extensions/plugins"
+    },
+    {
       "id": "plugin-tencent-docs",
       "title": "腾讯文档：官方 MCP",
       "status": "已新增接入代码（真实授权与网络验证待完成）",
@@ -413,7 +436,12 @@
       "source": [
         "plugins/tencent-docs/src/lib.rs"
       ],
-      "tests": [],
+      "tests": [
+        "plugins/tencent-docs/src/tests.rs",
+        "crates/mcp-http/src/tests.rs",
+        "webui-frontend/tests/plugins-flow.spec.js",
+        "crates/webui/tests/pages_api.rs"
+      ],
       "module": "extensions/plugins"
     },
     {
@@ -422,9 +450,14 @@
       "status": "已新增 CLI 适配（真实 OAuth 与网盘验证待完成）",
       "doc": "docs/features/extensions/plugins/quark-drive.md",
       "source": [
-        "plugins/quark-drive/src/lib.rs"
+        "plugins/quark-drive/src/lib.rs",
+        "plugins/quark-drive/src/process.rs"
       ],
-      "tests": [],
+      "tests": [
+        "plugins/quark-drive/src/tests.rs",
+        "webui-frontend/tests/plugins-flow.spec.js",
+        "crates/core/src/scheduler.rs"
+      ],
       "module": "extensions/plugins"
     },
     {
@@ -438,7 +471,8 @@
       ],
       "tests": [
         "crates/core/tests/sqlx_storage.rs",
-        "webui-frontend/tests/plugins-flow.spec.js"
+        "webui-frontend/tests/plugins-flow.spec.js",
+        "crates/core/src/scheduler.rs"
       ],
       "module": "core"
     }

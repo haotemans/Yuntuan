@@ -84,13 +84,10 @@ cargo check -p yuantuan --no-default-features
 
 视频与图文示例见 [social-media](social-media/README.md)，当前为实验性平台适配。
 
-## 官方服务插件
+## 服务插件与公共页面
 
-- [腾讯文档](tencent-docs/README.md)：官方 Streamable HTTP MCP，Token 授权，Tool + Skill 共用通道。
-- [夸克网盘](quark-drive/README.md)：官方 CLI + OAuth，受限 argv 白名单，Tool + Skill 共用通道。
+- [腾讯文档](../docs/features/extensions/plugins/tencent-docs.md)：官方 HTTP MCP。
+- [夸克网盘](../docs/features/extensions/plugins/quark-drive.md)：官方 CLI、OAuth 及核心每日只读调度。
+- [QQ空间](../docs/features/extensions/plugins/qzone.md)：现有 NapCat 登录与发布回执。
 
-安装新插件依然需要源码编译。WebUI 每个插件已有独立路由 `/plugins/:name`；所有配置和授权限制复用当前插件宿主，未完成的账户连通性不可显示为通过。
-
-### Skill 与 Tool 复用同一个执行权限
-
-通过 `HostServices::authorize_tool_for_skill(ctx,name,args)` 检查同一插件的工具已注册、启用、当前会话可用、参数有效后，Skill 才可委托共享 Connector。宿主只检查授权，不重入同插件 `HostedTool::call`（插件默认并发 1，递归进入会死锁）。独立工具和 Skill 开关都实际生效；适配器仍负责对应服务副作用的业务级确认。
+每个插件使用 `/plugins/:name` 通用配置页。表单、启停、范围、能力开关和统计复用宿主；只有安装并完成账号授权后才能验证服务连通。Skill 委托前调用 `host.authorize_tool_for_skill(ctx,name,args)`，不递归进入同插件 Tool Gate。无参数查询可显式声明 `accepts_empty_command`；最终参数复用 `validate_tool_arguments`，不自行复制校验器。公共规则和接口见[扩展宿主](../docs/features/extensions/host.md)。

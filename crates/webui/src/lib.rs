@@ -106,6 +106,7 @@ pub async fn serve(db_path: PathBuf, host: &str, port: u16, extras: Extras) -> R
         .route("/api/plugins/list", get(plugins_api::list))
         .route("/api/plugins/toggle", post(plugins_api::toggle))
         .route("/api/plugins/config", post(plugins_api::save_config))
+        .route("/api/plugins/connection/check", post(plugins_api::check_connection))
         .route("/api/plugins/quark/watches", get(schedule_api::list).post(schedule_api::add))
         .route("/api/plugins/quark/watches/{id}", post(schedule_api::toggle).delete(schedule_api::remove))
         .route("/api/plugins/quark/watches/{id}/check", post(schedule_api::check_now))

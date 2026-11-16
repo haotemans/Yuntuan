@@ -269,7 +269,7 @@ async fn v16_upgrade_and_legacy_tasks_keep_existing_data_without_inventing_sourc
         .fetch_one(&mut *c)
         .await
         .unwrap();
-    assert_eq!(version, 19);
+    assert_eq!(version, 20);
 }
 
 #[tokio::test]

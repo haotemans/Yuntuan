@@ -16,6 +16,7 @@ use std::{
 use tokio::sync::{Mutex, Semaphore};
 use yuantuan_plugin_api::*;
 mod invocation;
+mod qzone;
 use invocation::Invocations;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -265,6 +266,9 @@ impl Skill for HostedSkill {
     fn commands(&self) -> &'static [&'static str] {
         self.inner.commands()
     }
+    fn accepts_empty_command(&self) -> bool {
+        self.inner.accepts_empty_command()
+    }
     fn artifact_retention(&self) -> ArtifactRetention {
         self.inner.artifact_retention()
     }
@@ -289,28 +293,53 @@ struct Services {
     policy: PluginSettings,
     io: Mutex<()>,
     moderation: Option<Arc<dyn GroupModeration>>,
+    qzone: Option<Arc<dyn QzoneService>>,
     tools: crate::tools::Registry,
     db_path: PathBuf,
 }
 #[async_trait]
 impl HostServices for Services {
-    async fn authorize_tool_for_skill(&self, ctx: &ToolCtx, name: &str, args: &Value) -> Result<()> {
+    async fn authorize_tool_for_skill(
+        &self,
+        ctx: &ToolCtx,
+        name: &str,
+        args: &Value,
+    ) -> Result<()> {
         if !name.starts_with(&format!("{}.", self.id)) {
             bail!("Skill 不得调用其他插件的工具");
         }
-        if self.policy.allowed_chats.as_ref().is_some_and(|a| !a.contains(&ctx.chat_id)) {
+        if self
+            .policy
+            .allowed_chats
+            .as_ref()
+            .is_some_and(|a| !a.contains(&ctx.chat_id))
+        {
             bail!("会话不在插件授权范围内");
         }
         let tool = self.tools.get(name).context("Tool 未注册或已经被停用")?;
         if !tool.available_in_chat(ctx) {
             bail!("Tool 在当前会话不可用");
         }
-        crate::capabilities::check_tool(&self.db_path, name, ctx, &tool.parameters_schema(), args).await
+        crate::capabilities::check_tool(&self.db_path, name, ctx, &tool.parameters_schema(), args)
+            .await
+    }
+    async fn qzone(&self, ctx: &ToolCtx, action: QzoneAction) -> Result<Value> {
+        qzone::execute(self, ctx, action).await
     }
     async fn membership(&self, ctx: &ToolCtx, action: MembershipAction) -> Result<Value> {
-        if self.id != "moderator" { bail!("此插件不能管理好友或入群申请"); }
-        self.moderation.as_ref().context("QQ申请审核服务未启用")?
-            .membership(ctx,action,&self.policy.config,self.policy.allowed_chats.as_deref()).await
+        if self.id != "moderator" {
+            bail!("此插件不能管理好友或入群申请");
+        }
+        self.moderation
+            .as_ref()
+            .context("QQ申请审核服务未启用")?
+            .membership(
+                ctx,
+                action,
+                &self.policy.config,
+                self.policy.allowed_chats.as_deref(),
+            )
+            .await
     }
     async fn moderate(&self, ctx: &ToolCtx, action: ModerationAction) -> Result<()> {
         if self
@@ -452,6 +481,7 @@ pub struct PluginManager {
     stopped: AtomicBool,
     llm: crate::bot::SharedLlm,
     moderation: Option<Arc<dyn GroupModeration>>,
+    qzone: Option<Arc<dyn QzoneService>>,
     db_path: PathBuf,
 }
 
@@ -500,6 +530,29 @@ impl PluginManager {
         llm: crate::bot::SharedLlm,
         moderation: Option<Arc<dyn GroupModeration>>,
     ) -> Result<Arc<Self>> {
+        Self::load_with_services(
+            plugins,
+            data_root,
+            source_root,
+            tools,
+            skills,
+            llm,
+            moderation,
+            None,
+        )
+        .await
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub async fn load_with_services(
+        plugins: Vec<Arc<dyn Plugin>>,
+        data_root: PathBuf,
+        source_root: PathBuf,
+        tools: crate::tools::Registry,
+        skills: crate::skills::SkillRegistry,
+        llm: crate::bot::SharedLlm,
+        moderation: Option<Arc<dyn GroupModeration>>,
+        qzone: Option<Arc<dyn QzoneService>>,
+    ) -> Result<Arc<Self>> {
         let mut manager = Self {
             entries: BTreeMap::new(),
             tools,
@@ -509,6 +562,7 @@ impl PluginManager {
             stopped: AtomicBool::new(false),
             llm: llm.clone(),
             moderation: moderation.clone(),
+            qzone: qzone.clone(),
             db_path: data_root.join("yuantuan.db"),
         };
         // Validate the complete catalog before starting any plugin.
@@ -572,6 +626,11 @@ impl PluginManager {
                     io: Mutex::new(()),
                     tools: manager.tools.clone(),
                     db_path: manager.db_path.clone(),
+                    qzone: if meta.id == "qzone" {
+                        qzone.clone()
+                    } else {
+                        None
+                    },
                     moderation: if plugin.uses_group_moderation() {
                         moderation.clone()
                     } else {
@@ -939,6 +998,11 @@ impl PluginManager {
             io: Mutex::new(()),
             tools: self.tools.clone(),
             db_path: self.db_path.clone(),
+            qzone: if entry.meta.id == "qzone" {
+                self.qzone.clone()
+            } else {
+                None
+            },
             moderation: if entry.plugin.uses_group_moderation() {
                 self.moderation.clone()
             } else {

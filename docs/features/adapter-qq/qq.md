@@ -39,3 +39,6 @@
 - [`crates/adapter-qq/tests/delayed_delivery.rs`](../../../crates/adapter-qq/tests/delayed_delivery.rs)
 
 维护规则：修改上列源码的功能行为时，同一 PR 更新本页；新增、删除或迁移模块时同步更新 `catalog.json`。测试入口只代表可追踪的验证位置，不代表本次执行通过。
+
+
+QQ空间通过装配层注入受限服务并复用现有NapcatSender，不导出QQ登录凭据。`send_qzone_msg` 使用90秒回执等待，兼容图片数组为字符串的原生接口；普通非媒体动作预算不变。账号、图片和发布回执规则见[QQ空间](../extensions/plugins/qzone.md)，不将QQ连接成功当作说说已经发布。

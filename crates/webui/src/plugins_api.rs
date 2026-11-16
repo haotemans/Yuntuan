@@ -19,6 +19,59 @@ pub async fn list(State(state): State<AppState>) -> Json<Value> {
             .map(|(name, description)| json!({"name":name,"description":description})).collect::<Vec<_>>() }),
     )
 }
+
+/// Administrator-only, read-only connector probes through the normal registered Tool.
+pub async fn check_connection(
+    State(state): State<AppState>,
+    Json(body): Json<ConnectionBody>,
+) -> Result<Json<Value>, ApiError> {
+    use yuantuan_core::{
+        capabilities,
+        tools::{ToolCtx, ToolEffect},
+    };
+    let name = match body.name.as_str() {
+        "tencent-docs" => "tencent-docs.catalog",
+        "quark-drive" => "quark-drive.account",
+        _ => return Err(err("此插件没有注册连接检查")),
+    };
+    let tool = state
+        .extras
+        .tools_registry
+        .get(name)
+        .ok_or_else(|| err("请先保存配置并启用插件"))?;
+    let ctx = ToolCtx {
+        task_id: None,
+        chat_id: "plugin-check".into(),
+        chat_type: "private".into(),
+        sender_pid: "webui".into(),
+        locale: Some("zh-CN".into()),
+    };
+    if tool.policy().effect != ToolEffect::ReadOnly || !tool.available_in_chat(&ctx) {
+        return Err(err("连接检查不在插件允许的只读范围内"));
+    }
+    capabilities::check_tool(
+        &state.db_path,
+        name,
+        &ctx,
+        &tool.parameters_schema(),
+        &json!({}),
+    )
+    .await
+    .map_err(err)?;
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        tool.call(&ctx, json!({})),
+    )
+    .await
+    .map_err(|_| err("连接检查超时，请检查授权与网络"))?
+    .map_err(err)?;
+    Ok(Json(json!({"ok":true,"summary":out.summary})))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectionBody {
+    name: String,
+}
 #[derive(Deserialize)]
 pub struct ToggleBody {
     name: String,

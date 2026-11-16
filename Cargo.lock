@@ -2880,9 +2880,10 @@ dependencies = [
  "yuantuan-plugin-api",
  "yuantuan-plugin-moderator",
  "yuantuan-plugin-nai-image",
+ "yuantuan-plugin-qzone",
  "yuantuan-plugin-quark-drive",
- "yuantuan-plugin-social-media",
  "yuantuan-plugin-tencent-docs",
+ "yuantuan-plugin-social-media",
  "yuantuan-webui",
 ]
 
@@ -2930,16 +2931,7 @@ dependencies = [
  "toml",
  "tracing",
  "yuantuan-plugin-api",
-]
-
-[[package]]
-name = "yuantuan-mcp-http"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "reqwest",
- "serde_json",
- "tokio",
+ "yuantuan-plugin-qzone",
 ]
 
 [[package]]
@@ -2993,12 +2985,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "yuantuan-plugin-quark-drive"
+name = "yuantuan-plugin-qzone"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "yuantuan-plugin-api",
 ]
@@ -3018,18 +3012,6 @@ dependencies = [
  "sm3",
  "tokio",
  "url",
- "yuantuan-plugin-api",
-]
-
-[[package]]
-name = "yuantuan-plugin-tencent-docs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "serde_json",
- "tokio",
- "yuantuan-mcp-http",
  "yuantuan-plugin-api",
 ]
 
@@ -3163,3 +3145,37 @@ checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
 dependencies = [
  "zune-core",
 ]
+
+[[package]]
+name = "yuantuan-mcp-http"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "yuantuan-plugin-quark-drive"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde_json",
+ "tokio",
+ "yuantuan-plugin-api",
+]
+
+[[package]]
+name = "yuantuan-plugin-tencent-docs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde_json",
+ "tokio",
+ "yuantuan-mcp-http",
+ "yuantuan-plugin-api",
+]
+

@@ -3,7 +3,7 @@
     <header class="plugins-header">
       <div>
         <h1>插件</h1>
-        <p>扩展能力统一注册，官方 Skill 与插件工具配合工作。</p>
+        <p>管理插件、技能和工具。</p>
       </div>
       <div class="plugins-summary" aria-live="polite">{{ readyCount }} 个已加载 · {{ plugins.length }} 个已安装</div>
     </header>
@@ -26,7 +26,6 @@
     <div v-else-if="!loadError" class="plugins-empty">
       <EmptyState :title="plugins.length ? '未找到匹配插件' : '暂无已安装插件'" />
     </div>
-    <p v-if="plugins.length" class="footnote">点击插件可进入独立配置页面。账号授权和底层能力由云团统一管理。</p>
   </div>
 </template>
 

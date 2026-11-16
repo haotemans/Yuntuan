@@ -7,8 +7,8 @@
 | 模块 | 负责范围 | 功能文档 |
 | --- | --- | ---: |
 | [QQ 协议适配](adapter-qq/README.md) | OneBot/NapCat 连接、消息接入和发送边界。与核心对话管线解耦。 | 1 |
-| [核心对话与数据](core/README.md) | 消息处理、参与判断、分泡发送、记忆/人格、任务、表情与 SQLite；一份功能文档维护一类行为契约。 | 8 |
-| [扩展能力](extensions/README.md) | Tool、Skill、Plugin 宿主与 MCP 接入的契约；具体编译期插件在子目录独立维护。 | 6 |
+| [核心对话与数据](core/README.md) | 消息处理、参与判断、分泡发送、记忆/人格、任务、表情与 SQLite；一份功能文档维护一类行为契约。 | 9 |
+| [扩展能力](extensions/README.md) | Tool、Skill、Plugin 宿主与 MCP 接入的契约；具体编译期插件在子目录独立维护。 | 9 |
 | [管理界面与 API](webui/README.md) | Vue 管理页面与 Axum API 的联动、模型配置与观测，区分界面占位与实际后端闭环。 | 4 |
 | [运行时与部署](runtime/README.md) | 装配、生命周期、备份恢复及部署约束；运行包沿用 yuantuan 兼容命名。 | 2 |
 

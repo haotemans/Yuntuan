@@ -16,7 +16,7 @@
 
 现有管理员 session 保护下新增：
 
-- `GET /api/plugins/quark/watches`：查询最多 200 个已登记监控任务。
+- `GET /api/plugins/quark/watches`：查询最多 200 个已登记监控任务（登记时也限制200条）。
 - `POST /api/plugins/quark/watches`：登记 `{url,title}`；URL 必须是 `https://pan.quark.cn/s/...`，要求对应插件、Tool 和权限可用。
 - `POST /api/plugins/quark/watches/{id}/check`：执行一次立即检查，返回明确成功/失败。
 - `POST /api/plugins/quark/watches/{id}`：`{enabled:boolean}` 启用/暂停。
@@ -43,3 +43,6 @@
 - [`webui-frontend/tests/plugins-flow.spec.js`](../../../webui-frontend/tests/plugins-flow.spec.js)
 
 该功能复用插件专属页面 [`webui-frontend/src/views/PluginSettings.vue`](../../../webui-frontend/src/views/PluginSettings.vue)，页面本身的主源码归属见[扩展宿主](../extensions/host.md)，不重复归档。
+
+
+`scheduler.rs` 内新增真实 SQLite + fake Tool 回归，覆盖重复登记、成功/失败区分、持久停用/范围、未过期与过期租约、重新打开数据库后的恢复及暂停/删除。该回归不访问夸克账号。`check_now` 完成表示检查结果已记入库，检查失败仍以 `check_failed` 呈现，不能等同于可访问。

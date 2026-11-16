@@ -1,10 +1,14 @@
 //! Stable source-level contract for compiled Rust plugins; not a dynamic-library ABI.
+mod membership;
+mod qzone;
+mod schema;
+pub use schema::validate as validate_tool_arguments;
 mod skills;
 mod tools;
-mod membership;
+pub use membership::*;
+pub use qzone::*;
 pub use skills::*;
 pub use tools::*;
-pub use membership::*;
 
 use anyhow::{bail, Result};
 use async_trait::async_trait;
@@ -101,7 +105,13 @@ pub enum ModerationAction {
 #[async_trait]
 pub trait GroupModeration: Send + Sync {
     async fn execute(&self, ctx: &ToolCtx, action: ModerationAction) -> Result<()>;
-    async fn membership(&self, _ctx: &ToolCtx, _action: MembershipAction, _policy: &Value, _allowed_chats: Option<&[String]>) -> Result<Value> {
+    async fn membership(
+        &self,
+        _ctx: &ToolCtx,
+        _action: MembershipAction,
+        _policy: &Value,
+        _allowed_chats: Option<&[String]>,
+    ) -> Result<Value> {
         bail!("适配器尚未提供申请审核服务")
     }
 }
@@ -110,6 +120,9 @@ pub trait GroupModeration: Send + Sync {
 /// Native Rust code is trusted code: this interface is not an OS sandbox.
 #[async_trait]
 pub trait HostServices: Send + Sync {
+    async fn qzone(&self, _ctx: &ToolCtx, _action: QzoneAction) -> Result<Value> {
+        bail!("QQ空间服务未启用")
+    }
     async fn membership(&self, _ctx: &ToolCtx, _action: MembershipAction) -> Result<Value> {
         bail!("宿主未提供申请审核服务")
     }
@@ -117,9 +130,13 @@ pub trait HostServices: Send + Sync {
         bail!("宿主未提供群管理服务")
     }
     async fn chat(&self, ctx: &ToolCtx, system: &str, user: &str) -> Result<String>;
-    /// Check registered Tool availability, persisted capability switch, scope and schema.
-    /// Skills must call this before invoking the same connector directly.
-    async fn authorize_tool_for_skill(&self, _ctx: &ToolCtx, _name: &str, _args: &Value) -> Result<()> {
+    /// Shared registered Tool switch, scope and schema check for Skill delegates.
+    async fn authorize_tool_for_skill(
+        &self,
+        _ctx: &ToolCtx,
+        _name: &str,
+        _args: &Value,
+    ) -> Result<()> {
         bail!("宿主未提供 Tool 权限检查")
     }
     async fn read_data(&self, key: &str) -> Result<Option<Value>>;

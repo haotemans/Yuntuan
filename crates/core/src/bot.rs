@@ -1027,16 +1027,15 @@ async fn handle_plugin_command(deps: &PipelineDeps, m: &MessageReceivedPayload) 
     };
     add_message_slots(deps, m, &mut slots).await;
     let automatic = slots["automatic"].as_bool().unwrap_or(false);
-    let result = if slots["explicit_command"] == true
+    let result = if !skill.accepts_empty_command()
+        && slots["explicit_command"] == true
         && slots["user_text"].as_str().is_some_and(str::is_empty)
         && m.reply_to.is_none()
         && slots["mentioned_qqs"]
             .as_array()
             .is_none_or(|a| a.is_empty())
     {
-        Err(anyhow::anyhow!(
-            "请填写命令参数；撤回可引用目标消息后发送 /撤回"
-        ))
+        Err(anyhow::anyhow!("请填写命令参数，或引用需要处理的消息。"))
     } else {
         crate::capabilities::invoke(&deps.db_path, &skill, &ctx, Some(m.msg_id), slots).await
     };
@@ -1216,6 +1215,37 @@ mod tests {
                 })
             }
         }
+        struct Status;
+        #[async_trait::async_trait]
+        impl crate::skills::Skill for Status {
+            fn def(&self) -> crate::skills::SkillDef {
+                crate::skills::SkillDef {
+                    name: "test.status",
+                    description: "status",
+                    prompt_template: "".into(),
+                    tools: vec![],
+                    role_hint: None,
+                }
+            }
+            fn commands(&self) -> &'static [&'static str] {
+                &["/测试状态"]
+            }
+            fn accepts_empty_command(&self) -> bool {
+                true
+            }
+            async fn invoke(
+                &self,
+                _: &crate::tools::ToolCtx,
+                slots: serde_json::Value,
+            ) -> anyhow::Result<crate::tools::ToolOutput> {
+                assert_eq!(slots["user_text"], "");
+                Ok(crate::tools::ToolOutput {
+                    summary: "状态已核验".into(),
+                    artifacts: vec![],
+                    data: serde_json::json!({}),
+                })
+            }
+        }
         let db = temp_db().await;
         let artifact = db.parent().unwrap().join("command.mp4");
         std::fs::write(&artifact, b"video").unwrap();
@@ -1246,6 +1276,7 @@ mod tests {
         .spawn();
         let skills = crate::skills::SkillRegistry::new();
         let automatic = Arc::new(tokio::sync::Notify::new());
+        skills.register_arc(Arc::new(Status));
         skills.register_arc(Arc::new(Search {
             artifact: artifact.to_string_lossy().into_owned(),
             automatic: automatic.clone(),
@@ -1356,12 +1387,21 @@ mod tests {
         mention.has_image = false;
         mention.reply_to = Some(123);
         assert!(!is_bare_mention(&mention));
+        let status_message = MessageReceivedPayload {
+            text: "/测试状态".into(),
+            sender_pid: "p_1".into(),
+            sender_bot: false,
+            at_me: false,
+            reply_to: None,
+            ..mention.clone()
+        };
+        assert!(handle_plugin_command(&deps, &status_message).await);
         // The fake transport records a send before SQLite history and the
         // BubbleSent receipt finish. Wait on delivery, not an early Vec write;
         // a short shutdown deadline must not double as a DB completion timeout.
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             let mut completed = 0;
-            while completed < 6 {
+            while completed < 7 {
                 if let Event::BubbleSent(result) = delivered.recv().await.unwrap() {
                     if result.ok {
                         completed += 1;
@@ -1370,10 +1410,11 @@ mod tests {
             }
         })
         .await
-        .expect("all six plugin/greeting deliveries must finish");
+        .expect("all seven plugin/greeting deliveries must finish");
         assert!(engine.shutdown(std::time::Duration::from_secs(3)).await);
         let sent = sent.lock().unwrap();
-        assert_eq!(sent.len(), 6);
+        assert_eq!(sent.len(), 7);
+        assert_eq!(sent[6].segments[0]["data"]["text"], "状态已核验");
         assert_eq!(sent[0].segments[0]["type"], "text");
         assert!(sent[0].segments[0]["data"]["text"]
             .as_str()

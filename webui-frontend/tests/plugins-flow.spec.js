@@ -8,21 +8,32 @@ function catalog() {
     ['moderator', '敬之', '撤回、禁言与群聊管理', ['/撤回', '/禁言']],
     ['tencent-docs', '腾讯文档', '官方 MCP 与在线文档 Skill', ['/文档']],
     ['quark-drive', '夸克网盘', '官方 CLI 与网盘 Skill', ['/夸克']],
+    ['qzone', 'QQ空间', 'QQ空间说说发布与记录', ['/说说', '/空间记录']],
   ].map(([name, display_name, purpose, commands]) => ({
     name, display_name, description:purpose, version:'0.1.0', enabled:true, loaded:true, updating:false,
     pending_reload:false, pending_restart:false,
     presentation:{ purpose, examples: name==='nai-image' ? ['/image -m nai5 -r 2:3 成年女性在图书馆阅读'] : ['请直接描述任务'] },
-    skills:[{ name:name+'.generate', description:purpose, commands }],
-    tools:[{name:name+'.generate',description:purpose}],
+    skills:[{ name:name==='qzone'?'qzone.publish':['tencent-docs','quark-drive'].includes(name)?name+'.assist':name+'.generate', description:purpose, commands }],
+    tools:(name==='tencent-docs'?['catalog','read','call']:name==='quark-drive'?['account','search','inspect_share','share_updates','updated_files','create_share']:name==='qzone'?['publish']:['generate']).map(op=>({name:name+'.'+op,description:purpose})),
     invocations:{active:0,succeeded:3,failed:0,rejected:0,cancelled:0,last_status:'succeeded',last_duration_ms:1250},
     config_fields: name==='nai-image' ? [
       {key:'api_key',label:'API Key',kind:'string',secret:true,has_value:true},
       {key:'base_url',label:'API 地址',kind:'string',default:'https://nai.rinko.ai'},
       {key:'default_model',label:'默认模型',kind:'choice',default:'nai4.5',options:[{value:'nai4.5',label:'NAI 4.5'},{value:'nai5',label:'NAI 5'}]},
       {key:'enabled_option',label:'启用提示词优化',kind:'boolean',default:true},
+    ] : name==='qzone' ? [
+      {key:'default_visibility',label:'默认可见范围',kind:'choice',default:'friends',options:[{value:'friends',label:'好友可见'},{value:'private',label:'仅自己可见'}]},
+      {key:'daily_limit',label:'每日发布上限',kind:'integer',default:10},
+    ] : name==='tencent-docs' ? [
+      {key:'token_env',label:'Token 环境变量名',kind:'string',default:''},
+      {key:'token',label:'个人 Token',kind:'string',secret:true,has_value:true},
+      {key:'allow_writes',label:'允许文档写入',kind:'boolean',default:false},
+    ] : name==='quark-drive' ? [
+      {key:'cli_script',label:'官方 CLI 脚本路径',kind:'string',default:''},
+      {key:'allow_share_creation',label:'允许创建分享',kind:'boolean',default:false},
     ] : [],
     settings:{enabled:true,allowed_chats:null,timeout_ms:360000,max_concurrency:1,max_output_bytes:65536,
-      config:name==='nai-image'?{base_url:'https://nai.rinko.ai',default_model:'nai4.5',enabled_option:true}:{}},
+      config:name==='nai-image'?{base_url:'https://nai.rinko.ai',default_model:'nai4.5',enabled_option:true}:name==='qzone'?{default_visibility:'friends',daily_limit:10}:{}},
   }))
 }
 
@@ -30,12 +41,17 @@ async function openPlugins(page, { deferred=false,error=false }={}) {
   const state={plugins:catalog(),reads:0,writes:[],capabilityWrites:[],released:false,watches:[]}
   state.capabilities=state.plugins.flatMap(p=>[
     ...p.skills.map(s=>({name:s.name,kind:'skill',enabled:true,scopes:['group:42'],calls:3})),
-    ...p.tools.map(t=>({name:t.name,kind:'tool',enabled:true,scopes:['group:42'],calls:2,tool_contract:{input_schema:{type:'object',properties:{prompt:{type:'string'}}}}})),
+    ...p.tools.map(t=>({name:t.name,kind:'tool',enabled:true,scopes:['group:42'],calls:2,tool_contract:{input_schema:{type:'object',properties:t.name==='qzone.publish'?{content:{type:'string'}}:{prompt:{type:'string'}}}}})),
   ])
   await page.addInitScript(() => localStorage.setItem('yt_token','test-only'))
   await page.routeWebSocket('**/ws**',()=>{})
   await page.route('**/api/**',async route=>{
     const pathname=new URL(route.request().url()).pathname
+    if (pathname === '/api/plugins/connection/check') {
+      state.connectionChecks ||= []
+      state.connectionChecks.push(route.request().postDataJSON())
+      return route.fulfill({json:{ok:true,summary:'连接成功，已获取实际工具目录'}})
+    }
     if (pathname === '/api/plugins/quark/watches') {
       if (route.request().method() === 'POST') {
         const body=route.request().postDataJSON()
@@ -100,7 +116,7 @@ async function openConfig(page) {
 test('independent plugin pages, search, official instructions and responsive layout',async ({page})=>{
   await page.setViewportSize({width:1440,height:1000})
   await openPlugins(page)
-  await expect(page.locator('.plugin-card h2')).toHaveText(['琼华','采薇','采苓','敬之','腾讯文档','夸克网盘'])
+  await expect(page.locator('.plugin-card h2')).toHaveText(['琼华','采薇','采苓','敬之','腾讯文档','夸克网盘','QQ空间'])
   await page.getByRole('button',{name:'查看琼华详情'}).click()
   await expect(page).toHaveURL(/\/plugins\/nai-image/)
   await expect(page.getByText('/image -m nai5 -r 2:3 成年女性在图书馆阅读',{exact:true})).toBeVisible()
@@ -109,7 +125,7 @@ test('independent plugin pages, search, official instructions and responsive lay
   await expect(page.locator('.plugin-card')).toHaveCount(1)
   await page.getByPlaceholder('搜索插件名称或用途').fill('')
   await page.setViewportSize({width:390,height:844})
-  await expect(page.locator('.plugin-card')).toHaveCount(6)
+  await expect(page.locator('.plugin-card')).toHaveCount(7)
   expect(await page.locator('.plugins-page').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true)
   await page.getByRole('button',{name:'查看腾讯文档详情'}).click()
   await expect(page.getByText('官方 MCP 与在线文档 Skill').first()).toBeVisible()
@@ -152,11 +168,35 @@ test('tool toggle retains scopes and is independent of the skill with identical 
   await page.getByText('Skills / Tools',{exact:true}).click()
   const tool=page.getByRole('switch',{name:'工具 nai-image.generate'})
   await expect(tool).toBeVisible()
+  const row=tool.locator('..');
+  await row.getByText('调用参数',{exact:true}).click()
+  await expect(row.locator('.tool-schema')).toContainText('prompt')
   await tool.click()
   await expect.poll(()=>state.capabilityWrites.length).toBe(1)
   expect(state.capabilityWrites[0]).toEqual({name:'nai-image.generate',kind:'tool',enabled:false,scopes:['group:42']})
   expect(state.capabilities.find(c=>c.name==='nai-image.generate'&&c.kind==='skill').enabled).toBe(true)
   await expect(tool).toHaveAttribute('aria-checked','false')
+})
+
+
+test('QQ Space uses the common independent settings route without asking for cookies',async ({page})=>{
+  const state=await openPlugins(page)
+  await page.getByRole('button',{name:'查看QQ空间详情'}).click()
+  await expect(page).toHaveURL(/\/plugins\/qzone/)
+  await expect(page.getByText('无需另填 Cookie',{exact:false})).toBeVisible()
+  await expect(page.getByRole('switch',{name:'启用插件'})).toBeVisible()
+  await page.getByText('连接配置',{exact:true}).click()
+  const visibility=page.locator('.n-form-item').filter({hasText:'默认可见范围'})
+  await visibility.locator('.n-select').click()
+  await page.locator('.n-base-select-menu').getByText('仅自己可见',{exact:true}).click()
+  await page.getByRole('button',{name:'保存并应用'}).click()
+  await expect.poll(()=>state.writes.length).toBe(1)
+  expect(state.writes[0].settings.config.default_visibility).toBe('private')
+  await page.getByText('Skills / Tools',{exact:true}).click()
+  const tool=page.getByRole('switch',{name:'工具 qzone.publish'})
+  await expect(tool).toBeVisible()
+  await tool.locator('..').getByText('调用参数',{exact:true}).click()
+  await expect(tool.locator('..').locator('.tool-schema')).toContainText('content')
 })
 
 test('quark share watcher uses the shared persistent schedule API',async ({page})=>{
@@ -177,4 +217,18 @@ test('quark share watcher uses the shared persistent schedule API',async ({page}
   await page.getByRole('button',{name:'删除'}).click()
   await expect(page.getByText('尚未登记分享链接',{exact:false})).toBeVisible()
   expect(state.watches).toHaveLength(0)
+})
+
+test('connector check uses saved configuration and the shared probe endpoint',async ({page})=>{
+  const state=await openPlugins(page)
+  await page.getByRole('button',{name:'查看腾讯文档详情'}).click()
+  await page.getByText('连接配置',{exact:true}).click()
+  await page.getByRole('textbox',{name:'Token 环境变量名',exact:true}).fill('TENCENT_DOCS_TOKEN')
+  await expect(page.getByRole('button',{name:'检查连接',exact:true})).toBeDisabled()
+  await page.getByRole('button',{name:'保存并应用'}).click()
+  expect(state.writes[0].settings.config.token_env).toBe('TENCENT_DOCS_TOKEN')
+  expect(state.writes[0].settings.config).not.toHaveProperty('token')
+  await page.getByRole('button',{name:'检查连接',exact:true}).click()
+  await expect(page.getByText('连接成功，已获取实际工具目录')).toBeVisible()
+  expect(state.connectionChecks).toEqual([{name:'tencent-docs'}])
 })

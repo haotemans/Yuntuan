@@ -1,15 +1,14 @@
 //! Persistent capability switches and invocation receipts; plugin permission checks still apply.
-mod schema;
 use crate::{
     db::{self, params, SqliteExt},
     skills::Skill,
     tools::{ToolCtx, ToolOutput},
 };
 use anyhow::{ensure, Result};
-pub use schema::validate;
 use serde_json::{json, Value};
 use sqlx::Row;
 use std::{path::Path, sync::Arc};
+pub use yuantuan_plugin_api::validate_tool_arguments as validate;
 
 pub async fn register(
     path: &Path,
