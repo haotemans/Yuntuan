@@ -6,9 +6,9 @@ function catalog() {
     ['social-media', '采薇', '视频与图文解析下载', ['/下载', '/download']],
     ['anysearch', '采苓', '联网搜索与网页提取', ['/搜索', '/search']],
     ['moderator', '敬之', '撤回、禁言与群聊管理', ['/撤回', '/禁言']],
-    ['tencent-docs', '腾讯文档', '官方 MCP 与在线文档 Skill', ['/文档']],
-    ['quark-drive', '夸克网盘', '官方 CLI 与网盘 Skill', ['/夸克']],
-    ['qzone', 'QQ空间', 'QQ空间说说发布与记录', ['/说说', '/空间记录']],
+    ['tencent-docs', '子衿', '腾讯文档搜索与编辑', ['/文档']],
+    ['quark-drive', '卷耳', '夸克网盘文件与分享', ['/夸克']],
+    ['qzone', '鹿鸣', 'QQ空间动态发布', ['/说说', '/空间记录']],
   ].map(([name, display_name, purpose, commands]) => ({
     name, display_name, description:purpose, version:'0.1.0', enabled:true, loaded:true, updating:false,
     pending_reload:false, pending_restart:false,
@@ -116,19 +116,19 @@ async function openConfig(page) {
 test('independent plugin pages, search, official instructions and responsive layout',async ({page})=>{
   await page.setViewportSize({width:1440,height:1000})
   await openPlugins(page)
-  await expect(page.locator('.plugin-card h2')).toHaveText(['琼华','采薇','采苓','敬之','腾讯文档','夸克网盘','QQ空间'])
+  await expect(page.locator('.plugin-card h2')).toHaveText(['琼华','采薇','采苓','敬之','子衿','卷耳','鹿鸣'])
   await page.getByRole('button',{name:'查看琼华详情'}).click()
   await expect(page).toHaveURL(/\/plugins\/nai-image/)
   await expect(page.getByText('/image -m nai5 -r 2:3 成年女性在图书馆阅读',{exact:true})).toBeVisible()
   await page.getByRole('button',{name:'返回插件列表'}).click()
-  await page.getByPlaceholder('搜索插件名称或用途').fill('搜索')
+  await page.getByPlaceholder('搜索插件名称或用途').fill('夸克')
   await expect(page.locator('.plugin-card')).toHaveCount(1)
   await page.getByPlaceholder('搜索插件名称或用途').fill('')
   await page.setViewportSize({width:390,height:844})
   await expect(page.locator('.plugin-card')).toHaveCount(7)
   expect(await page.locator('.plugins-page').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true)
-  await page.getByRole('button',{name:'查看腾讯文档详情'}).click()
-  await expect(page.getByText('官方 MCP 与在线文档 Skill').first()).toBeVisible()
+  await page.getByRole('button',{name:'查看子衿详情'}).click()
+  await expect(page.getByText('腾讯文档搜索与编辑').first()).toBeVisible()
   await expect(page.getByRole('link',{name:/查看官方授权及安装说明/})).toHaveAttribute('href','https://docs.qq.com/open/auth/mcp.html')
 })
 
@@ -181,7 +181,7 @@ test('tool toggle retains scopes and is independent of the skill with identical 
 
 test('QQ Space uses the common independent settings route without asking for cookies',async ({page})=>{
   const state=await openPlugins(page)
-  await page.getByRole('button',{name:'查看QQ空间详情'}).click()
+  await page.getByRole('button',{name:'查看鹿鸣详情'}).click()
   await expect(page).toHaveURL(/\/plugins\/qzone/)
   await expect(page.getByText('无需另填 Cookie',{exact:false})).toBeVisible()
   await expect(page.getByRole('switch',{name:'启用插件'})).toBeVisible()
@@ -201,7 +201,7 @@ test('QQ Space uses the common independent settings route without asking for coo
 
 test('quark share watcher uses the shared persistent schedule API',async ({page})=>{
   const state=await openPlugins(page)
-  await page.getByRole('button',{name:'查看夸克网盘详情'}).click()
+  await page.getByRole('button',{name:'查看卷耳详情'}).click()
   await page.getByText('分享守护',{exact:true}).click()
   await expect(page.getByText('尚未登记分享链接',{exact:false})).toBeVisible()
   await page.getByPlaceholder('任务名称（可选）').fill('学习资料')
@@ -221,7 +221,7 @@ test('quark share watcher uses the shared persistent schedule API',async ({page}
 
 test('connector check uses saved configuration and the shared probe endpoint',async ({page})=>{
   const state=await openPlugins(page)
-  await page.getByRole('button',{name:'查看腾讯文档详情'}).click()
+  await page.getByRole('button',{name:'查看子衿详情'}).click()
   await page.getByText('连接配置',{exact:true}).click()
   await page.getByRole('textbox',{name:'Token 环境变量名',exact:true}).fill('TENCENT_DOCS_TOKEN')
   await expect(page.getByRole('button',{name:'检查连接',exact:true})).toBeDisabled()

@@ -1,4 +1,4 @@
-# QQ空间：说说发布与回执
+# 鹿鸣：QQ空间：说说发布与回执
 
 [插件索引](README.md) · [扩展宿主](../host.md) · [项目首页](../../../../README.md)
 
@@ -56,3 +56,6 @@ Skill 委托 Publisher 前调用 `HostServices::authorize_tool_for_skill`；这�
 - [`bot.rs`](../../../../crates/core/src/bot.rs) 的命令到发送回归包含无参数查询；[`plugins-flow.spec.js`](../../../../webui-frontend/tests/plugins-flow.spec.js) 验证独立配置页、参数元数据、权限开关及配置保存。
 
 上述自动化不向真实 QQ空间发布内容；验收结果按当前提交的实际 CI 与部署报告分别记录。
+
+
+界面展示名为“鹿鸣”，沿用现有《诗经》系命名，出处《小雅·鹿鸣》。副标题保留QQ空间和用途；内部插件 ID `qzone`、Tool/Skill 名、命令、配置路径与持久记录继续沿用原值，无数据迁移。
