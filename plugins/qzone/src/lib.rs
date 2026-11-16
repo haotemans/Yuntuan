@@ -18,23 +18,23 @@ impl Plugin for Qzone {
     fn metadata(&self) -> PluginMeta {
         PluginMeta {
             id: "qzone",
-            name: "QQ空间",
+            name: "鹿鸣",
             version: env!("CARGO_PKG_VERSION"),
             api_version: API_VERSION,
-            description:
-                "复用NapCat登录发布说说，支持图片、可见范围及持久发布回执；仅超级管理员可调用。",
+            description: "发布文字和图片，选择可见范围，查看发布记录。",
         }
     }
     fn presentation(&self) -> PluginPresentation {
         PluginPresentation {
-            purpose: "QQ空间说说发布与记录",
+            purpose: "QQ空间动态发布",
+            poem: "小雅·鹿鸣",
+            verse: "呦呦鹿鸣，食野之苹。",
             examples: vec![
                 "/说说 今天完成了一个小目标",
                 "/说说 --私密 记录一下今天",
                 "/空间状态",
                 "/空间记录",
             ],
-            ..Default::default()
         }
     }
     fn default_timeout_ms(&self) -> u64 {

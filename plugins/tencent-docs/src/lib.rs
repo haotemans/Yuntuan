@@ -200,17 +200,18 @@ impl Plugin for TencentDocs {
     fn metadata(&self) -> PluginMeta {
         PluginMeta {
             id: "tencent-docs",
-            name: "腾讯文档",
+            name: "子衿",
             version: env!("CARGO_PKG_VERSION"),
             api_version: API_VERSION,
-            description: "通过官方 MCP 搜索、读取及受控编辑腾讯文档。",
+            description: "查找、阅读和编辑腾讯文档。",
         }
     }
     fn presentation(&self) -> PluginPresentation {
         PluginPresentation {
-            purpose: "腾讯文档搜索、读取与编辑",
+            purpose: "腾讯文档搜索与编辑",
+            poem: "郑风·子衿",
+            verse: "青青子衿，悠悠我心。",
             examples: vec!["/文档 工具", "/文档 搜索 项目周报"],
-            ..Default::default()
         }
     }
     fn config_fields(&self) -> Vec<ConfigField> {

@@ -411,7 +411,7 @@
     },
     {
       "id": "qzone",
-      "title": "QQ空间说说发布与回执",
+      "title": "鹿鸣：QQ空间说说发布与回执",
       "status": "代码入口已实现（需真实QQ空间发布验收）",
       "doc": "docs/features/extensions/plugins/qzone.md",
       "source": [
@@ -432,7 +432,7 @@
     },
     {
       "id": "plugin-tencent-docs",
-      "title": "腾讯文档：官方 MCP",
+      "title": "子衿：腾讯文档",
       "status": "已新增接入代码（真实授权与网络验证待完成）",
       "doc": "docs/features/extensions/plugins/tencent-docs.md",
       "source": [
@@ -448,7 +448,7 @@
     },
     {
       "id": "plugin-quark-drive",
-      "title": "夸克网盘：官方 Skill/CLI",
+      "title": "卷耳：夸克网盘",
       "status": "已新增 CLI 适配（真实 OAuth 与网盘验证待完成）",
       "doc": "docs/features/extensions/plugins/quark-drive.md",
       "source": [

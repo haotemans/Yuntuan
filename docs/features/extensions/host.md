@@ -77,3 +77,6 @@ Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统
 
 
 账号连接权限复用主配置 `security.super_admin_qq`，由启动装配传入 PluginManager 的共享原子槽，插件重载保持同一身份；不新增每插件 owner 表单。`HostServices::account_owner_qq` 和 [`crates/plugin-api/src/account.rs`](../../../crates/plugin-api/src/account.rs) 的 `require_account_access` 同时约束服务 Tool 可见性、Skill 与实际 Connector，普通群成员/私聊用户不能借用管理员账号读写。未配置管理员则拒绝对话操作。`private:plugin-check`/webui 与 `private:scheduled`/scheduler 仅作为无 task_id 的宿主只读身份开放，绝不放行写入，且仍检查原会话范围/能力开关；模型不能从参数指定这些身份。身份配置随应用启动加载，修改后需重启应用。账号策略单元测试与两插件的非本人零调用测试分别验证此边界。
+
+
+服务插件的展示名采用与采薇、采苓、敬之、琼华一致的两字雅名：子衿（腾讯文档）、卷耳（夸克网盘）、鹿鸣（QQ空间）。卡片和详情页均读取宿主 display_name，副标题说明平台及用途；内部注册 ID、配置和权限不随显示名更换。现有插件页面回归沿真实显示名检查跳转、配置与调用入口。

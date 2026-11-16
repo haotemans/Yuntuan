@@ -49,17 +49,17 @@ impl Plugin for QuarkPlugin {
     fn metadata(&self) -> PluginMeta {
         PluginMeta {
             id: "quark-drive",
-            name: "夸克网盘",
+            name: "卷耳",
             version: env!("CARGO_PKG_VERSION"),
-            description: "调用夸克官方 Skill CLI，进行文件搜索、分享检查和受控分享创建",
+            description: "查找网盘文件，查看分享内容与更新，按需创建分享。",
             api_version: API_VERSION,
         }
     }
     fn presentation(&self) -> PluginPresentation {
         PluginPresentation {
-            purpose: "官方 CLI · OAuth · 网盘 Skill",
-            poem: "",
-            verse: "",
+            purpose: "夸克网盘文件与分享",
+            poem: "周南·卷耳",
+            verse: "采采卷耳，不盈顷筐。",
             examples: vec![
                 "/夸克 搜索 学习资料",
                 "/夸克 检查 https://pan.quark.cn/s/xxxx",
