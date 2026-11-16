@@ -3,7 +3,7 @@
 use anyhow::{bail, Context, Result};
 use reqwest::{header, Client, Url};
 use serde_json::{json, Value};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::Mutex;
 
@@ -16,6 +16,7 @@ pub struct HttpMcpClient {
     http: Client,
     session: Mutex<Option<String>>,
     next_id: AtomicU64,
+    ready: AtomicBool,
 }
 
 impl HttpMcpClient {
@@ -41,6 +42,7 @@ impl HttpMcpClient {
                 .build()?,
             session: Mutex::new(None),
             next_id: AtomicU64::new(1),
+            ready: AtomicBool::new(false),
         })
     }
 
@@ -70,17 +72,31 @@ impl HttpMcpClient {
             .and_then(|v| v.to_str().ok()).map(str::to_owned);
         let content_type = response.headers().get(header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok()).unwrap_or("").to_owned();
-        let bytes = response.bytes().await.context("MCP 响应读取失败")?;
-        if bytes.len() > RESPONSE_LIMIT {
-            bail!("MCP 响应超过 1 MiB");
-        }
-        if bytes.is_empty() && notification {
-            return Ok((Value::Null, sid));
-        }
         let reply = if content_type.contains("text/event-stream") {
-            // Only JSON-RPC message events count. Events can have multiline data.
-            parse_sse(&bytes)?
+            // Streamable HTTP SSE may stay open after the JSON-RPC response.
+            // Stop reading as soon as one complete result event is received.
+            let mut body = Vec::new();
+            let mut response = response;
+            loop {
+                let Some(chunk) = response.chunk().await.context("MCP SSE 读取失败")? else {
+                    bail!("MCP SSE 未返回 JSON-RPC 结果");
+                };
+                if body.len() + chunk.len() > RESPONSE_LIMIT {
+                    bail!("MCP SSE 超过 1 MiB");
+                }
+                body.extend_from_slice(&chunk);
+                if let Ok(result) = parse_sse(&body) {
+                    break result;
+                }
+            }
         } else {
+            let bytes = response.bytes().await.context("MCP 响应读取失败")?;
+            if bytes.len() > RESPONSE_LIMIT {
+                bail!("MCP 响应超过 1 MiB");
+            }
+            if bytes.is_empty() && notification {
+                return Ok((Value::Null, sid));
+            }
             serde_json::from_slice::<Value>(&bytes).context("MCP 返回无效 JSON")?
         };
         if !notification {
@@ -94,8 +110,8 @@ impl HttpMcpClient {
 
     async fn ensure_ready(&self) -> Result<Option<String>> {
         let mut guard = self.session.lock().await;
-        if let Some(value) = guard.as_ref() {
-            return Ok(Some(value.clone()));
+        if self.ready.load(Ordering::Acquire) {
+            return Ok(guard.clone());
         }
         let (init, sid) = self.exchange("initialize", json!({
             "protocolVersion":VERSION,
@@ -107,6 +123,7 @@ impl HttpMcpClient {
         }
         self.exchange("notifications/initialized", json!({}), sid.as_deref(), true).await?;
         *guard = sid.clone();
+        self.ready.store(true, Ordering::Release);
         Ok(sid)
     }
 

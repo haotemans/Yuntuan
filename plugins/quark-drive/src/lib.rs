@@ -2,7 +2,7 @@
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::{path::{Path, PathBuf}, sync::{Arc, atomic::{AtomicU64, Ordering}}, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}}, time::{Duration, SystemTime, UNIX_EPOCH}};
 use tokio::process::Command;
 use yuantuan_plugin_api::*;
 
@@ -58,7 +58,9 @@ impl Plugin for QuarkPlugin {
         let path = path.canonicalize().context("官方 CLI 脚本不存在")?;
         if !path.is_file() { bail!("官方 CLI 路径不是文件"); }
         let connector = Arc::new(QuarkConnector {
-            path, allow_share_creation:config["allow_share_creation"].as_bool().unwrap_or(false),
+            path,
+            allow_share_creation:config["allow_share_creation"].as_bool().unwrap_or(false),
+            sessions: Mutex::new(HashMap::new()),
         });
         let variants = [Op::UserInfo,Op::Search,Op::InspectShare,Op::ShareUpdates,Op::UpdatedFiles,Op::CreateShare];
         let tools = variants.into_iter().map(|op|Arc::new(QuarkTool {
@@ -72,6 +74,7 @@ impl Plugin for QuarkPlugin {
 struct QuarkConnector {
     path: PathBuf,
     allow_share_creation: bool,
+    sessions: Mutex<HashMap<String,String>>,
 }
 #[derive(Clone, Copy)]
 enum Op { UserInfo, Search, InspectShare, ShareUpdates, UpdatedFiles, CreateShare }
@@ -177,11 +180,17 @@ impl QuarkConnector {
             // Original input is optional in non-dialogue tool contexts; bound to this call only.
             args.extend(["--session-input".into(), raw.chars().take(2000).collect()]);
         }
-        args.extend(["--session-id".into(), session_id()]);
-        let process = Command::new("node").args(&args)
-            .kill_on_drop(true)
-            .env("NO_COLOR","1")
-            .output();
+        let stable_session = {
+            let mut sessions = self.sessions.lock().unwrap();
+            if sessions.len() > 1000 {
+                sessions.clear();
+            }
+            sessions.entry(ctx.chat_id.clone()).or_insert_with(session_id).clone()
+        };
+        args.extend(["--session-id".into(), stable_session]);
+        let mut command = Command::new("node");
+        command.args(&args).kill_on_drop(true).env("NO_COLOR","1");
+        let process = command.output();
         let output = tokio::time::timeout(Duration::from_secs(100), process)
             .await.context("夸克官方 CLI 执行超时")?
             .context("启动夸克 CLI 失败，请检查 Node.js 与安装路径")?;
