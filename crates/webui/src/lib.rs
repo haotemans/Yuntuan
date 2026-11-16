@@ -14,6 +14,7 @@ mod overview;
 mod personality;
 mod plugins_api;
 mod relations;
+mod schedule_api;
 mod runtime_api;
 mod state;
 mod static_files;
@@ -105,6 +106,9 @@ pub async fn serve(db_path: PathBuf, host: &str, port: u16, extras: Extras) -> R
         .route("/api/plugins/list", get(plugins_api::list))
         .route("/api/plugins/toggle", post(plugins_api::toggle))
         .route("/api/plugins/config", post(plugins_api::save_config))
+        .route("/api/plugins/quark/watches", get(schedule_api::list).post(schedule_api::add))
+        .route("/api/plugins/quark/watches/{id}", post(schedule_api::toggle).delete(schedule_api::remove))
+        .route("/api/plugins/quark/watches/{id}/check", post(schedule_api::check_now))
         .route("/api/mcp/list", get(mcp_api::list))
         .route("/api/mcp/save", post(mcp_api::save))
         .route("/api/mcp/call", post(mcp_api::call))

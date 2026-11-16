@@ -24,4 +24,4 @@
 
 历史与背景资料继续查阅[总体设计](../design/architecture-v0.1.md)、[实现参考](../reference/message-flow-rules.md)、[ADR](../adr/README.md)和[变更记录](../changes/README.md)，这些资料不取代模块功能说明。
 
-本版覆盖 21 个功能、83 个受监管主源码文件。
+本版覆盖 24 个功能、83 个受监管主源码文件。

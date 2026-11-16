@@ -53,3 +53,6 @@ V12在现有session保护层注册 `/api/capabilities`、`/api/tasks/{id}/runtim
 新Decision Trace显示本轮群聊热度、近2分钟消息/参与人数、实际采用的参与间隔及“自然接话”模式，沿用现有标签与布局，不增加额外解释文案或写配置请求。旧事件没有热度字段时隐藏此区，不补造数据。trace-flow浏览器回归覆盖新字段与桌面/390像素窄屏展示；事件数据仍是判断记录，不能当作实际发送回执。
 
 Trace的policy版本5可展示“计划表情”的类别及云团专属/其他图库/优先云团范围；它是Decision的已校验计划，实际图片发送以BubbleSent回执为准。旧事件没有计划字段时不补造，trace-flow浏览器回归同时覆盖新计划标签与既有热度/失败状态。
+
+
+V20 复用管理员 Session 保护层注册夸克链接守护的五个 GET/POST/DELETE 接口；API 实际实现见 [\`crates/webui/src/schedule_api.rs\`](../../../crates/webui/src/schedule_api.rs) ，业务规则由[统一每日只读工具调度](../core/scheduler.md)维护。按钮不直接执行外部 Shell，使用核心 ToolRegistry 及 SQLite 状态。此源码修改尚未经过真实夸克账号联调。

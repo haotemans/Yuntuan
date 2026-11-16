@@ -60,3 +60,6 @@ V18仅追加tool_contracts和tool_invocation_records，SQL见[`tools_v18.sql`](.
 
 
 V19追加`portrait_coverage`与`portrait_runs`，SQL见[`portrait_v19.sql`](../../../crates/core/src/db/portrait_v19.sql)。精确消息覆盖关联已有批次，运行诊断保存实际模型和安全错误类别；原消息、旧游标/baseline、人物版本、群记忆、摘要、配置均保留。旧数据不虚构覆盖记录，迁移可重放，最新数据库版本19。V18升级、保留和回滚回归见[`profile_refresh.rs`](../../../crates/core/tests/profile_refresh.rs)，行为详见[记忆功能](memory.md#v19近期增量历史补齐与整理诊断)。
+
+
+V20 新增 SQLite 表 \`scheduled_tools\` 与待执行索引，记录工具、参数、每日本地时刻、下一次执行、租约和最近结果。迁移仅追加表与索引，保留既有任务、消息和插件配置。SQL见[\`scheduler_v20.sql\`](../../../crates/core/src/db/scheduler_v20.sql)，读写和恢复边界见[调度功能](scheduler.md)；最新数据库版本为20。

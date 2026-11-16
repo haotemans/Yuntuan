@@ -27,7 +27,7 @@ function catalog() {
 }
 
 async function openPlugins(page, { deferred=false,error=false }={}) {
-  const state={plugins:catalog(),reads:0,writes:[],capabilityWrites:[],released:false}
+  const state={plugins:catalog(),reads:0,writes:[],capabilityWrites:[],released:false,watches:[]}
   state.capabilities=state.plugins.flatMap(p=>[
     ...p.skills.map(s=>({name:s.name,kind:'skill',enabled:true,scopes:['group:42'],calls:3})),
     ...p.tools.map(t=>({name:t.name,kind:'tool',enabled:true,scopes:['group:42'],calls:2,tool_contract:{input_schema:{type:'object',properties:{prompt:{type:'string'}}}}})),
@@ -36,6 +36,29 @@ async function openPlugins(page, { deferred=false,error=false }={}) {
   await page.routeWebSocket('**/ws**',()=>{})
   await page.route('**/api/**',async route=>{
     const pathname=new URL(route.request().url()).pathname
+    if (pathname === '/api/plugins/quark/watches') {
+      if (route.request().method() === 'POST') {
+        const body=route.request().postDataJSON()
+        const item={id:state.watches.length+1,title:body.title||'夸克分享链接',tool_name:'quark-drive.inspect_share',
+          resource_key:body.url,enabled:true,next_run_at:1794783600,last_run_at:null,last_status:'pending',last_summary:''}
+        state.watches.push(item)
+        return route.fulfill({json:{ok:true,id:item.id}})
+      }
+      return route.fulfill({json:{ok:true,watches:state.watches}})
+    }
+    if (pathname.startsWith('/api/plugins/quark/watches/')) {
+      const id=Number(pathname.split('/')[5])
+      const item=state.watches.find(w=>w.id===id)
+      if (!item) return route.fulfill({status:404,json:{error:'任务不存在'}})
+      if (pathname.endsWith('/check')) {
+        item.last_status='accessible'
+        item.last_run_at=1794780000
+        item.last_summary='夸克官方 CLI 已执行'
+      } else if (route.request().method()==='DELETE') {
+        state.watches=state.watches.filter(w=>w.id!==id)
+      } else item.enabled=route.request().postDataJSON().enabled
+      return route.fulfill({json:{ok:true}})
+    }
     if (pathname==='/api/capabilities') {
       if (route.request().method()==='POST') {
         const body=route.request().postDataJSON()
@@ -134,4 +157,24 @@ test('tool toggle retains scopes and is independent of the skill with identical 
   expect(state.capabilityWrites[0]).toEqual({name:'nai-image.generate',kind:'tool',enabled:false,scopes:['group:42']})
   expect(state.capabilities.find(c=>c.name==='nai-image.generate'&&c.kind==='skill').enabled).toBe(true)
   await expect(tool).toHaveAttribute('aria-checked','false')
+})
+
+test('quark share watcher uses the shared persistent schedule API',async ({page})=>{
+  const state=await openPlugins(page)
+  await page.getByRole('button',{name:'查看夸克网盘详情'}).click()
+  await page.getByText('分享守护',{exact:true}).click()
+  await expect(page.getByText('尚未登记分享链接',{exact:false})).toBeVisible()
+  await page.getByRole('textbox',{name:'守护任务名称'}).fill('学习资料')
+  await page.getByRole('textbox',{name:'夸克分享链接'}).fill('https://pan.quark.cn/s/demo123')
+  await page.getByRole('button',{name:'添加每日检查'}).click()
+  await expect(page.getByText('学习资料',{exact:true})).toBeVisible()
+  expect(state.watches).toHaveLength(1)
+  await page.getByRole('button',{name:'立即检查'}).click()
+  await expect(page.getByText('链接可访问',{exact:false})).toBeVisible()
+  await page.getByRole('switch',{name:'启用守护 1'}).click()
+  expect(state.watches[0].enabled).toBe(false)
+  page.once('dialog',dialog=>dialog.accept())
+  await page.getByRole('button',{name:'删除'}).click()
+  await expect(page.getByText('尚未登记分享链接',{exact:false})).toBeVisible()
+  expect(state.watches).toHaveLength(0)
 })

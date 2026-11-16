@@ -26,3 +26,8 @@ Yuntuan 现有 ToolRegistry、SkillRegistry、原生 Plugin 宿主以及 stdio M
 ## 后续工作
 
 核心持久任务调度、源分享状态跟踪、OAuth 面板自动回调/续期、Skill 来源版本锁定和完整连接健康检查，应各自单独完成真实环境验证后再启用自动化。
+
+
+## V20 补充：共享持久调度已新增
+
+统一 `scheduled_tools` 在云团核心通过已注册只读 Tool 运行每日检查；夸克只提供 `quark-drive.inspect_share`，WebUI 只登记任务与呈现结果。不增加夸克插件私有 Cron。当前不自动换链、不发布 QQ 提醒，详见 [调度主文档](../features/core/scheduler.md)。

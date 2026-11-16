@@ -426,6 +426,21 @@
       ],
       "tests": [],
       "module": "extensions/plugins"
+    },
+    {
+      "id": "scheduler",
+      "title": "统一每日只读工具调度与分享守护",
+      "status": "新增持久调度代码（真实账号联调与部署待完成）",
+      "doc": "docs/features/core/scheduler.md",
+      "source": [
+        "crates/core/src/scheduler.rs",
+        "crates/webui/src/schedule_api.rs"
+      ],
+      "tests": [
+        "crates/core/tests/sqlx_storage.rs",
+        "webui-frontend/tests/plugins-flow.spec.js"
+      ],
+      "module": "core"
     }
   ],
   "description": "One canonical feature document per behavior; module README files are navigation only; each managed source has exactly one primary feature owner.",
