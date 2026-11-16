@@ -30,6 +30,7 @@
 - [`crates/plugin-api/src/tools.rs`](../../../crates/plugin-api/src/tools.rs)
 - [`crates/webui/src/plugins_api.rs`](../../../crates/webui/src/plugins_api.rs)
 - [`webui-frontend/src/views/Plugins.vue`](../../../webui-frontend/src/views/Plugins.vue)
+- [`webui-frontend/src/views/PluginSettings.vue`](../../../webui-frontend/src/views/PluginSettings.vue)
 
 ## 验证入口
 
@@ -50,7 +51,7 @@ V18在plugin-api的Tool trait追加有默认实现的available_in_chat、policy�
 Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统一工具执行接口)为准。Skill仍保留技能匹配、权限和来源幂等入口，共享ToolOutput，不因接口统一改变其调度职责；管理面板手工MCP诊断仍为已有原始stdio请求，不冒充Agent任务回执。SQLite工具契约仅描述实际注册实现，不凭一条数据库记录生成执行器。
 
 
-工具调用易用性补充：基础Schema检查移到[`schema.rs`](../../../crates/core/src/capabilities/schema.rs)，错误包含JSON Pointer字段路径和期望类型/范围，不回显用户实参。支持type（含类型数组）、required、enum、properties、additionalProperties、items、min/maxItems、min/maxLength及minimum/maximum；递归检查限32层，$ref/组合Schema等完整标准仍不支持，业务校验继续由Tool负责。回归见[`tool_usability.rs`](../../../crates/core/tests/tool_usability.rs)。
+工具调用易用性补充：基础Schema检查移到[`schema.rs`](../../../crates/plugin-api/src/schema.rs)，错误包含JSON Pointer字段路径和期望类型/范围，不回显用户实参。支持type（含类型数组）、required、enum、properties、additionalProperties、items、min/maxItems、min/maxLength及minimum/maximum；递归检查限32层，$ref/组合Schema等完整标准仍不支持，业务校验继续由Tool负责。回归见[`tool_usability.rs`](../../../crates/core/tests/tool_usability.rs)。
 
 插件页“调用状态→能力与存储信息”增加Tool独立开关、持久调用计数与折叠输入Schema；同名Skill和Tool按kind分别控制。切换任一能力都携带原scopes，避免开关操作清空会话范围。这里只开关已注册实现，不绕过插件总开关、业务权限或底层依赖。浏览器回归[`plugins-flow.spec.js`](../../../webui-frontend/tests/plugins-flow.spec.js)验证Tool/Skill独立、范围保留及参数查看，加入Linux前端CI。
 
@@ -64,3 +65,15 @@ Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统
 `Skill::accepts_empty_command` 默认false；状态/列表类 Skill 可显式声明接受无参命令，宿主包装透传此标记。它只解除公共空参数提示，Skill/Tool权限与业务校验仍执行。SDK共享QQ空间动作见 [`qzone.rs`](../../../crates/plugin-api/src/qzone.rs)；仅qzone插件获得对应宿主服务，账号发布边界由适配器核验，详见[QQ空间](plugins/qzone.md)。
 
 回归见 [`qzone_host.rs`](../../../crates/core/tests/qzone_host.rs)、[`plugins-flow.spec.js`](../../../webui-frontend/tests/plugins-flow.spec.js) 与会话命令测试。独立页面的只读运行统计继续沿用原接口，不声明为完整的历史审计库；QQ空间发布的持久回执由该插件复用宿主数据服务保存。
+
+
+## 服务连接检查与共享 Schema
+
+腾讯文档、夸克与QQ空间复用上述页面及授权入口，分别见[腾讯文档](plugins/tencent-docs.md)、[夸克](plugins/quark-drive.md)和[QQ空间](plugins/qzone.md)。通用操作契约是源码内注册的 Skill，外部 SKILL.md 不会自行变成执行器。
+
+新增认证接口 `POST /api/plugins/connection/check {name}` 只允许腾讯文档 catalog、夸克 account 两个已注册只读探针。它通过原 ToolRegistry、HostedTool、SQLite 能力开关及参数验证后调用连接器，使用明确系统域 `private:plugin-check`；没有伪装成群成员绕开会话范围，也不把加载成功当作账号连接成功。页面有未保存更改时不能检查旧配置。验证见 [`pages_api.rs`](../../../crates/webui/tests/pages_api.rs) 及上述浏览器测试。
+
+公共 Schema 校验器已移入 `crates/plugin-api/src/schema.rs`，通过 `validate_tool_arguments` 提供给宿主和连接器；原 `yuantuan_core::capabilities::validate` 继续重导出，保留旧调用接口。仍只支持本页列出的有界子集，完整远端 Schema 由服务端校验，不另加一个不一致的实现。
+
+
+账号连接权限复用主配置 `security.super_admin_qq`，由启动装配传入 PluginManager 的共享原子槽，插件重载保持同一身份；不新增每插件 owner 表单。`HostServices::account_owner_qq` 和 [`crates/plugin-api/src/account.rs`](../../../crates/plugin-api/src/account.rs) 的 `require_account_access` 同时约束服务 Tool 可见性、Skill 与实际 Connector，普通群成员/私聊用户不能借用管理员账号读写。未配置管理员则拒绝对话操作。`private:plugin-check`/webui 与 `private:scheduled`/scheduler 仅作为无 task_id 的宿主只读身份开放，绝不放行写入，且仍检查原会话范围/能力开关；模型不能从参数指定这些身份。身份配置随应用启动加载，修改后需重启应用。账号策略单元测试与两插件的非本人零调用测试分别验证此边界。

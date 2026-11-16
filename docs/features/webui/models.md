@@ -57,3 +57,5 @@ Agent模型绑定追加tool_protocol，可选json（缺省，兼容旧配置）�
 
 
 模型热更新同时供夜间整理使用：[`config_api.rs`](../../../crates/webui/src/config_api.rs)重建归纳定时器时传递共享`llm_slot`，不再固定当时的网关；会话下一批/人物下一次读取当前Decision绑定，同批格式修复固定模型。该修复不增加模型角色或修改用户配置；测试入口见[记忆功能](../core/memory.md#v19近期增量历史补齐与整理诊断)。
+
+统一配置 API 对 `security.super_admin_qq` 的变更返回 `requires_restart`：服务账号权限在启动时装配给插件，不属于模型 Provider 的热应用范围。原值未变化则不重复提示；回归见 `crates/webui/tests/pages_api.rs` 的 connector_probe_reports_account_owner_changes_as_requiring_restart。此规则不改变角色路由/模型配置已有的热更新。

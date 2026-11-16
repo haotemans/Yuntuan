@@ -55,4 +55,11 @@ V14迁移回归同步最新版本断言，继续验证已有申请、记忆、�
 启动夜间调度时传递与Router/Chat/任务共用的`llm_slot`；保存Provider或角色配置后，后台会话下一批、人物下一次也读取新配置，避免持续使用启动时模型。凌晨3点、每晚10人、串行60秒间隔仍沿用现有配置；持久覆盖、诊断及同类失败熔断见[记忆功能](../core/memory.md#v19近期增量历史补齐与整理诊断)。这项源码修改不等于目标服务器已更新。
 
 
+新增公共 `scheduled_tools` 受监督调度协程，使用与插件和 Agent 共用的 ToolRegistry；通过 SQLite 到期扫描和租约恢复，不为夸克另造 Cron。服务关闭时与其它受监督后台组件一同停止。此处只读每日检查，无自动换链；业务契约见[统一每日只读工具调度](../core/scheduler.md)。
+
 编译清单新增默认编入的 `plugin-qzone` feature，装配层将已有适配器和security.super_admin_qq传入受限QQ空间服务；未编译该feature则无对应插件，新运行目录仍沿用插件默认未启用规则。不创建第二个QQ登录会话，应用部署不得随带重启NapCat。具体功能见[QQ空间](../extensions/plugins/qzone.md)。
+
+
+服务插件默认编入 `plugin-tencent-docs` 和 `plugin-quark-drive`，运行时仍默认关闭；无 Token 或无 CLI/授权时不伪造连接成功。Dockerfile 的 connector-runtime 阶段提供 Node.js 22，CLI 及其 OAuth 配置须由管理员安装到持久 data 路径；仓库镜像不会下载账号凭据或在后台运行官方更新脚本。Docker 构建已补齐全部 workspace manifests、编译所需 SKILL.md 和实际前端构建产物。CI 对 Node 基础运行时做烟测，该烟测不代表完整应用镜像/真实账号联调；应用 Linux 构建和后端测试另行执行。只改仓库不等于更新服务器。
+
+装配在插件加载后、开始接收事件前，将 security.super_admin_qq 写入共享账号身份槽；腾讯文档/夸克的 Connector 和工具可见性均从该槽校验。它是启动配置，变更后需要重启云团；不改变现有 QQ空间适配器的账号检查。

@@ -199,6 +199,13 @@ pub async fn post_config(
         if cfg_clean.get("sandbox") != orig.get("sandbox") {
             requires_restart.push("sandbox 开发沙箱（重启生效）".into());
         }
+        if cfg_clean
+            .get("security")
+            .and_then(|v| v.get("super_admin_qq"))
+            != orig.get("security").and_then(|v| v.get("super_admin_qq"))
+        {
+            requires_restart.push("security.super_admin_qq 账号操作人（重启生效）".into());
+        }
         std::fs::write(&state.extras.config_path, &toml_text)
             .map_err(|e| err(&format!("写 config.toml 失败: {e}")))?;
 

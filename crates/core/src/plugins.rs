@@ -8,7 +8,7 @@ use std::{
     collections::BTreeMap,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, RwLock,
     },
     time::Duration,
@@ -296,9 +296,14 @@ struct Services {
     qzone: Option<Arc<dyn QzoneService>>,
     tools: crate::tools::Registry,
     db_path: PathBuf,
+    account_owner: Arc<AtomicU64>,
 }
 #[async_trait]
 impl HostServices for Services {
+    fn account_owner_qq(&self) -> Option<u64> {
+        let id = self.account_owner.load(Ordering::Acquire);
+        (id > 0).then_some(id)
+    }
     async fn authorize_tool_for_skill(
         &self,
         ctx: &ToolCtx,
@@ -483,6 +488,7 @@ pub struct PluginManager {
     moderation: Option<Arc<dyn GroupModeration>>,
     qzone: Option<Arc<dyn QzoneService>>,
     db_path: PathBuf,
+    account_owner: Arc<AtomicU64>,
 }
 
 enum Change {
@@ -511,6 +517,10 @@ async fn update_response(handle: tokio::task::JoinHandle<Result<()>>) -> Result<
     }
 }
 impl PluginManager {
+    pub fn set_account_owner(&self, owner: Option<u64>) {
+        self.account_owner
+            .store(owner.unwrap_or(0), Ordering::Release);
+    }
     pub async fn load(
         plugins: Vec<Arc<dyn Plugin>>,
         data_root: PathBuf,
@@ -564,6 +574,7 @@ impl PluginManager {
             moderation: moderation.clone(),
             qzone: qzone.clone(),
             db_path: data_root.join("yuantuan.db"),
+            account_owner: Arc::new(AtomicU64::new(0)),
         };
         // Validate the complete catalog before starting any plugin.
         let mut ids = std::collections::HashSet::new();
@@ -626,6 +637,7 @@ impl PluginManager {
                     io: Mutex::new(()),
                     tools: manager.tools.clone(),
                     db_path: manager.db_path.clone(),
+                    account_owner: manager.account_owner.clone(),
                     qzone: if meta.id == "qzone" {
                         qzone.clone()
                     } else {
@@ -998,6 +1010,7 @@ impl PluginManager {
             io: Mutex::new(()),
             tools: self.tools.clone(),
             db_path: self.db_path.clone(),
+            account_owner: self.account_owner.clone(),
             qzone: if entry.meta.id == "qzone" {
                 self.qzone.clone()
             } else {

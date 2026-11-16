@@ -55,4 +55,13 @@ V12在现有session保护层注册 `/api/capabilities`、`/api/tasks/{id}/runtim
 Trace的policy版本5可展示“计划表情”的类别及云团专属/其他图库/优先云团范围；它是Decision的已校验计划，实际图片发送以BubbleSent回执为准。旧事件没有计划字段时不补造，trace-flow浏览器回归同时覆盖新计划标签与既有热度/失败状态。
 
 
+V20 复用管理员 Session 保护层注册夸克链接守护的五个 GET/POST/DELETE 接口；API 实际实现见 [\`crates/webui/src/schedule_api.rs\`](../../../crates/webui/src/schedule_api.rs) ，业务规则由[统一每日只读工具调度](../core/scheduler.md)维护。按钮不直接执行外部 Shell，使用核心 ToolRegistry 及 SQLite 状态。此源码修改尚未经过真实夸克账号联调。
+
 插件中心使用共享 `/plugins/:name` 独立配置页，复用已认证插件与能力API；设置草稿、secret保留、应用等待、会话范围和工具参数查看保持。QQ空间使用该模板配置可见范围与额度，没有单独Cookie表单；插件已加载不等于已完成真实发布。详见[宿主](../extensions/host.md)和[QQ空间](../extensions/plugins/qzone.md)。
+
+
+服务连接配置页新增“检查连接”，只检查已保存且已启用的腾讯文档或夸克插件，调用公共认证探针 API，明确呈现返回结果或错误；不保存 Token 到前端状态回显。Token 环境变量名、secret 和创建分享/文档写入开关仍由通用元数据表单提供。回归包括真实 API 注册表/认证/持久开关与浏览器配置保存后检查，QQ空间原有参数契约与启停保持。
+
+连接结果按当前插件标识关联，切换详情页后不把旧请求成功显示成新插件已连接。账号操作者统一使用主配置 security.super_admin_qq，插件页不复制 owner 设置。
+
+配置 API 保存更改后的 security.super_admin_qq 会明确返回 requires_restart，原值未变时不重复提示；对应 pages_api 回归验证这不是已经热应用。

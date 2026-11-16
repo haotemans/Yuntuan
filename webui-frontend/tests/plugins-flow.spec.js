@@ -13,8 +13,8 @@ function catalog() {
     name, display_name, description:purpose, version:'0.1.0', enabled:true, loaded:true, updating:false,
     pending_reload:false, pending_restart:false,
     presentation:{ purpose, examples: name==='nai-image' ? ['/image -m nai5 -r 2:3 成年女性在图书馆阅读'] : ['请直接描述任务'] },
-    skills:[{ name:name==='qzone'?'qzone.publish':name+'.generate', description:purpose, commands }],
-    tools:[{name:name==='qzone'?'qzone.publish':name+'.generate',description:purpose}],
+    skills:[{ name:name==='qzone'?'qzone.publish':['tencent-docs','quark-drive'].includes(name)?name+'.assist':name+'.generate', description:purpose, commands }],
+    tools:(name==='tencent-docs'?['catalog','read','call']:name==='quark-drive'?['account','search','inspect_share','share_updates','updated_files','create_share']:name==='qzone'?['publish']:['generate']).map(op=>({name:name+'.'+op,description:purpose})),
     invocations:{active:0,succeeded:3,failed:0,rejected:0,cancelled:0,last_status:'succeeded',last_duration_ms:1250},
     config_fields: name==='nai-image' ? [
       {key:'api_key',label:'API Key',kind:'string',secret:true,has_value:true},
@@ -24,6 +24,13 @@ function catalog() {
     ] : name==='qzone' ? [
       {key:'default_visibility',label:'默认可见范围',kind:'choice',default:'friends',options:[{value:'friends',label:'好友可见'},{value:'private',label:'仅自己可见'}]},
       {key:'daily_limit',label:'每日发布上限',kind:'integer',default:10},
+    ] : name==='tencent-docs' ? [
+      {key:'token_env',label:'Token 环境变量名',kind:'string',default:''},
+      {key:'token',label:'个人 Token',kind:'string',secret:true,has_value:true},
+      {key:'allow_writes',label:'允许文档写入',kind:'boolean',default:false},
+    ] : name==='quark-drive' ? [
+      {key:'cli_script',label:'官方 CLI 脚本路径',kind:'string',default:''},
+      {key:'allow_share_creation',label:'允许创建分享',kind:'boolean',default:false},
     ] : [],
     settings:{enabled:true,allowed_chats:null,timeout_ms:360000,max_concurrency:1,max_output_bytes:65536,
       config:name==='nai-image'?{base_url:'https://nai.rinko.ai',default_model:'nai4.5',enabled_option:true}:name==='qzone'?{default_visibility:'friends',daily_limit:10}:{}},
@@ -31,7 +38,7 @@ function catalog() {
 }
 
 async function openPlugins(page, { deferred=false,error=false }={}) {
-  const state={plugins:catalog(),reads:0,writes:[],capabilityWrites:[],released:false}
+  const state={plugins:catalog(),reads:0,writes:[],capabilityWrites:[],released:false,watches:[]}
   state.capabilities=state.plugins.flatMap(p=>[
     ...p.skills.map(s=>({name:s.name,kind:'skill',enabled:true,scopes:['group:42'],calls:3})),
     ...p.tools.map(t=>({name:t.name,kind:'tool',enabled:true,scopes:['group:42'],calls:2,tool_contract:{input_schema:{type:'object',properties:t.name==='qzone.publish'?{content:{type:'string'}}:{prompt:{type:'string'}}}}})),
@@ -40,6 +47,34 @@ async function openPlugins(page, { deferred=false,error=false }={}) {
   await page.routeWebSocket('**/ws**',()=>{})
   await page.route('**/api/**',async route=>{
     const pathname=new URL(route.request().url()).pathname
+    if (pathname === '/api/plugins/connection/check') {
+      state.connectionChecks ||= []
+      state.connectionChecks.push(route.request().postDataJSON())
+      return route.fulfill({json:{ok:true,summary:'连接成功，已获取实际工具目录'}})
+    }
+    if (pathname === '/api/plugins/quark/watches') {
+      if (route.request().method() === 'POST') {
+        const body=route.request().postDataJSON()
+        const item={id:state.watches.length+1,title:body.title||'夸克分享链接',tool_name:'quark-drive.inspect_share',
+          resource_key:body.url,enabled:true,next_run_at:1794783600,last_run_at:null,last_status:'pending',last_summary:''}
+        state.watches.push(item)
+        return route.fulfill({json:{ok:true,id:item.id}})
+      }
+      return route.fulfill({json:{ok:true,watches:state.watches}})
+    }
+    if (pathname.startsWith('/api/plugins/quark/watches/')) {
+      const id=Number(pathname.split('/')[5])
+      const item=state.watches.find(w=>w.id===id)
+      if (!item) return route.fulfill({status:404,json:{error:'任务不存在'}})
+      if (pathname.endsWith('/check')) {
+        item.last_status='accessible'
+        item.last_run_at=1794780000
+        item.last_summary='夸克官方 CLI 已执行'
+      } else if (route.request().method()==='DELETE') {
+        state.watches=state.watches.filter(w=>w.id!==id)
+      } else item.enabled=route.request().postDataJSON().enabled
+      return route.fulfill({json:{ok:true}})
+    }
     if (pathname==='/api/capabilities') {
       if (route.request().method()==='POST') {
         const body=route.request().postDataJSON()
@@ -162,4 +197,38 @@ test('QQ Space uses the common independent settings route without asking for coo
   await expect(tool).toBeVisible()
   await tool.locator('..').getByText('调用参数',{exact:true}).click()
   await expect(tool.locator('..').locator('.tool-schema')).toContainText('content')
+})
+
+test('quark share watcher uses the shared persistent schedule API',async ({page})=>{
+  const state=await openPlugins(page)
+  await page.getByRole('button',{name:'查看夸克网盘详情'}).click()
+  await page.getByText('分享守护',{exact:true}).click()
+  await expect(page.getByText('尚未登记分享链接',{exact:false})).toBeVisible()
+  await page.getByPlaceholder('任务名称（可选）').fill('学习资料')
+  await page.getByPlaceholder('https://pan.quark.cn/s/...').fill('https://pan.quark.cn/s/demo123')
+  await page.getByRole('button',{name:'添加每日检查'}).click()
+  await expect(page.getByText('学习资料',{exact:true})).toBeVisible()
+  expect(state.watches).toHaveLength(1)
+  await page.getByRole('button',{name:'立即检查'}).click()
+  await expect(page.getByText('链接可访问',{exact:false})).toBeVisible()
+  await page.getByRole('switch',{name:'启用守护 1'}).click()
+  expect(state.watches[0].enabled).toBe(false)
+  page.once('dialog',dialog=>dialog.accept())
+  await page.getByRole('button',{name:'删除'}).click()
+  await expect(page.getByText('尚未登记分享链接',{exact:false})).toBeVisible()
+  expect(state.watches).toHaveLength(0)
+})
+
+test('connector check uses saved configuration and the shared probe endpoint',async ({page})=>{
+  const state=await openPlugins(page)
+  await page.getByRole('button',{name:'查看腾讯文档详情'}).click()
+  await page.getByText('连接配置',{exact:true}).click()
+  await page.getByRole('textbox',{name:'Token 环境变量名',exact:true}).fill('TENCENT_DOCS_TOKEN')
+  await expect(page.getByRole('button',{name:'检查连接',exact:true})).toBeDisabled()
+  await page.getByRole('button',{name:'保存并应用'}).click()
+  expect(state.writes[0].settings.config.token_env).toBe('TENCENT_DOCS_TOKEN')
+  expect(state.writes[0].settings.config).not.toHaveProperty('token')
+  await page.getByRole('button',{name:'检查连接',exact:true}).click()
+  await expect(page.getByText('连接成功，已获取实际工具目录')).toBeVisible()
+  expect(state.connectionChecks).toEqual([{name:'tencent-docs'}])
 })

@@ -432,6 +432,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "V0.19 人物整理精确覆盖与运行诊断",
         include_str!("db/portrait_v19.sql"),
     ),
+    (
+        "V0.20 持久只读工具定时任务",
+        include_str!("db/scheduler_v20.sql"),
+    ),
 ];
 
 pub async fn migrate(conn: &mut sqlx::SqliteConnection) -> Result<()> {

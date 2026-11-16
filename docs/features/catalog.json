@@ -177,16 +177,18 @@
         "webui-frontend/src/views/Plugins.vue",
         "crates/plugin-api/src/membership.rs",
         "crates/core/src/capabilities.rs",
-        "crates/core/src/capabilities/schema.rs",
+        "crates/plugin-api/src/schema.rs",
         "crates/plugin-api/src/qzone.rs",
-        "webui-frontend/src/views/PluginSettings.vue"
+        "webui-frontend/src/views/PluginSettings.vue",
+        "crates/plugin-api/src/account.rs"
       ],
       "tests": [
         "crates/core/tests/plugin_host.rs",
         "crates/core/tests/plugin_attachments.rs",
         "crates/core/tests/tool_usability.rs",
         "webui-frontend/tests/plugins-flow.spec.js",
-        "crates/core/tests/qzone_host.rs"
+        "crates/core/tests/qzone_host.rs",
+        "crates/plugin-api/src/account.rs"
       ],
       "module": "extensions"
     },
@@ -427,6 +429,54 @@
         "webui-frontend/tests/plugins-flow.spec.js"
       ],
       "module": "extensions/plugins"
+    },
+    {
+      "id": "plugin-tencent-docs",
+      "title": "腾讯文档：官方 MCP",
+      "status": "已新增接入代码（真实授权与网络验证待完成）",
+      "doc": "docs/features/extensions/plugins/tencent-docs.md",
+      "source": [
+        "plugins/tencent-docs/src/lib.rs"
+      ],
+      "tests": [
+        "plugins/tencent-docs/src/tests.rs",
+        "crates/mcp-http/src/tests.rs",
+        "webui-frontend/tests/plugins-flow.spec.js",
+        "crates/webui/tests/pages_api.rs"
+      ],
+      "module": "extensions/plugins"
+    },
+    {
+      "id": "plugin-quark-drive",
+      "title": "夸克网盘：官方 Skill/CLI",
+      "status": "已新增 CLI 适配（真实 OAuth 与网盘验证待完成）",
+      "doc": "docs/features/extensions/plugins/quark-drive.md",
+      "source": [
+        "plugins/quark-drive/src/lib.rs",
+        "plugins/quark-drive/src/process.rs"
+      ],
+      "tests": [
+        "plugins/quark-drive/src/tests.rs",
+        "webui-frontend/tests/plugins-flow.spec.js",
+        "crates/core/src/scheduler.rs"
+      ],
+      "module": "extensions/plugins"
+    },
+    {
+      "id": "scheduler",
+      "title": "统一每日只读工具调度与分享守护",
+      "status": "新增持久调度代码（真实账号联调与部署待完成）",
+      "doc": "docs/features/core/scheduler.md",
+      "source": [
+        "crates/core/src/scheduler.rs",
+        "crates/webui/src/schedule_api.rs"
+      ],
+      "tests": [
+        "crates/core/tests/sqlx_storage.rs",
+        "webui-frontend/tests/plugins-flow.spec.js",
+        "crates/core/src/scheduler.rs"
+      ],
+      "module": "core"
     }
   ],
   "description": "One canonical feature document per behavior; module README files are navigation only; each managed source has exactly one primary feature owner.",

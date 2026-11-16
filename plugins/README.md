@@ -84,9 +84,10 @@ cargo check -p yuantuan --no-default-features
 
 视频与图文示例见 [social-media](social-media/README.md)，当前为实验性平台适配。
 
+## 服务插件与公共页面
 
-## 独立配置与 Skill 委托
+- [腾讯文档](../docs/features/extensions/plugins/tencent-docs.md)：官方 HTTP MCP。
+- [夸克网盘](../docs/features/extensions/plugins/quark-drive.md)：官方 CLI、OAuth 及核心每日只读调度。
+- [QQ空间](../docs/features/extensions/plugins/qzone.md)：现有 NapCat 登录与发布回执。
 
-每个插件使用 `/plugins/:name` 通用配置页，表单、启停、会话范围、能力开关和统计复用宿主。新增QQ空间见[功能文档](../docs/features/extensions/plugins/qzone.md)。
-
-Skill直接委托共享业务处理器时，先调用 `host.authorize_tool_for_skill(ctx, tool_name, args)`，核验工具真实注册、开关、范围和参数。不要递归调用同插件 HostedTool 以再次获取并发门；命令与自然语言共用一个处理器。无参数状态命令可显式覆盖 `Skill::accepts_empty_command`，默认执行命令仍要求输入。公共规则集中在[扩展宿主](../docs/features/extensions/host.md)。
+每个插件使用 `/plugins/:name` 通用配置页。表单、启停、范围、能力开关和统计复用宿主；只有安装并完成账号授权后才能验证服务连通。Skill 委托前调用 `host.authorize_tool_for_skill(ctx,name,args)`，不递归进入同插件 Tool Gate。无参数查询可显式声明 `accepts_empty_command`；最终参数复用 `validate_tool_arguments`，不自行复制校验器。公共规则和接口见[扩展宿主](../docs/features/extensions/host.md)。

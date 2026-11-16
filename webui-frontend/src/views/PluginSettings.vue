@@ -38,8 +38,8 @@
             </section>
             <section class="panel">
               <h2>连接与授权</h2>
-              <p v-if="detail.name === 'tencent-docs'">使用腾讯文档官方 MCP。先获取个人 Token，再到「连接配置」填写。开启插件不代表已完成远端联通测试。</p>
-              <p v-else-if="detail.name === 'quark-drive'">在 Linux / WSL 中安装并登录夸克官方 Skill CLI，填写 quark-drive.cjs 的绝对路径。OAuth 凭据保留在官方 CLI 中，不存储到云团 Skill。</p>
+              <p v-if="detail.name === 'tencent-docs'">仅云团超级管理员可操作。使用腾讯文档官方 MCP，先获取个人 Token，再到「连接配置」填写。开启插件不代表已完成远端联通测试。</p>
+              <p v-else-if="detail.name === 'quark-drive'">仅云团超级管理员可操作。在云团应用容器或进程内安装、授权官方 CLI，填写容器内 quark-drive.cjs 的绝对路径。脚本和 OAuth 配置应放在持久 data 目录。</p>
               <p v-else-if="detail.name === 'qzone'">使用 NapCat 当前登录的 QQ 账号，无需另填 Cookie。仅云团超级管理员可发布；默认可见范围和每日额度可在连接配置中调整。</p>
               <p v-else>使用云团现有插件配置、权限和调用状态管理。</p>
               <a v-if="officialUrl" :href="officialUrl" target="_blank" rel="noopener noreferrer" class="official-link">查看官方授权及安装说明 ↗</a>
@@ -57,7 +57,7 @@
                 <div v-else class="field-input">
                   <n-input v-model:value="configDraft[field.key]" :type="field.secret ? 'password' : 'text'"
                     :placeholder="field.secret ? (field.has_value ? '已保存，留空保持不变' : '尚未配置') : ''"
-                    :autocomplete="field.secret ? 'off' : 'on'" :aria-label="field.label" />
+                    :autocomplete="field.secret ? 'off' : 'on'" :input-props="{'aria-label':field.label}" />
                   <div v-if="field.secret" class="field-help">
                     {{ field.has_value ? '密钥已保存（不显示明文）' : '尚未设置密钥' }}
                     <n-checkbox v-if="field.has_value" v-model:checked="clearSecrets[field.key]">清除密钥</n-checkbox>
@@ -76,9 +76,11 @@
             </n-form>
             <div class="settings-actions">
               <span aria-live="polite">{{ saved }}</span>
+              <n-button v-if="['tencent-docs','quark-drive'].includes(detail.name)" :loading="checkingConnection" :disabled="busy || checkingConnection || formDirty || !detail.loaded || !detail.enabled || detail.updating" @click="checkConnection">检查连接</n-button>
               <n-button :disabled="busy || detail.updating || !formDirty" @click="resetDraft(detail)">撤销修改</n-button>
               <n-button type="primary" :loading="busy" :disabled="busy || detail.updating || !formDirty" @click="saveConfig">保存并应用</n-button>
             </div>
+            <n-alert v-if="connectionResult" :type="connectionFailed ? 'error' : 'success'" :bordered="false" class="connection-result">{{ connectionResult }}</n-alert>
           </section>
         </n-tab-pane>
         <n-tab-pane name="skills" tab="Skills / Tools">
@@ -99,6 +101,34 @@
               <n-switch :value="capabilityEnabled(tool.name,'tool')" :disabled="busy || !capability(tool.name,'tool')" :aria-label="`工具 ${tool.name}`" @update:value="value => toggleCapability(tool.name,'tool',value)" />
             </div>
             <p v-if="!detail.skills?.length && !detail.tools?.length">启用插件并完成配置后，将在这里看到工具和 Skill。</p>
+          </section>
+        </n-tab-pane>
+        <n-tab-pane v-if="detail.name === 'quark-drive'" name="links" tab="分享守护">
+          <section class="panel">
+            <h2>分享链接每日检查</h2>
+            <p>默认每天北京时间 09:00，通过夸克官方 CLI 检查已登记的分享 URL。此功能只做只读检测、保存结果，不会在平台限制或链接异常时自动换链。网络失败不等于违规封禁。</p>
+            <div class="watch-form">
+              <n-input v-model:value="watchTitle" placeholder="任务名称（可选）" aria-label="守护任务名称" />
+              <n-input v-model:value="watchUrl" placeholder="https://pan.quark.cn/s/..." aria-label="夸克分享链接" />
+              <n-button type="primary" :loading="watchBusy" :disabled="watchBusy || !watchUrl.trim()" @click="addWatch">添加每日检查</n-button>
+            </div>
+            <n-alert v-if="watchError" type="error" :bordered="false" closable @close="watchError = ''">{{ watchError }}</n-alert>
+            <div v-if="!watches.length" class="watch-empty">尚未登记分享链接。先在「连接配置」启用并授权夸克插件，然后添加链接。</div>
+            <div v-for="item in watches" :key="item.id" class="watch-item">
+              <div class="watch-info">
+                <strong>{{ item.title }}</strong>
+                <a :href="item.resource_key" target="_blank" rel="noopener noreferrer">{{ item.resource_key }}</a>
+                <small>状态：{{ watchStatus(item.last_status) }} · 下次检查：{{ fmtTime(item.next_run_at) }}</small>
+                <small v-if="item.last_run_at">最近检查：{{ fmtTime(item.last_run_at) }}</small>
+                <small v-if="item.last_summary">{{ item.last_summary }}</small>
+              </div>
+              <div class="watch-actions">
+                <n-switch :value="item.enabled" :disabled="watchBusy" :aria-label="`启用守护 ${item.id}`" @update:value="enabled => toggleWatch(item,enabled)" />
+                <n-button size="small" :loading="watchBusy && watchBusyId===item.id" :disabled="watchBusy || !item.enabled" @click="checkWatch(item)">立即检查</n-button>
+                <n-button size="small" tertiary type="error" :disabled="watchBusy" @click="removeWatch(item)">删除</n-button>
+              </div>
+            </div>
+            <p class="watch-caution">需要官方 CLI 已登录；定时检查复用云团已有 Tool 权限和插件调用统计。检查失败只记录异常，不会自动重新分享。</p>
           </section>
         </n-tab-pane>
         <n-tab-pane name="runtime" tab="运行记录">
@@ -139,10 +169,89 @@ const busy = ref(false)
 const loadError = ref('')
 const actionError = ref('')
 const saved = ref('')
+const checkingConnection = ref(false)
+const connectionResult = ref('')
+const connectionFailed = ref(false)
+async function checkConnection() {
+  if (checkingConnection.value || !detail.value || formDirty.value) return
+  const name = detail.value.name
+  checkingConnection.value = true
+  connectionResult.value = ''
+  try {
+    const {data} = await api.post('/plugins/connection/check',{name})
+    if (detail.value?.name !== name) return
+    connectionResult.value = data.summary || '连接检查已完成'
+    connectionFailed.value = false
+  } catch(e) {
+    if (detail.value?.name !== name) return
+    connectionResult.value = e.response?.data?.error || '连接失败，请检查安装、授权、网络及调用范围'
+    connectionFailed.value = true
+  } finally { checkingConnection.value = false }
+}
+
+const watches = ref([])
+const watchTitle = ref('')
+const watchUrl = ref('')
+const watchBusy = ref(false)
+const watchBusyId = ref(null)
+const watchError = ref('')
 const initialTab = typeof route.query.tab === 'string' ? route.query.tab : ''
-const activeTab = ref(['overview','config','skills','runtime'].includes(initialTab) ? initialTab : 'overview')
+const activeTab = ref(['overview','config','skills','runtime','links'].includes(initialTab) ? initialTab : 'overview')
 const detail = computed(() => plugins.value.find(p => p.name === route.params.name))
 const officialUrl = computed(() => ({'tencent-docs':'https://docs.qq.com/open/auth/mcp.html','quark-drive':'https://github.com/quark-clouddrive/quarkclouddrive_offical'}[detail.value?.name] || ''))
+const watchLabels = { pending:'待首次检查', checking:'检查中', accessible:'链接可访问', check_failed:'检查失败（需核实）' }
+const watchStatus = status => watchLabels[status] || '状态未知'
+const fmtTime = stamp => stamp ? new Date(stamp * 1000).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai',hour12:false}) : '尚未安排'
+async function loadWatches() {
+  if (detail.value?.name !== 'quark-drive') return
+  try {
+    const {data} = await api.get('/plugins/quark/watches')
+    watches.value = data.watches || []
+  } catch(e) { watchError.value = e.response?.data?.error || '无法获取分享守护列表' }
+}
+async function addWatch() {
+  if (watchBusy.value) return
+  watchBusy.value = true
+  watchError.value = ''
+  try {
+    await api.post('/plugins/quark/watches',{url:watchUrl.value,title:watchTitle.value})
+    watchUrl.value = ''
+    watchTitle.value = ''
+    message.success('已登记每日检查任务')
+    await loadWatches()
+  } catch(e) { watchError.value = e.response?.data?.error || '添加失败，请检查授权与链接' }
+  finally { watchBusy.value = false }
+}
+async function checkWatch(item) {
+  if (watchBusy.value) return
+  watchBusy.value = true
+  watchBusyId.value = item.id
+  watchError.value = ''
+  try {
+    await api.post(`/plugins/quark/watches/${item.id}/check`,{})
+    await loadWatches()
+    message.success('检查结果已更新')
+  } catch(e) { watchError.value = e.response?.data?.error || '检查失败' }
+  finally { watchBusy.value = false; watchBusyId.value = null }
+}
+async function toggleWatch(item,enabled) {
+  if (watchBusy.value) return
+  watchBusy.value = true
+  try {
+    await api.post(`/plugins/quark/watches/${item.id}`,{enabled})
+    await loadWatches()
+  } catch(e) { watchError.value = e.response?.data?.error || '更改失败' }
+  finally { watchBusy.value = false }
+}
+async function removeWatch(item) {
+  if (watchBusy.value || !window.confirm('删除这条分享守护任务？不会删除网盘中的文件。')) return
+  watchBusy.value = true
+  try {
+    await api.delete(`/plugins/quark/watches/${item.id}`)
+    await loadWatches()
+  } catch(e) { watchError.value = e.response?.data?.error || '删除失败' }
+  finally { watchBusy.value = false }
+}
 const commands = computed(() => [...new Set((detail.value?.skills || []).flatMap(s => s.commands || []))])
 const configDraft = ref({})
 const clearSecrets = ref({})
@@ -187,12 +296,13 @@ async function load() {
     capabilities.value=capResponse.data.capabilities || []
     if (detail.value && (!baseline.value || !formDirty.value)) resetDraft(detail.value)
     loadError.value=''
+    if (activeTab.value === 'links' && !watchBusy.value) await loadWatches()
   } catch(e) {
     if (!disposed) loadError.value=e.response?.data?.error || '无法获取插件详情'
   } finally { loading.value=false; fetching=false }
 }
-watch(() => route.params.name, () => {baseline.value='';void load()})
-watch(activeTab, tab => { router.replace({query:{...route.query,tab}}) })
+watch(() => route.params.name, () => {baseline.value='';connectionResult.value='';void load()})
+watch(activeTab, tab => { router.replace({query:{...route.query,tab}}); if (tab === 'links') void loadWatches() })
 async function saveConfig() {
   const plugin=detail.value
   if (!plugin || busy.value || plugin.updating) return
@@ -237,6 +347,7 @@ onUnmounted(() => {disposed=true;clearTimeout(timer)})
 </script>
 
 <style scoped>
+.connection-result {white-space:pre-wrap;overflow-wrap:anywhere}
 .plugin-settings {max-width:1180px;margin:0 auto;padding-bottom:58px}
 .topbar {display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}
 .eyebrow {font-size:11px;letter-spacing:.13em;color:var(--yt-ink-3)}
@@ -270,5 +381,14 @@ onUnmounted(() => {disposed=true;clearTimeout(timer)})
 .stats {display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
 .stats dt {font-size:12px;color:var(--yt-ink-3)}
 .stats dd {font-size:23px;margin:5px 0;font-variant-numeric:tabular-nums}
+.watch-form {display:grid;grid-template-columns:minmax(140px,1fr) minmax(220px,2fr) auto;gap:10px;margin:24px 0}
+.watch-item {display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:18px 0;border-top:1px solid var(--yt-card-border)}
+.watch-info {display:flex;flex-direction:column;gap:7px;min-width:0}
+.watch-info strong {font-size:14px;color:var(--yt-ink-1)}
+.watch-info a {font-size:12px;color:var(--yt-primary);word-break:break-all}
+.watch-info small,.watch-caution,.watch-empty {font-size:12px;color:var(--yt-ink-3);line-height:1.6}
+.watch-actions {display:flex;align-items:center;gap:10px;flex-shrink:0}
+.watch-empty {padding:22px 0}
+@media(max-width:760px) { .watch-form {grid-template-columns:1fr} .watch-item {flex-direction:column} .watch-actions {flex-wrap:wrap} }
 @media(max-width:760px) {.plugin-heading{align-items:start;flex-direction:column}.section-grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}.panel{padding:18px}}
 </style>

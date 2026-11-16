@@ -88,6 +88,10 @@ jobs:
 
       - name: 全量测试（mock WS/LLM、SQLx 存储，不依赖外部服务）
         run: |
+          cargo test --locked -p yuantuan-mcp-http
+          cargo test --locked -p yuantuan-plugin-tencent-docs -p yuantuan-plugin-quark-drive
+          cargo test --locked -p yuantuan-core --lib scheduler::tests
+          cargo test --locked -p yuantuan-webui --test pages_api connector_probe
           cargo test --locked -p yuantuan-plugin-qzone
           cargo test --locked -p yuantuan-core --test qzone_host
           cargo test --locked -p yuantuan-adapter-qq --lib qzone
@@ -112,6 +116,11 @@ jobs:
           cargo test --locked -p yuantuan-webui --test memes_api
           cargo test --locked -p yuantuan-adapter-qq --test meme --test reply
           cargo test --locked --workspace
+
+      - name: Docker connector runtime smoke
+        run: |
+          docker build --target connector-runtime -t yuantuan-connector-runtime:ci .
+          docker run --rm --entrypoint node yuantuan-connector-runtime:ci --version
 
       - name: musl release 构建
         run: cargo build --locked --release --target x86_64-unknown-linux-musl -p yuantuan

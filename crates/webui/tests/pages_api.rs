@@ -314,6 +314,7 @@ async fn decision_status_reads_real_states_without_replaying_uncertain_actions()
 }
 
 struct Rig {
+    tools: yuantuan_core::tools::Registry,
     http: reqwest::Client,
     base: String,
     token: String,
@@ -358,6 +359,7 @@ async fn start() -> Rig {
         .await
         .unwrap(),
     );
+    let tools = extras.tools_registry.clone();
     let self_qq = extras.self_qq.clone();
     let db2 = db_path.clone();
     tokio::spawn(async move {
@@ -386,6 +388,7 @@ async fn start() -> Rig {
         .await
         .unwrap();
     Rig {
+        tools,
         http,
         base,
         token: login["token"].as_str().unwrap().to_string(),
@@ -504,6 +507,18 @@ async fn relations_folds_bot_aliases_without_merging_same_name_members_or_histor
 }
 
 impl Rig {
+    async fn post(&self, path: &str, body: Value) -> (u16, Value) {
+        let response = self
+            .http
+            .post(format!("{}{}", self.base, path))
+            .bearer_auth(&self.token)
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        (response.status().as_u16(), response.json().await.unwrap())
+    }
+
     async fn get(&self, path: &str) -> (u16, Value) {
         let r = self
             .http
@@ -859,4 +874,117 @@ async fn native_tool_protocol_is_saved_only_for_agent() {
     assert_eq!(response.status().as_u16(), 400);
     let (_, config) = rig.get("/api/config").await;
     assert!(config["providers"]["roles"]["bot_chat"]["tool_protocol"].is_null());
+}
+
+#[tokio::test]
+async fn connector_probe_uses_authenticated_readonly_registry_and_persistent_switches() {
+    use yuantuan_core::tools::*;
+    struct Probe;
+    #[async_trait::async_trait]
+    impl Tool for Probe {
+        fn name(&self) -> &'static str {
+            "tencent-docs.catalog"
+        }
+        fn description(&self) -> &'static str {
+            "fixture read-only connector"
+        }
+        fn parameters_schema(&self) -> Value {
+            json!({"type":"object","properties":{},"additionalProperties":false})
+        }
+        fn policy(&self) -> ToolPolicy {
+            ToolPolicy {
+                effect: ToolEffect::ReadOnly,
+                ..Default::default()
+            }
+        }
+        async fn call(&self, ctx: &ToolCtx, _: Value) -> anyhow::Result<ToolOutput> {
+            assert_eq!(ctx.chat_id, "plugin-check");
+            Ok(ToolOutput {
+                summary: "实际 fixture 工具目录".into(),
+                data: json!({}),
+                artifacts: vec![],
+            })
+        }
+    }
+    let rig = start().await;
+    let response = rig
+        .http
+        .post(format!("{}/api/plugins/connection/check", rig.base))
+        .json(&json!({"name":"tencent-docs"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 401);
+    assert_eq!(
+        rig.post("/api/plugins/connection/check", json!({"name":"qzone"}))
+            .await
+            .0,
+        400
+    );
+    assert_eq!(
+        rig.post(
+            "/api/plugins/connection/check",
+            json!({"name":"tencent-docs"})
+        )
+        .await
+        .0,
+        400
+    );
+    rig.tools.register(Probe);
+    let (status, data) = rig
+        .post(
+            "/api/plugins/connection/check",
+            json!({"name":"tencent-docs"}),
+        )
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(data["summary"], "实际 fixture 工具目录");
+    let tool = rig.tools.get("tencent-docs.catalog").unwrap();
+    yuantuan_core::capabilities::register(
+        &rig.db_path,
+        tool.name(),
+        "tool",
+        tool.description(),
+        &tool.parameters_schema(),
+    )
+    .await
+    .unwrap();
+    let mut c = db::connect(&rig.db_path).await.unwrap();
+    c.execute(
+        "UPDATE capability_catalog SET enabled=0 WHERE name='tencent-docs.catalog' AND kind='tool'",
+        yuantuan_core::db::params![],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        rig.post(
+            "/api/plugins/connection/check",
+            json!({"name":"tencent-docs"})
+        )
+        .await
+        .0,
+        400
+    );
+}
+#[tokio::test]
+async fn connector_probe_reports_account_owner_changes_as_requiring_restart() {
+    let rig = start().await;
+    let body = json!({"config":{"security":{"super_admin_qq":123}}});
+    let (status, result) = rig.post("/api/config", body.clone()).await;
+    assert_eq!(status, 200);
+    assert!(result["requires_restart"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v
+            .as_str()
+            .is_some_and(|s| s.contains("security.super_admin_qq"))));
+    let (_, same) = rig.post("/api/config", body).await;
+    assert!(!same["requires_restart"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v
+            .as_str()
+            .is_some_and(|s| s.contains("security.super_admin_qq"))));
 }

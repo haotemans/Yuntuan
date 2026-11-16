@@ -11,6 +11,9 @@ members = [
     "plugins/moderator",
     "plugins/nai-image",
     "plugins/qzone",
+    "plugins/tencent-docs",
+    "plugins/quark-drive",
+    "crates/mcp-http",
 ]
 
 [workspace.dependencies]

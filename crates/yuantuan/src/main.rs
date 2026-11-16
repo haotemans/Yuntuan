@@ -207,7 +207,16 @@ async fn main() -> Result<()> {
             .map(|h| yuantuan_adapter_qq::qzone_service(h.clone(), cfg.security.super_admin_qq)),
     )
     .await?;
+    plugins.set_account_owner(cfg.security.super_admin_qq);
     plugins.subscribe(&bus).await;
+    // Shared durable scheduler. Quark share watchers register read-only tools here.
+    {
+        let scheduler_db = db_path.clone();
+        let scheduler_tools = tools_registry.clone();
+        supervisor.spawn("scheduled_tools", move || {
+            yuantuan_core::scheduler::spawn(scheduler_db.clone(), scheduler_tools.clone())
+        });
+    }
 
     // h1''. MCP stdio client（Q-M01 裁决：spawn 外部 MCP server，tools 注入 ToolRegistry）
     //        未配置 = 跳过；任一 server 失败 = warn + 继续（不阻塞其他）
@@ -460,7 +469,12 @@ async fn finish_shutdown(
     if let Some(adapter) = adapter {
         adapter.stop_receiving();
     }
-    for name in ["pipeline", "task_runner", "steal_listener"] {
+    for name in [
+        "pipeline",
+        "task_runner",
+        "steal_listener",
+        "scheduled_tools",
+    ] {
         supervisor.stop(name);
     }
     plugins.shutdown().await;
