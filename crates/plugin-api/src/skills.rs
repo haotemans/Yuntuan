@@ -54,6 +54,11 @@ pub trait Skill: Send + Sync {
         &[]
     }
 
+    /// Explicit opt-in for parameterless status/list commands; execution commands stay strict.
+    fn accepts_empty_command(&self) -> bool {
+        false
+    }
+
     fn artifact_retention(&self) -> ArtifactRetention {
         ArtifactRetention::Keep
     }

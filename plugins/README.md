@@ -83,3 +83,10 @@ cargo check -p yuantuan --no-default-features
 测试覆盖工具和技能通过公共 API 调用、插件归属、版本和名字冲突、配置持久化与 secret 保留、热重载与失败恢复、数据键范围、会话权限、并发、超时、panic、输出限制、事件和停机生命周期。
 
 视频与图文示例见 [social-media](social-media/README.md)，当前为实验性平台适配。
+
+
+## 独立配置与 Skill 委托
+
+每个插件使用 `/plugins/:name` 通用配置页，表单、启停、会话范围、能力开关和统计复用宿主。新增QQ空间见[功能文档](../docs/features/extensions/plugins/qzone.md)。
+
+Skill直接委托共享业务处理器时，先调用 `host.authorize_tool_for_skill(ctx, tool_name, args)`，核验工具真实注册、开关、范围和参数。不要递归调用同插件 HostedTool 以再次获取并发门；命令与自然语言共用一个处理器。无参数状态命令可显式覆盖 `Skill::accepts_empty_command`，默认执行命令仍要求输入。公共规则集中在[扩展宿主](../docs/features/extensions/host.md)。

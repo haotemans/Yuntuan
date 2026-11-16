@@ -88,6 +88,10 @@ jobs:
 
       - name: 全量测试（mock WS/LLM、SQLx 存储，不依赖外部服务）
         run: |
+          cargo test --locked -p yuantuan-plugin-qzone
+          cargo test --locked -p yuantuan-core --test qzone_host
+          cargo test --locked -p yuantuan-adapter-qq --lib qzone
+          cargo test --locked -p yuantuan-core --lib bot::tests::plugin_command_works_without_models_and_keeps_output_as_text
           cargo test --locked -p yuantuan-plugin-moderator
           cargo test --locked -p yuantuan-adapter-qq --lib moderation
           cargo test --locked -p yuantuan-core --lib bot::dispatch_tests
