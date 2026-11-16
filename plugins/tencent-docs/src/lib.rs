@@ -26,8 +26,16 @@ fn config_fields() -> Vec<ConfigField> {
             options: vec![],
         },
         ConfigField {
+            key: "token_env",
+            label: "Token 环境变量名（推荐，例如 TENCENT_DOCS_TOKEN）",
+            kind: ConfigKind::String,
+            default: json!(""),
+            secret: false,
+            options: vec![],
+        },
+        ConfigField {
             key: "token",
-            label: "个人 Token（在腾讯文档申请）",
+            label: "个人 Token（未配置环境变量时可直接输入）",
             kind: ConfigKind::String,
             default: json!(""),
             secret: true,
@@ -109,11 +117,21 @@ impl Plugin for TencentDocs {
         if value.get("token").and_then(Value::as_str).is_some_and(|t| t.len() > 8192) {
             bail!("Token 超过长度限制");
         }
+        if let Some(var) = value["token_env"].as_str().filter(|v| !v.is_empty()) {
+            if var.len() > 128 || !var.bytes().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_')
+                || var.as_bytes()[0].is_ascii_digit() {
+                bail!("环境变量名应为大写字母、数字及下划线，不能以数字开头");
+            }
+        }
         Ok(())
     }
     async fn start(&self, ctx: PluginContext, config: Value) -> Result<Capabilities> {
-        let token = config["token"].as_str().filter(|v| !v.trim().is_empty())
-            .context("请在插件设置中填写腾讯文档个人 Token")?;
+        let env_token = config["token_env"].as_str().filter(|v| !v.is_empty())
+            .and_then(|var| std::env::var(var).ok())
+            .filter(|token| !token.trim().is_empty());
+        let token = env_token.as_deref()
+            .or_else(|| config["token"].as_str().filter(|v| !v.trim().is_empty()))
+            .context("请设置 Token 环境变量或在插件设置中填写个人 Token")?;
         let connector = Arc::new(Connector {
             mcp: HttpMcpClient::new(ENDPOINT, token)?,
             allow_writes: config["allow_writes"].as_bool().unwrap_or(false),

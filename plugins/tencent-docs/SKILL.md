@@ -5,7 +5,7 @@ description: Use when the user requests searching, reading, creating or editing 
 
 # 腾讯文档
 
-唯一执行来源：腾讯文档官方 HTTP MCP `https://docs.qq.com/openapi/mcp`。个人 Token 从官方页面 `https://docs.qq.com/open/auth/mcp.html` 获取，由云团管理面板安全存储，不能在对话、日志或群聊显示。
+唯一执行来源：腾讯文档官方 HTTP MCP `https://docs.qq.com/openapi/mcp`。个人 Token 从官方页面 `https://docs.qq.com/open/auth/mcp.html` 获取，优先配置服务端环境变量（插件 token_env），或通过云团管理面板 secret 字段填写，不能在对话、日志或群聊显示。
 
 1. 先调用 `tencent-docs.catalog` 读取实际可用工具与 JSON Schema，禁止依据旧工具名猜测参数。
 2. 使用 `tencent-docs.call` 执行。创建常规文档优先 `create_smartcanvas_by_markdown`；查询文件先 `search_space_file`，再使用真实 file_id 调用 `get_content`。

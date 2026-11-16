@@ -14,7 +14,7 @@
 
 ## 授权及安装
 
-在 [官方授权页面](https://docs.qq.com/open/auth/mcp.html) 获取个人 Token，进入 WebUI 插件中心 → 腾讯文档 → 连接配置填写。Token 不应该发送到 QQ 聊天、Skill 文本或日志。固定官方服务地址，防止向自定义域名发送 Token。当前沿用插件宿主的 secret 字段存储和掩码机制，并未引入新的加密凭据库。
+在 [官方授权页面](https://docs.qq.com/open/auth/mcp.html) 获取个人 Token，进入 WebUI 插件中心 → 腾讯文档 → 连接配置填写。建议在服务端环境变量设置 `TENCENT_DOCS_TOKEN` 并在插件页填写 `token_env`，不将 Token 明文写入插件配置；仍可使用宿主已有 `token` secret 字段。Token 不应该发送到 QQ 聊天、Skill 文本或日志。固定官方服务地址，防止向自定义域名发送 Token。当前沿用插件宿主的 secret 字段存储和掩码机制，并未引入新的加密凭据库。
 
 官方参考：[腾讯文档 MCP 指南](https://developer.cloud.tencent.com/mcp/server/11803)。当参数和文档有差异时，以实际 `tools/list` 为准。
 
