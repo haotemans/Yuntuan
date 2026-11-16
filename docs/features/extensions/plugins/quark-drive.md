@@ -2,7 +2,7 @@
 
 [插件索引](README.md) · [扩展宿主](../host.md) · [操作契约](../../../../plugins/quark-drive/SKILL.md)
 
-已实现官方 CLI 的受限适配。自动化实际执行 Node fixture、NDJSON/JSONL 与 SQLite 调度，但未登录真实夸克账号；不将模拟结果当作 OAuth 或真实网盘验收。
+已实现官方 CLI 受限适配及可选 Linux OAuth 工具运行服务。2026-11-17 在隔离 Linux 容器复现：普通云团运行环境被官方 CLI 1.0.25 以 `-104` 拒绝；真实 OpenCode 原生执行能取得 `pan.quark.cn` OAuth 链接，模型输入/输出 Token 均为0。获取链接不等于账号已授权；尚未用真实账号完成登录、读取文件或创建分享。
 
 ## 能力与双入口
 
@@ -25,11 +25,23 @@ Skill 在执行所选工具前复核同名 Tool 的持久开关、会话范围�
 
 首次开始时，后台从官方 CDN 下载固定的 Skill 1.0.25，验证 SHA-256 后安全解压到当前持久 data 目录的 `connectors/quark/`。镜像提供 Node.js 22；不执行远程安装 shell、不改系统包、不覆盖已有组件或登录。每包最多8MiB、解压总量32MiB/100项，拒绝路径越界、符号链接及覆盖文件。已有 `cli_script` 则直接复用，不替换自定义安装。组件根目录在 Unix 上设为0700。高级配置仍可指定应用容器内的 `quark-drive.cjs` 绝对路径。
 
-官方 CLI `login` 生成实际 OAuth 链接；后台仅提取官方 HTTPS `quark.cn` 域链接，不编造 client_id 或 redirect_uri。无桌面容器不能接收浏览器跳转时，管理员把完整跳转链接中的唯一 `code`/`agent_auth_code`（或授权页显示的裸码）粘贴回管理页。回填链接仅在本地解析，不请求其地址；目前不实现自动公开回调端点。链接仍受官方有效期约束，本地流程最多保留10分钟，刷新可恢复同一管理会话，云团重启后须重新开始。
+先执行官方 `resolve-agent` 预检查：其成功输出为 `QK_AGENT_ID=<渠道>` 文本；失败 `-104` 则显示“环境不受支持”，明确尚未进入 OAuth，不提示重复更换授权码。通过后再由官方 CLI `login` 生成实际 OAuth 链接；后台仅提取官方 HTTPS `quark.cn` 域链接，不编造 client_id 或 redirect_uri。无桌面容器不能接收浏览器跳转时，管理员把完整跳转链接中的唯一 `code`/`agent_auth_code`（或授权页显示的裸码）粘贴回管理页。回填链接仅在本地解析，不请求其地址；目前不实现自动公开回调端点。链接仍受官方有效期约束，本地流程最多保留10分钟，刷新可恢复同一管理会话，云团重启后须重新开始。
 
 授权准备、回填及检查在后台执行，管理页轮询进度；每插件只允许一项操作，流程绑定当前 WebUI 登录会话。回填码使用一次，不因失败自动重试；官方 `-118` 已授权状态通过 `get-user-info` 复核后复用。成功检查后原子写入脚本路径并启用插件，保留会话范围、调用限制及分享开关。官方凭据由 CLI 保存于持久安装目录，不回显到接口、日志或模型。
 
 之后可在高级配置点击“检查连接”，通过已注册 `quark-drive.account` 执行只读检查；此探针还受 `private:plugin-check` 与持久能力开关限制。授权向导仅核实账号并保存连接，不证明具体文件或分享已读取，也不扩大聊天调用权限。
+
+## Linux 独立工具服务
+
+普通 Docker 中仅安装 Node 和 CLI 不足以通过官方 Agent 环境识别。当前方案运行真正的 OpenCode 1.19.5 服务，通过其原生 `/session/.../shell` 接口执行官方 CLI；不伪造 Codex/OpenClaw 标识、不修改官方脚本，也不把临时授权码当作绕过运行环境检查的凭据。官方仓库的[服务器接入问题](https://github.com/quark-clouddrive/quarkclouddrive_offical/issues/18)仍需与真实验证结果区分。
+
+可选部署文件 [`compose.quark-tools.yml`](../../../../deploy/compose.quark-tools.yml) 只增加 `quark-tools` 服务，不发布宿主端口、不挂载数据库、QQ 数据或 Docker socket；默认 uid1000、768MiB/1 CPU。镜像以官方 OpenCode digest 固定版本，Node 由 Alpine 官方包提供。镜像在 GitHub Linux CI 构建，并连同其原生执行测试作为独立 artifact 保存；应用更新仍单独操作 yuantuan，不能重建 NapCat。
+
+管理员部署时在持久 `data/connectors/quark-service/` 创建权限0600的随机 `password` 和 `connection.json`：`{"kind":"yuantuan-quark-tools-v1","url":"http://quark-tools:4096/"}`。插件在 CLI 的上级目录中发现此配置后，授权、账号检查和全部业务命令统一经该运行服务；配置存在但服务断开时明确失败，不静默退回未授权的直连模式。既有 CLI 路径、会话范围和分享开关继续保留。
+
+内部 Basic Auth 是整个工具服务的操作人凭据，仅由应用读取，不返回前端或模型；目前只允许预定义内网服务名/回环 URL，禁止重定向和环境代理。云团仍负责聊天、任务授权及工具参数检查，运行服务只执行，不使用 Provider API Key、不发起模型回复。
+
+`worker.rs` 在0700目录中创建0600的一次性执行票据，把官方参数（包括授权码）留在短暂共享文件里；HTTP shell 命令只有固定入口和随机票据编号，不能拼接用户文本。`job.cjs` 取走并删除输入，校验命令白名单、路径和时限，调用真实运行层提供环境中的 Node，限制输出、执行时间并响应取消。官方输出写入私有结果文件，shell 历史只留回执编号；应用必须读取匹配票据的实际结果，不把 HTTP200/工具“完成”当成功，随后清除临时文件并删除运行会话。官方账号 Token 保存在原 CLI 持久目录，不存入执行票据、会话历史或模型上下文。
 
 ## 调用、输出和状态
 
@@ -51,6 +63,9 @@ stdout/stderr 分别有界（256KB/16KB），总执行100秒，超时/输出过�
 
 - [`plugins/quark-drive/src/lib.rs`](../../../../plugins/quark-drive/src/lib.rs)：配置、工具白名单、Schema、共享 Skill/Tool 权限和参数构造。
 - [`plugins/quark-drive/src/process.rs`](../../../../plugins/quark-drive/src/process.rs)：有界进程、NDJSON 和受限 JSONL 读取。
+- [`plugins/quark-drive/src/worker.rs`](../../../../plugins/quark-drive/src/worker.rs)：内部 HTTP 鉴权、私有票据与真实结果校验；[`worker/tests.rs`](../../../../plugins/quark-drive/src/worker/tests.rs) 覆盖没有实际回执时不能报告成功。
+- [`plugins/quark-drive/worker/job.test.cjs`](../../../../plugins/quark-drive/worker/job.test.cjs)：argv、输出上限、取消、过期及凭据不进入 shell 输出。
+- [`plugins/quark-drive/worker/smoke.py`](../../../../plugins/quark-drive/worker/smoke.py)：真实 Docker/OpenCode 原生执行、鉴权与零模型 Token；显式 `--official-sdk` 额外核实官方 OAuth 链接，不代替用户同意。
 - [`plugins/quark-drive/src/auth.rs`](../../../../plugins/quark-drive/src/auth.rs)：固定组件安装、OAuth 链接提取及回填；[`auth/tests.rs`](../../../../plugins/quark-drive/src/auth/tests.rs) 使用 Node fixture 验证非零退出、授权码、已有登录和解压边界。
 - [`plugins/quark-drive/src/tests.rs`](../../../../plugins/quark-drive/src/tests.rs)：真实 Node fixture 验证 argv 不经 shell、会话复用、能力停用不执行、结果文件/notice/敏感字段与无效分享输入。
 - [`crates/core/src/scheduler.rs`](../../../../crates/core/src/scheduler.rs)：内含真实 SQLite + fake Tool 的持久、权限、租约和失败状态回归。

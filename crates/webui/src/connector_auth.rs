@@ -95,7 +95,11 @@ impl AuthState {
                 job.script = None;
             }
             Err(error) => {
-                job.phase = "error";
+                job.phase = if error.downcast_ref::<quark::UnsupportedRuntime>().is_some() {
+                    "unsupported"
+                } else {
+                    "error"
+                };
                 job.message = error.to_string();
                 job.url = None;
                 job.script = None;
@@ -315,5 +319,9 @@ mod tests {
         state.finish("quark-drive", &id, Err(anyhow::anyhow!("stale")));
         assert_eq!(state.0.lock().unwrap()["quark-drive"].id, next);
         assert_eq!(state.0.lock().unwrap()["quark-drive"].phase, "preparing");
+        state.finish("quark-drive", &next, Err(quark::UnsupportedRuntime.into()));
+        let view = state.0.lock().unwrap()["quark-drive"].view();
+        assert_eq!(view["phase"], "unsupported");
+        assert!(view["authorization_url"].is_null());
     }
 }

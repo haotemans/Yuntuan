@@ -1,0 +1,28 @@
+# Optional private OAuth/business worker. No host ports, model keys or QQ mounts.
+services:
+  quark-tools:
+    image: yuantuan-quark-tools:local
+    build:
+      context: ..
+      dockerfile: deploy/quark-tools.Dockerfile
+    container_name: yuantuan-quark-tools
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - ./data/connectors:/app/data/connectors
+      - quark-tools-state:/home/quark/.local/share
+    networks:
+      - yuantuan-net
+    logging:
+      driver: json-file
+      options:
+        max-size: '5m'
+        max-file: '2'
+volumes:
+  quark-tools-state:

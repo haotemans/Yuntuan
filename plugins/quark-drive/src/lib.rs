@@ -15,6 +15,7 @@ use std::{
 /// Administrator onboarding; never registered as a model tool.
 pub mod auth;
 mod process;
+mod worker;
 use yuantuan_plugin_api::*;
 
 const INSTRUCTIONS: &str = include_str!("../SKILL.md");

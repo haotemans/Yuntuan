@@ -286,3 +286,17 @@ test('tencent docs uses the official personal token page and clears the submitte
   expect(state.authWrites).toEqual([{path:'/api/plugins/auth/tencent-docs/complete',body:{value:'private-fixture-token'}}])
   expect(state.writes).toHaveLength(0)
 })
+
+test('quark runtime rejection does not pretend to be an OAuth login or retry automatically',async ({page})=>{
+  const state=await openPlugins(page)
+  state.auth={phase:'unsupported',message:'夸克官方工具不支持当前 Agent 运行环境（-104），尚未进入 OAuth 登录',authorization_url:null}
+  await page.getByRole('button',{name:'查看卷耳详情'}).click()
+  await page.getByRole('button',{name:'前往连接账号'}).click()
+  await expect(page.getByText('夸克官方工具不支持当前 Agent 运行环境（-104），尚未进入 OAuth 登录',{exact:true})).toBeVisible()
+  await expect(page.getByRole('button',{name:'重新检查运行环境',exact:true})).toBeVisible()
+  await expect(page.getByRole('link',{name:'打开夸克授权页'})).not.toBeVisible()
+  await expect(page.getByLabel('跳转链接或授权码',{exact:true})).not.toBeVisible()
+  expect(state.authWrites || []).toHaveLength(0)
+  await expect.poll(()=>state.reads,{timeout:8000}).toBeGreaterThan(2)
+  expect(state.authWrites || []).toHaveLength(0)
+})

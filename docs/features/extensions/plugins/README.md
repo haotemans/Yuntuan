@@ -14,6 +14,6 @@
 | [鹿鸣：QQ空间](qzone.md) | 原生接口、权限和回执已接入（需真实发布验收） | 5 |
 | [敬之：群聊与好友管理](moderator.md) | 已实现权限检查（需真实 QQ 验收） | 5 |
 | [子衿：腾讯文档](tencent-docs.md) | 连接向导与 Token 接入（需真实授权验收） | 1 |
-| [卷耳：夸克网盘](quark-drive.md) | OAuth 回填与 CLI 适配（需真实授权验收） | 3 |
+| [卷耳：夸克网盘](quark-drive.md) | Linux OAuth 运行服务与 CLI 适配（需本人授权验收） | 4 |
 
 维护规则：本目录 `README.md` 仅导航，功能变更更新对应的主 MD 及 [映射清单](../../catalog.json)，再运行文档检查。
