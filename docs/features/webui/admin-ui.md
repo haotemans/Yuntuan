@@ -53,3 +53,6 @@ V12在现有session保护层注册 `/api/capabilities`、`/api/tasks/{id}/runtim
 新Decision Trace显示本轮群聊热度、近2分钟消息/参与人数、实际采用的参与间隔及“自然接话”模式，沿用现有标签与布局，不增加额外解释文案或写配置请求。旧事件没有热度字段时隐藏此区，不补造数据。trace-flow浏览器回归覆盖新字段与桌面/390像素窄屏展示；事件数据仍是判断记录，不能当作实际发送回执。
 
 Trace的policy版本5可展示“计划表情”的类别及云团专属/其他图库/优先云团范围；它是Decision的已校验计划，实际图片发送以BubbleSent回执为准。旧事件没有计划字段时不补造，trace-flow浏览器回归同时覆盖新计划标签与既有热度/失败状态。
+
+
+插件中心使用共享 `/plugins/:name` 独立配置页，复用已认证插件与能力API；设置草稿、secret保留、应用等待、会话范围和工具参数查看保持。QQ空间使用该模板配置可见范围与额度，没有单独Cookie表单；插件已加载不等于已完成真实发布。详见[宿主](../extensions/host.md)和[QQ空间](../extensions/plugins/qzone.md)。

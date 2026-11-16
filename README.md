@@ -140,6 +140,8 @@ flowchart TD
 | **Plugin** | 打包与管理 Tool、Skill 的工程单元，通过 `plugin-api` 接入宿主。当前是编译进程序的 Rust 插件，运行时可启停和调整配置；宿主约束会话范围、超时、并发与输出大小，见[插件宿主](crates/core/src/plugins.rs)。 |
 | **MCP** | 通过本地子进程的 stdio 连接外部服务，将发现的工具包装后接入同一 ToolRegistry；当前实现覆盖工具发现与调用所需的子集，见 [MCP 客户端](crates/core/src/mcp.rs)。 |
 
+[QQ空间插件](docs/features/extensions/plugins/qzone.md) 支持超级管理员通过 `/说说 正文` 或聊天调用发布，复用 NapCat 登录及云团 Tool/Skill 执行链；可在 `/plugins/qzone` 独立配置默认可见范围和每日额度，使用 `/空间状态`、`/空间记录` 查询。新安装默认未启用，发布以真实 tid 回执为准，未知结果不自动重发。所有插件共用独立配置页模板，表单、权限和调用状态复用云团公共接口。
+
 Docker 开发沙箱是可选工具能力，默认关闭，配置见[开发沙箱指南](docs/reference/agent-sandbox.md)。它不意味着所有原生插件和 MCP 子进程都自动运行在沙箱中；这些扩展仍应按受信任代码配置和使用。
 
 ### 任务执行：共享预算、检查点与投递回执

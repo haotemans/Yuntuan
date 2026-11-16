@@ -2880,6 +2880,7 @@ dependencies = [
  "yuantuan-plugin-api",
  "yuantuan-plugin-moderator",
  "yuantuan-plugin-nai-image",
+ "yuantuan-plugin-qzone",
  "yuantuan-plugin-social-media",
  "yuantuan-webui",
 ]
@@ -2928,6 +2929,7 @@ dependencies = [
  "toml",
  "tracing",
  "yuantuan-plugin-api",
+ "yuantuan-plugin-qzone",
 ]
 
 [[package]]
@@ -2977,6 +2979,19 @@ dependencies = [
  "serde_json",
  "tokio",
  "url",
+ "yuantuan-plugin-api",
+]
+
+[[package]]
+name = "yuantuan-plugin-qzone"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
  "yuantuan-plugin-api",
 ]
 

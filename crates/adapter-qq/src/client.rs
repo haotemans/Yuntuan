@@ -34,7 +34,7 @@ fn action_timeout(action: &str, params: &Value) -> Duration {
             _ => false,
         }
     }
-    if action.starts_with("send_") && contains_media(params) {
+    if action == "send_qzone_msg" || (action.starts_with("send_") && contains_media(params)) {
         MEDIA_ECHO_TIMEOUT
     } else {
         ECHO_TIMEOUT
@@ -422,6 +422,8 @@ mod timeout_tests {
     use super::*;
     #[test]
     fn media_receipts_allow_upload_time_including_forward_nodes() {
+        assert_eq!(action_timeout("send_qzone_msg",&json!({"content":"文字","images":["base64://AAAA"]})),MEDIA_ECHO_TIMEOUT);
+        assert_eq!(action_timeout("send_qzone_msg",&json!({"content":"文字"})),MEDIA_ECHO_TIMEOUT);
         assert_eq!(
             action_timeout(
                 "send_group_msg",

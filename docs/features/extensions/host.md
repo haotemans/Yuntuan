@@ -53,3 +53,14 @@ Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统
 工具调用易用性补充：基础Schema检查移到[`schema.rs`](../../../crates/core/src/capabilities/schema.rs)，错误包含JSON Pointer字段路径和期望类型/范围，不回显用户实参。支持type（含类型数组）、required、enum、properties、additionalProperties、items、min/maxItems、min/maxLength及minimum/maximum；递归检查限32层，$ref/组合Schema等完整标准仍不支持，业务校验继续由Tool负责。回归见[`tool_usability.rs`](../../../crates/core/tests/tool_usability.rs)。
 
 插件页“调用状态→能力与存储信息”增加Tool独立开关、持久调用计数与折叠输入Schema；同名Skill和Tool按kind分别控制。切换任一能力都携带原scopes，避免开关操作清空会话范围。这里只开关已注册实现，不绕过插件总开关、业务权限或底层依赖。浏览器回归[`plugins-flow.spec.js`](../../../webui-frontend/tests/plugins-flow.spec.js)验证Tool/Skill独立、范围保留及参数查看，加入Linux前端CI。
+
+
+## 独立配置页与共享执行权限
+
+插件中心导航到 `/plugins/:name`，通用 [`PluginSettings.vue`](../../../webui-frontend/src/views/PluginSettings.vue) 承载概览、配置、Skills/Tools和运行状态；不为每个插件复制表单、启停或授权存储。保留工具参数契约、各类型独立开关、原会话范围及调用数；加载状态不等于账号连通或写入成功。页面来自同仓库独立插件页公共实现，新增插件由真实编译目录提供元数据，没有安装的服务不伪造为可用。
+
+`HostServices::authorize_tool_for_skill` 核验本插件已注册 Tool、可用性、SQLite 持久开关、类型化会话范围和最终参数，随后 Skill 委托共享业务连接器；不递归进入同插件 Tool Gate，以免单并发死锁。QQ空间在每个实际操作前采用此入口。它是可复用的委托接口，不是加载任意SKILL.md就能获得执行权。
+
+`Skill::accepts_empty_command` 默认false；状态/列表类 Skill 可显式声明接受无参命令，宿主包装透传此标记。它只解除公共空参数提示，Skill/Tool权限与业务校验仍执行。SDK共享QQ空间动作见 [`qzone.rs`](../../../crates/plugin-api/src/qzone.rs)；仅qzone插件获得对应宿主服务，账号发布边界由适配器核验，详见[QQ空间](plugins/qzone.md)。
+
+回归见 [`qzone_host.rs`](../../../crates/core/tests/qzone_host.rs)、[`plugins-flow.spec.js`](../../../webui-frontend/tests/plugins-flow.spec.js) 与会话命令测试。独立页面的只读运行统计继续沿用原接口，不声明为完整的历史审计库；QQ空间发布的持久回执由该插件复用宿主数据服务保存。

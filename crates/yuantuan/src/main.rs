@@ -183,7 +183,7 @@ async fn main() -> Result<()> {
     }
     let skill_registry = yuantuan_core::skills::SkillRegistry::new();
     let llm_slot: yuantuan_core::bot::SharedLlm = Arc::new(RwLock::new(llm.clone()));
-    let plugins = yuantuan_core::plugins::PluginManager::load_with_moderation(
+    let plugins = yuantuan_core::plugins::PluginManager::load_with_services(
         compiled_plugins(),
         data_root.clone(),
         std::path::PathBuf::from("plugins"),
@@ -202,6 +202,9 @@ async fn main() -> Result<()> {
             }
             yuantuan_adapter_qq::moderation_service(h.clone(), db_path.clone(), super_admin)
         }),
+        adapter
+            .as_ref()
+            .map(|h| yuantuan_adapter_qq::qzone_service(h.clone(), cfg.security.super_admin_qq)),
     )
     .await?;
     plugins.subscribe(&bus).await;
