@@ -7,6 +7,9 @@ struct Host {
 }
 #[async_trait]
 impl HostServices for Host {
+    fn account_owner_qq(&self) -> Option<u64> {
+        Some(123)
+    }
     async fn authorize_tool_for_skill(&self, _: &ToolCtx, name: &str, args: &Value) -> Result<()> {
         self.checked.lock().unwrap().push(name.into());
         if self.disabled.load(Ordering::SeqCst) {
@@ -127,6 +130,12 @@ async fn actual_node_argv_is_guarded_and_session_is_reused_without_shell_expansi
         .is_err());
     assert!(!root.join("calls.jsonl").exists());
     host.disabled.store(false, Ordering::SeqCst);
+    let other = ToolCtx {
+        sender_pid: "p_456".into(),
+        ..ctx()
+    };
+    assert!(caps.tools[0].call(&other, json!({})).await.is_err());
+    assert!(!root.join("calls.jsonl").exists());
     let out = caps.skills[0].invoke(&ctx(), request).await.unwrap();
     assert!(out.summary.contains("fixture-fid"));
     assert!(out.summary.contains("Official fixture notice"));

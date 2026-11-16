@@ -98,6 +98,7 @@ impl Plugin for QuarkPlugin {
             bail!("官方 CLI 路径不是文件");
         }
         let connector = Arc::new(QuarkConnector {
+            host: ctx.host.clone(),
             path,
             allow_share_creation: config["allow_share_creation"].as_bool().unwrap_or(false),
             sessions: Mutex::new(HashMap::new()),
@@ -128,6 +129,7 @@ impl Plugin for QuarkPlugin {
 }
 
 struct QuarkConnector {
+    host: Arc<dyn HostServices>,
     path: PathBuf,
     allow_share_creation: bool,
     sessions: Mutex<HashMap<(String, String), String>>,
@@ -263,6 +265,11 @@ fn session_id() -> String {
 }
 impl QuarkConnector {
     async fn run(&self, ctx: &ToolCtx, op: Op, input: Value) -> Result<Value> {
+        require_account_access(
+            ctx,
+            self.host.account_owner_qq(),
+            !matches!(op, Op::CreateShare),
+        )?;
         if matches!(op, Op::CreateShare)
             && (!self.allow_share_creation || ctx.chat_type != "private")
         {
@@ -353,6 +360,14 @@ struct QuarkTool {
 }
 #[async_trait]
 impl Tool for QuarkTool {
+    fn available_in_chat(&self, ctx: &ToolCtx) -> bool {
+        require_account_access(
+            ctx,
+            self.connector.host.account_owner_qq(),
+            !matches!(self.op, Op::CreateShare),
+        )
+        .is_ok()
+    }
     fn name(&self) -> &'static str {
         self.op.tool_name()
     }
@@ -396,7 +411,7 @@ impl Skill for QuarkSkill {
     fn def(&self) -> SkillDef {
         SkillDef {
             name:"quark-drive.assist",
-            description:"当用户明确提出夸克网盘搜索、分享链接状态检查、已转存分享更新查询、账号查询、自己文件的分享创建时使用。命令 /夸克 和自然语言入口等价。不要为应对违规封禁自动换链。",
+            description:"仅云团超级管理员明确提出夸克网盘搜索、分享链接状态检查、已转存分享更新查询、账号查询、自己文件的分享创建时使用。命令 /夸克 和自然语言入口等价。不要为应对违规封禁自动换链。",
             prompt_template:INSTRUCTIONS.into(),
             tools:vec!["quark-drive.account","quark-drive.search","quark-drive.inspect_share",
                 "quark-drive.share_updates","quark-drive.updated_files","quark-drive.create_share"],
@@ -404,6 +419,7 @@ impl Skill for QuarkSkill {
         }
     }
     async fn invoke(&self, ctx: &ToolCtx, slots: Value) -> Result<ToolOutput> {
+        require_account_access(ctx, self.connector.host.account_owner_qq(), true)?;
         let text =
             slot_text(&slots, &["user_text", "prompt", "query"]).context("缺少网盘操作请求")?;
         let prompt = "根据用户原话选择一个夸克工具，只输出 JSON {\"name\":\"quark-drive.search\",\"arguments\":{\"keyword\":\"...\"}}。可选工具：quark-drive.account ({}), quark-drive.search ({keyword}), quark-drive.inspect_share ({url}), quark-drive.share_updates ({}), quark-drive.updated_files ({url}), quark-drive.create_share ({fids,expired_type,private_share})。禁止凭空编造 FID 或链接；无法确定时 name 为空。只选择一步，不擅自创建或轮换链接。";

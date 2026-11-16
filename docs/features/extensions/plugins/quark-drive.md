@@ -58,3 +58,6 @@ stdout/stderr 分别有界（256KB/16KB），总执行100秒，超时/输出过�
 - [`webui-frontend/tests/plugins-flow.spec.js`](../../../../webui-frontend/tests/plugins-flow.spec.js)：独立配置、连接检查和分享守护 API 流程。
 
 验证命令：`cargo test -p yuantuan-plugin-quark-drive`；实际账号及服务器行为另行验收，不由绿色构建代替。
+
+
+账号操作人统一取 `security.super_admin_qq`：对话 Tool/Skill 只对该真实发言者开放，未配置则拒绝，范围开关不能把管理员账号授权给其他群成员。管理员页面探针及明确登记的核心只读巡检使用宿主固定身份；它们不能执行写操作。此身份由应用启动加载，修改主配置后需重启应用；不是再填一套插件账号权限。

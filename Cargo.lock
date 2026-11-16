@@ -3020,6 +3020,7 @@ name = "yuantuan-webui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "argon2",
  "axum",
  "futures-util",
@@ -3178,4 +3179,3 @@ dependencies = [
  "yuantuan-mcp-http",
  "yuantuan-plugin-api",
 ]
-

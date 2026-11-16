@@ -38,8 +38,8 @@
             </section>
             <section class="panel">
               <h2>连接与授权</h2>
-              <p v-if="detail.name === 'tencent-docs'">使用腾讯文档官方 MCP。先获取个人 Token，再到「连接配置」填写。开启插件不代表已完成远端联通测试。</p>
-              <p v-else-if="detail.name === 'quark-drive'">在云团应用容器或进程内安装、授权官方 CLI，填写容器内 quark-drive.cjs 的绝对路径。脚本和 OAuth 配置应放在持久 data 目录。</p>
+              <p v-if="detail.name === 'tencent-docs'">仅云团超级管理员可操作。使用腾讯文档官方 MCP，先获取个人 Token，再到「连接配置」填写。开启插件不代表已完成远端联通测试。</p>
+              <p v-else-if="detail.name === 'quark-drive'">仅云团超级管理员可操作。在云团应用容器或进程内安装、授权官方 CLI，填写容器内 quark-drive.cjs 的绝对路径。脚本和 OAuth 配置应放在持久 data 目录。</p>
               <p v-else-if="detail.name === 'qzone'">使用 NapCat 当前登录的 QQ 账号，无需另填 Cookie。仅云团超级管理员可发布；默认可见范围和每日额度可在连接配置中调整。</p>
               <p v-else>使用云团现有插件配置、权限和调用状态管理。</p>
               <a v-if="officialUrl" :href="officialUrl" target="_blank" rel="noopener noreferrer" class="official-link">查看官方授权及安装说明 ↗</a>
@@ -174,13 +174,16 @@ const connectionResult = ref('')
 const connectionFailed = ref(false)
 async function checkConnection() {
   if (checkingConnection.value || !detail.value || formDirty.value) return
+  const name = detail.value.name
   checkingConnection.value = true
   connectionResult.value = ''
   try {
-    const {data} = await api.post('/plugins/connection/check',{name:detail.value.name})
+    const {data} = await api.post('/plugins/connection/check',{name})
+    if (detail.value?.name !== name) return
     connectionResult.value = data.summary || '连接检查已完成'
     connectionFailed.value = false
   } catch(e) {
+    if (detail.value?.name !== name) return
     connectionResult.value = e.response?.data?.error || '连接失败，请检查安装、授权、网络及调用范围'
     connectionFailed.value = true
   } finally { checkingConnection.value = false }

@@ -179,14 +179,16 @@
         "crates/core/src/capabilities.rs",
         "crates/plugin-api/src/schema.rs",
         "crates/plugin-api/src/qzone.rs",
-        "webui-frontend/src/views/PluginSettings.vue"
+        "webui-frontend/src/views/PluginSettings.vue",
+        "crates/plugin-api/src/account.rs"
       ],
       "tests": [
         "crates/core/tests/plugin_host.rs",
         "crates/core/tests/plugin_attachments.rs",
         "crates/core/tests/tool_usability.rs",
         "webui-frontend/tests/plugins-flow.spec.js",
-        "crates/core/tests/qzone_host.rs"
+        "crates/core/tests/qzone_host.rs",
+        "crates/plugin-api/src/account.rs"
       ],
       "module": "extensions"
     },

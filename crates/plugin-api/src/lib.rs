@@ -1,4 +1,6 @@
 //! Stable source-level contract for compiled Rust plugins; not a dynamic-library ABI.
+mod account;
+pub use account::require_account_access;
 mod membership;
 mod qzone;
 mod schema;
@@ -120,6 +122,10 @@ pub trait GroupModeration: Send + Sync {
 /// Native Rust code is trusted code: this interface is not an OS sandbox.
 #[async_trait]
 pub trait HostServices: Send + Sync {
+    /// Configured account administrator; never chosen by model/tool arguments.
+    fn account_owner_qq(&self) -> Option<u64> {
+        None
+    }
     async fn qzone(&self, _ctx: &ToolCtx, _action: QzoneAction) -> Result<Value> {
         bail!("QQ空间服务未启用")
     }

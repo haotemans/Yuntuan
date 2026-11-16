@@ -207,6 +207,7 @@ async fn main() -> Result<()> {
             .map(|h| yuantuan_adapter_qq::qzone_service(h.clone(), cfg.security.super_admin_qq)),
     )
     .await?;
+    plugins.set_account_owner(cfg.security.super_admin_qq);
     plugins.subscribe(&bus).await;
     // Shared durable scheduler. Quark share watchers register read-only tools here.
     {
@@ -468,7 +469,12 @@ async fn finish_shutdown(
     if let Some(adapter) = adapter {
         adapter.stop_receiving();
     }
-    for name in ["pipeline", "task_runner", "steal_listener", "scheduled_tools"] {
+    for name in [
+        "pipeline",
+        "task_runner",
+        "steal_listener",
+        "scheduled_tools",
+    ] {
         supervisor.stop(name);
     }
     plugins.shutdown().await;

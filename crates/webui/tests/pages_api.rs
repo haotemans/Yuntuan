@@ -966,3 +966,25 @@ async fn connector_probe_uses_authenticated_readonly_registry_and_persistent_swi
         400
     );
 }
+#[tokio::test]
+async fn connector_probe_reports_account_owner_changes_as_requiring_restart() {
+    let rig = start().await;
+    let body = json!({"config":{"security":{"super_admin_qq":123}}});
+    let (status, result) = rig.post("/api/config", body.clone()).await;
+    assert_eq!(status, 200);
+    assert!(result["requires_restart"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v
+            .as_str()
+            .is_some_and(|s| s.contains("security.super_admin_qq"))));
+    let (_, same) = rig.post("/api/config", body).await;
+    assert!(!same["requires_restart"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v
+            .as_str()
+            .is_some_and(|s| s.contains("security.super_admin_qq"))));
+}

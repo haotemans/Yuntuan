@@ -61,3 +61,5 @@ V14迁移回归同步最新版本断言，继续验证已有申请、记忆、�
 
 
 服务插件默认编入 `plugin-tencent-docs` 和 `plugin-quark-drive`，运行时仍默认关闭；无 Token 或无 CLI/授权时不伪造连接成功。Dockerfile 的 connector-runtime 阶段提供 Node.js 22，CLI 及其 OAuth 配置须由管理员安装到持久 data 路径；仓库镜像不会下载账号凭据或在后台运行官方更新脚本。Docker 构建已补齐全部 workspace manifests、编译所需 SKILL.md 和实际前端构建产物。CI 对 Node 基础运行时做烟测，该烟测不代表完整应用镜像/真实账号联调；应用 Linux 构建和后端测试另行执行。只改仓库不等于更新服务器。
+
+装配在插件加载后、开始接收事件前，将 security.super_admin_qq 写入共享账号身份槽；腾讯文档/夸克的 Connector 和工具可见性均从该槽校验。它是启动配置，变更后需要重启云团；不改变现有 QQ空间适配器的账号检查。

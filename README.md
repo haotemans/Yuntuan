@@ -341,4 +341,4 @@ CI 还包含表情库、关系图谱、记忆库、任务控制和模型配置�
 普通群聊按30秒增量判断，@即时处理；补发单独@会结合同一人最近未答问题，连续文字追问不再误套主动插话门槛。上下文来源、已答去重与执行边界见[会话调度](docs/features/core/conversation.md)。
 
 
-[腾讯文档](docs/features/extensions/plugins/tencent-docs.md)与[夸克网盘](docs/features/extensions/plugins/quark-drive.md)已提供独立配置、实际连接检查及命令/聊天/Agent 共用工具入口。腾讯文档区分读取与受控编辑；夸克支持搜索、分享检查、受控创建分享及核心每日只读巡检。Docker 运行时提供 Node.js，官方 CLI 和账号授权仍需安装配置到持久目录；需要 Token/OAuth 后做实服验收，构建通过不等于账号已连接。
+[腾讯文档](docs/features/extensions/plugins/tencent-docs.md)与[夸克网盘](docs/features/extensions/plugins/quark-drive.md)已提供独立配置、实际连接检查及命令/聊天/Agent 共用工具入口。账号操作沿用主配置指定的超级管理员。腾讯文档区分读取与受控编辑；夸克支持搜索、分享检查、受控创建分享及核心每日只读巡检。Docker 运行时提供 Node.js，官方 CLI 和账号授权仍需安装配置到持久目录；需要 Token/OAuth 后做实服验收，构建通过不等于账号已连接。

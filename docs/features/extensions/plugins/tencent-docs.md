@@ -41,3 +41,6 @@
 - [`crates/webui/tests/pages_api.rs`](../../../../crates/webui/tests/pages_api.rs)：认证、只读探针、真实注册表及持久工具开关。
 
 验证命令：`cargo test -p yuantuan-plugin-tencent-docs -p yuantuan-mcp-http`。当前提交的 CI 和实服结果分别报告；源码、功能映射及此文档须同步维护。
+
+
+账号操作人统一取 `security.super_admin_qq`：对话 Tool/Skill 只对该真实发言者开放，未配置则拒绝，范围开关不能把管理员账号授权给其他群成员。管理员页面探针及明确登记的核心只读巡检使用宿主固定身份；它们不能执行写操作。此身份由应用启动加载，修改主配置后需重启应用；不是再填一套插件账号权限。

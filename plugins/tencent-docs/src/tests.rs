@@ -30,6 +30,9 @@ struct Host {
 }
 #[async_trait]
 impl HostServices for Host {
+    fn account_owner_qq(&self) -> Option<u64> {
+        Some(123)
+    }
     async fn authorize_tool_for_skill(&self, _: &ToolCtx, name: &str, args: &Value) -> Result<()> {
         self.checks.lock().unwrap().push(name.into());
         ensure!(self.enabled.load(Ordering::SeqCst), "工具已停用");
@@ -83,10 +86,11 @@ fn unsafe_config_and_destructive_annotations_are_rejected() {
 async fn schemas_read_write_routes_and_uncertain_writes_have_no_implicit_retry() {
     let remote = Arc::new(FakeRemote::default());
     let connector = Connector {
+        host: fake_host(),
         remote: remote.clone(),
         allow_writes: true,
     };
-    let catalog = connector.catalog().await.unwrap();
+    let catalog = connector.catalog(&ctx("private")).await.unwrap();
     assert!(connector
         .invoke(&ctx("private"), "get_content", json!({}), &catalog, true)
         .await
@@ -158,6 +162,7 @@ async fn schemas_read_write_routes_and_uncertain_writes_have_no_implicit_retry()
 async fn skill_checks_catalog_and_chosen_tool_and_renders_real_content() {
     let remote = Arc::new(FakeRemote::default());
     let connector = Arc::new(Connector {
+        host: fake_host(),
         remote: remote.clone(),
         allow_writes: false,
     });
@@ -200,4 +205,38 @@ async fn skill_checks_catalog_and_chosen_tool_and_renders_real_content() {
         .effect,
         ToolEffect::ReadOnly
     );
+}
+
+fn fake_host() -> Arc<Host> {
+    Arc::new(Host {
+        enabled: AtomicBool::new(true),
+        choice: Mutex::new(json!({})),
+        checks: Mutex::new(vec![]),
+    })
+}
+#[tokio::test]
+async fn non_owner_cannot_discover_or_read_the_connected_account() {
+    let remote = Arc::new(FakeRemote::default());
+    let connector = Connector {
+        remote: remote.clone(),
+        allow_writes: true,
+        host: fake_host(),
+    };
+    let other = ToolCtx {
+        sender_pid: "p_456".into(),
+        ..ctx("private")
+    };
+    assert!(connector.catalog(&other).await.is_err());
+    let catalog = connector.catalog(&ctx("private")).await.unwrap();
+    assert!(connector
+        .invoke(
+            &other,
+            "get_content",
+            json!({"file_id":"known"}),
+            &catalog,
+            true
+        )
+        .await
+        .is_err());
+    assert_eq!(remote.calls.load(Ordering::SeqCst), 0);
 }
