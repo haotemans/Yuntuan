@@ -180,7 +180,8 @@
         "crates/plugin-api/src/schema.rs",
         "crates/plugin-api/src/qzone.rs",
         "webui-frontend/src/views/PluginSettings.vue",
-        "crates/plugin-api/src/account.rs"
+        "crates/plugin-api/src/account.rs",
+        "crates/webui/src/connector_auth.rs"
       ],
       "tests": [
         "crates/core/tests/plugin_host.rs",
@@ -188,7 +189,9 @@
         "crates/core/tests/tool_usability.rs",
         "webui-frontend/tests/plugins-flow.spec.js",
         "crates/core/tests/qzone_host.rs",
-        "crates/plugin-api/src/account.rs"
+        "crates/plugin-api/src/account.rs",
+        "crates/webui/src/connector_auth.rs",
+        "crates/webui/tests/pages_api.rs"
       ],
       "module": "extensions"
     },
@@ -453,12 +456,15 @@
       "doc": "docs/features/extensions/plugins/quark-drive.md",
       "source": [
         "plugins/quark-drive/src/lib.rs",
-        "plugins/quark-drive/src/process.rs"
+        "plugins/quark-drive/src/process.rs",
+        "plugins/quark-drive/src/auth.rs"
       ],
       "tests": [
         "plugins/quark-drive/src/tests.rs",
         "webui-frontend/tests/plugins-flow.spec.js",
-        "crates/core/src/scheduler.rs"
+        "crates/core/src/scheduler.rs",
+        "plugins/quark-drive/src/auth/tests.rs",
+        "crates/webui/tests/pages_api.rs"
       ],
       "module": "extensions/plugins"
     },

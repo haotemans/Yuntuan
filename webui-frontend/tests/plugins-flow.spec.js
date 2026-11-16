@@ -47,6 +47,20 @@ async function openPlugins(page, { deferred=false,error=false }={}) {
   await page.routeWebSocket('**/ws**',()=>{})
   await page.route('**/api/**',async route=>{
     const pathname=new URL(route.request().url()).pathname
+    if (pathname.startsWith('/api/plugins/auth/')) {
+      state.auth ||= {phase:'idle',message:''}
+      if (route.request().method()==='POST') {
+        state.authWrites ||= []
+        state.authWrites.push({path:pathname,body:route.request().postDataJSON()})
+        if (pathname.endsWith('/complete')) {
+          state.auth={phase:'connected',message:'账号连接检查已通过，配置已保存并启用'}
+          return route.fulfill({json:{ok:true,phase:'connecting'}})
+        }
+        state.auth={phase:'waiting',message:'打开夸克授权页，完成登录后回填跳转链接或授权码',authorization_url:'https://pan.quark.cn/oauth?client_id=official&page_code=opaque'}
+        return route.fulfill({json:{ok:true,phase:'preparing'}})
+      }
+      return route.fulfill({json:state.auth})
+    }
     if (pathname === '/api/plugins/connection/check') {
       state.connectionChecks ||= []
       state.connectionChecks.push(route.request().postDataJSON())
@@ -223,6 +237,7 @@ test('connector check uses saved configuration and the shared probe endpoint',as
   const state=await openPlugins(page)
   await page.getByRole('button',{name:'查看子衿详情'}).click()
   await page.getByText('连接配置',{exact:true}).click()
+  await page.getByRole('button',{name:'高级配置与调用限制',exact:true}).click()
   await page.getByRole('textbox',{name:'Token 环境变量名',exact:true}).fill('TENCENT_DOCS_TOKEN')
   await expect(page.getByRole('button',{name:'检查连接',exact:true})).toBeDisabled()
   await page.getByRole('button',{name:'保存并应用'}).click()
@@ -231,4 +246,43 @@ test('connector check uses saved configuration and the shared probe endpoint',as
   await page.getByRole('button',{name:'检查连接',exact:true}).click()
   await expect(page.getByText('连接成功，已获取实际工具目录')).toBeVisible()
   expect(state.connectionChecks).toEqual([{name:'tencent-docs'}])
+})
+
+test('quark authorization prepares the link, resumes after refresh and submits callback once',async ({page})=>{
+  const state=await openPlugins(page)
+  const plugin=state.plugins.find(p=>p.name==='quark-drive')
+  plugin.enabled=false;plugin.loaded=false
+  await page.getByRole('button',{name:'查看卷耳详情'}).click()
+  await page.getByRole('button',{name:'前往连接账号'}).click()
+  await expect(page.getByRole('textbox',{name:'官方 CLI 脚本路径'})).not.toBeVisible()
+  await page.getByRole('button',{name:'开始授权登录'}).click()
+  await expect(page.getByRole('link',{name:'打开夸克授权页'})).toHaveAttribute('href',/https:\/\/pan\.quark\.cn\/oauth\?client_id=/)
+  await page.reload()
+  await expect(page.getByRole('link',{name:'打开夸克授权页'})).toBeVisible()
+  const input=page.getByLabel('跳转链接或授权码',{exact:true})
+  await input.fill('https://localhost/callback?code=private-fixture')
+  await page.getByRole('button',{name:'保存并连接',exact:true}).click()
+  await expect(page.getByText('账号连接检查已通过，配置已保存并启用')).toBeVisible()
+  expect(state.authWrites).toEqual([
+    {path:'/api/plugins/auth/quark-drive',body:{}},
+    {path:'/api/plugins/auth/quark-drive/complete',body:{value:'https://localhost/callback?code=private-fixture'}},
+  ])
+  expect(state.writes).toHaveLength(0)
+  await expect(page.getByText('private-fixture',{exact:false})).not.toBeVisible()
+  state.auth={phase:'waiting',message:'fixture',authorization_url:'https://pan.quark.cn.evil.test/?client_id=x'}
+  await expect(page.getByRole('link',{name:'打开夸克授权页'})).not.toBeVisible()
+})
+
+test('tencent docs uses the official personal token page and clears the submitted secret',async ({page})=>{
+  const state=await openPlugins(page)
+  await page.getByRole('button',{name:'查看子衿详情'}).click()
+  await page.getByRole('button',{name:'前往连接账号'}).click()
+  await expect(page.getByRole('link',{name:'打开腾讯文档授权页'})).toHaveAttribute('href','https://docs.qq.com/open/auth/mcp.html')
+  const token=page.getByLabel('授权页个人 Token',{exact:true})
+  await token.fill('private-fixture-token')
+  await page.getByRole('button',{name:'保存并连接',exact:true}).click()
+  await expect(page.getByText('账号连接检查已通过，配置已保存并启用')).toBeVisible()
+  await expect(token).toHaveValue('')
+  expect(state.authWrites).toEqual([{path:'/api/plugins/auth/tencent-docs/complete',body:{value:'private-fixture-token'}}])
+  expect(state.writes).toHaveLength(0)
 })

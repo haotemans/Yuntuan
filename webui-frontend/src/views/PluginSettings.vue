@@ -17,7 +17,7 @@
         </div>
         <div class="heading-right">
           <span class="connection-state">{{ detail.error ? '加载异常' : detail.loaded && detail.enabled ? '插件已加载' : '插件未运行' }}</span>
-          <n-switch :value="detail.enabled" :loading="busy" :disabled="busy || detail.updating || detail.pending_restart" aria-label="启用插件"
+          <n-switch :value="detail.enabled" :loading="busy" :disabled="busy || authBusy || detail.updating || detail.pending_restart" aria-label="启用插件"
             @update:value="toggle" />
         </div>
       </header>
@@ -38,18 +38,21 @@
             </section>
             <section class="panel">
               <h2>连接与授权</h2>
-              <p v-if="detail.name === 'tencent-docs'">仅云团超级管理员可操作。使用腾讯文档官方 MCP，先获取个人 Token，再到「连接配置」填写。开启插件不代表已完成远端联通测试。</p>
-              <p v-else-if="detail.name === 'quark-drive'">仅云团超级管理员可操作。在云团应用容器或进程内安装、授权官方 CLI，填写容器内 quark-drive.cjs 的绝对路径。脚本和 OAuth 配置应放在持久 data 目录。</p>
+              <p v-if="detail.name === 'tencent-docs'">在「连接配置」打开官方授权页，回填个人 Token，由云团检查并保存连接。</p>
+              <p v-else-if="detail.name === 'quark-drive'">在「连接配置」发起账号授权，云团会准备运行组件和路径；登录后回填授权结果即可。</p>
               <p v-else-if="detail.name === 'qzone'">使用 NapCat 当前登录的 QQ 账号，无需另填 Cookie。仅云团超级管理员可发布；默认可见范围和每日额度可在连接配置中调整。</p>
               <p v-else>使用云团现有插件配置、权限和调用状态管理。</p>
               <a v-if="officialUrl" :href="officialUrl" target="_blank" rel="noopener noreferrer" class="official-link">查看官方授权及安装说明 ↗</a>
+              <n-button v-if="isConnector" @click="activeTab='config'">前往连接账号</n-button>
             </section>
           </div>
         </n-tab-pane>
         <n-tab-pane name="config" tab="连接配置">
-          <section class="panel">
+          <ConnectorAuth v-if="isConnector" :key="detail.name" :name="detail.name" :disabled="formDirty || busy || detail.updating || detail.pending_restart" @connected="load" @busy="authBusy=$event" />
+          <n-button v-if="isConnector" text @click="showAdvanced=!showAdvanced">{{ showAdvanced ? '收起高级配置' : '高级配置与调用限制' }}</n-button>
+          <section v-show="!isConnector || showAdvanced" class="panel">
             <div class="config-heading"><div><h2>插件设置</h2><p>密钥不会通过读取接口返回，留空表示保留原值。</p></div><span v-if="formDirty" class="unsaved">未保存</span></div>
-            <n-form label-placement="top" :show-feedback="false" :disabled="busy || detail.pending_restart" class="settings-form">
+            <n-form label-placement="top" :show-feedback="false" :disabled="busy || authBusy || detail.pending_restart" class="settings-form">
               <n-form-item v-for="field in detail.config_fields || []" :key="field.key" :label="field.label">
                 <n-select v-if="field.kind === 'choice'" v-model:value="configDraft[field.key]" :options="field.options || []" />
                 <n-switch v-else-if="field.kind === 'boolean'" v-model:value="configDraft[field.key]" :aria-label="field.label" />
@@ -77,8 +80,8 @@
             <div class="settings-actions">
               <span aria-live="polite">{{ saved }}</span>
               <n-button v-if="['tencent-docs','quark-drive'].includes(detail.name)" :loading="checkingConnection" :disabled="busy || checkingConnection || formDirty || !detail.loaded || !detail.enabled || detail.updating" @click="checkConnection">检查连接</n-button>
-              <n-button :disabled="busy || detail.updating || !formDirty" @click="resetDraft(detail)">撤销修改</n-button>
-              <n-button type="primary" :loading="busy" :disabled="busy || detail.updating || !formDirty" @click="saveConfig">保存并应用</n-button>
+              <n-button :disabled="busy || authBusy || detail.updating || !formDirty" @click="resetDraft(detail)">撤销修改</n-button>
+              <n-button type="primary" :loading="busy" :disabled="busy || authBusy || detail.updating || !formDirty" @click="saveConfig">保存并应用</n-button>
             </div>
             <n-alert v-if="connectionResult" :type="connectionFailed ? 'error' : 'success'" :bordered="false" class="connection-result">{{ connectionResult }}</n-alert>
           </section>
@@ -158,6 +161,7 @@ import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import { pluginDuration } from '../plugin-ui'
 import EmptyState from '../components/EmptyState.vue'
+import ConnectorAuth from '../components/ConnectorAuth.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -172,6 +176,9 @@ const saved = ref('')
 const checkingConnection = ref(false)
 const connectionResult = ref('')
 const connectionFailed = ref(false)
+const authBusy = ref(false)
+const showAdvanced = ref(false)
+const isConnector = computed(() => ['quark-drive','tencent-docs'].includes(detail.value?.name))
 async function checkConnection() {
   if (checkingConnection.value || !detail.value || formDirty.value) return
   const name = detail.value.name
@@ -301,11 +308,11 @@ async function load() {
     if (!disposed) loadError.value=e.response?.data?.error || '无法获取插件详情'
   } finally { loading.value=false; fetching=false }
 }
-watch(() => route.params.name, () => {baseline.value='';connectionResult.value='';void load()})
+watch(() => route.params.name, () => {baseline.value='';connectionResult.value='';showAdvanced.value=false;authBusy.value=false;void load()})
 watch(activeTab, tab => { router.replace({query:{...route.query,tab}}); if (tab === 'links') void loadWatches() })
 async function saveConfig() {
   const plugin=detail.value
-  if (!plugin || busy.value || plugin.updating) return
+  if (!plugin || busy.value || authBusy.value || plugin.updating) return
   busy.value=true
   actionError.value=''
   saved.value=''
@@ -328,7 +335,7 @@ async function saveConfig() {
   finally {busy.value=false}
 }
 async function toggle(enabled) {
-  if (!detail.value || busy.value || detail.value.updating) return
+  if (!detail.value || busy.value || authBusy.value || detail.value.updating) return
   busy.value=true
   actionError.value=''
   try {

@@ -65,3 +65,6 @@ V20 复用管理员 Session 保护层注册夸克链接守护的五个 GET/POST/
 连接结果按当前插件标识关联，切换详情页后不把旧请求成功显示成新插件已连接。账号操作者统一使用主配置 security.super_admin_qq，插件页不复制 owner 设置。
 
 配置 API 保存更改后的 security.super_admin_qq 会明确返回 requires_restart，原值未变时不重复提示；对应 pages_api 回归验证这不是已经热应用。
+
+
+账号连接向导在 AppState 保存有界、会话绑定的临时进度，所有授权接口位于现有 API 会话中间件之后；重启清除待授权流程，插件设置和官方 CLI 已保存的登录沿用持久目录。前端向导与配置补丁行为见[扩展宿主](../extensions/host.md#账号连接向导)，不新增公开回调路由。

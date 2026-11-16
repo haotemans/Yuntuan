@@ -494,6 +494,7 @@ pub struct PluginManager {
 enum Change {
     Settings(PluginSettings),
     Toggle(bool),
+    ConfigPatch(serde_json::Map<String, Value>, Option<bool>),
 }
 struct UpdateGuard {
     manager: Arc<PluginManager>,
@@ -796,6 +797,24 @@ impl PluginManager {
                 enabled,
                 ..old.clone()
             },
+            Change::ConfigPatch(patch, enabled) => {
+                let mut settings = old.clone();
+                let config = settings
+                    .config
+                    .as_object_mut()
+                    .context("插件配置必须是对象")?;
+                for (key, value) in patch {
+                    anyhow::ensure!(
+                        entry.plugin.config_fields().iter().any(|f| f.key == key),
+                        "未知插件配置字段"
+                    );
+                    config.insert(key, value);
+                }
+                if let Some(enabled) = enabled {
+                    settings.enabled = enabled;
+                }
+                settings
+            }
         };
         if let Some(config) = settings.config.as_object_mut() {
             for field in entry.plugin.config_fields() {
@@ -833,6 +852,17 @@ impl PluginManager {
 
     pub async fn save(self: &Arc<Self>, id: &str, settings: PluginSettings) -> Result<()> {
         self.start_change(id, Change::Settings(settings))?.await?
+    }
+    /// Apply onboarding results under the existing update guard, retaining secrets,
+    /// scopes and limits rather than rebuilding settings from the redacted catalog.
+    pub async fn patch_config(
+        self: &Arc<Self>,
+        id: &str,
+        patch: serde_json::Map<String, Value>,
+        enabled: Option<bool>,
+    ) -> Result<()> {
+        self.start_change(id, Change::ConfigPatch(patch, enabled))?
+            .await?
     }
     /// Return promptly for long drains. The catalog exposes progress and the final error.
     pub async fn save_deferred(

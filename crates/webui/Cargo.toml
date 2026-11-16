@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 yuantuan-core = { path = "../core" }
+yuantuan-plugin-quark-drive = { path = "../../plugins/quark-drive" }
+yuantuan-mcp-http = { path = "../mcp-http" }
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["trace"] }
 tokio = { version = "1", features = ["full"] }

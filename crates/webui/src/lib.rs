@@ -4,6 +4,7 @@
 mod auth;
 mod backup_api;
 mod config_api;
+mod connector_auth;
 mod dashboard;
 mod events_api;
 mod llm_test;
@@ -14,8 +15,8 @@ mod overview;
 mod personality;
 mod plugins_api;
 mod relations;
-mod schedule_api;
 mod runtime_api;
+mod schedule_api;
 mod state;
 mod static_files;
 mod tasks_api;
@@ -106,10 +107,30 @@ pub async fn serve(db_path: PathBuf, host: &str, port: u16, extras: Extras) -> R
         .route("/api/plugins/list", get(plugins_api::list))
         .route("/api/plugins/toggle", post(plugins_api::toggle))
         .route("/api/plugins/config", post(plugins_api::save_config))
-        .route("/api/plugins/connection/check", post(plugins_api::check_connection))
-        .route("/api/plugins/quark/watches", get(schedule_api::list).post(schedule_api::add))
-        .route("/api/plugins/quark/watches/{id}", post(schedule_api::toggle).delete(schedule_api::remove))
-        .route("/api/plugins/quark/watches/{id}/check", post(schedule_api::check_now))
+        .route(
+            "/api/plugins/connection/check",
+            post(plugins_api::check_connection),
+        )
+        .route(
+            "/api/plugins/auth/{name}",
+            get(connector_auth::status).post(connector_auth::start),
+        )
+        .route(
+            "/api/plugins/auth/{name}/complete",
+            post(connector_auth::complete),
+        )
+        .route(
+            "/api/plugins/quark/watches",
+            get(schedule_api::list).post(schedule_api::add),
+        )
+        .route(
+            "/api/plugins/quark/watches/{id}",
+            post(schedule_api::toggle).delete(schedule_api::remove),
+        )
+        .route(
+            "/api/plugins/quark/watches/{id}/check",
+            post(schedule_api::check_now),
+        )
         .route("/api/mcp/list", get(mcp_api::list))
         .route("/api/mcp/save", post(mcp_api::save))
         .route("/api/mcp/call", post(mcp_api::call))
