@@ -30,6 +30,7 @@
 - [`crates/plugin-api/src/tools.rs`](../../../crates/plugin-api/src/tools.rs)
 - [`crates/webui/src/plugins_api.rs`](../../../crates/webui/src/plugins_api.rs)
 - [`webui-frontend/src/views/Plugins.vue`](../../../webui-frontend/src/views/Plugins.vue)
+- [`webui-frontend/src/views/PluginSettings.vue`](../../../webui-frontend/src/views/PluginSettings.vue)
 
 ## 验证入口
 
@@ -53,3 +54,10 @@ Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统
 工具调用易用性补充：基础Schema检查移到[`schema.rs`](../../../crates/core/src/capabilities/schema.rs)，错误包含JSON Pointer字段路径和期望类型/范围，不回显用户实参。支持type（含类型数组）、required、enum、properties、additionalProperties、items、min/maxItems、min/maxLength及minimum/maximum；递归检查限32层，$ref/组合Schema等完整标准仍不支持，业务校验继续由Tool负责。回归见[`tool_usability.rs`](../../../crates/core/tests/tool_usability.rs)。
 
 插件页“调用状态→能力与存储信息”增加Tool独立开关、持久调用计数与折叠输入Schema；同名Skill和Tool按kind分别控制。切换任一能力都携带原scopes，避免开关操作清空会话范围。这里只开关已注册实现，不绕过插件总开关、业务权限或底层依赖。浏览器回归[`plugins-flow.spec.js`](../../../webui-frontend/tests/plugins-flow.spec.js)验证Tool/Skill独立、范围保留及参数查看，加入Linux前端CI。
+
+
+## 独立插件详情页面与官方 Skill 配合
+
+管理端现以 `/plugins/:name` 提供插件独立页面，包含概览、连接配置、Skills/Tools 和运行状态。页面仍复用 `/api/plugins/list`、`/api/plugins/config`、`/api/plugins/toggle` 与 `/api/capabilities`，没有新增插件专用配置数据库或上传式动态安装。
+
+首批服务连接见 [腾讯文档](plugins/tencent-docs.md) 和 [夸克网盘](plugins/quark-drive.md)。两者只把官方能力包装成 Tool / Skill；宿主统一做会话范围、参数门控和日志。当前原生 Plugin 是编译期依赖，`SKILL.md` 被编译为使用说明而不是可在生产中从外部目录任意安装的 Skill 包。

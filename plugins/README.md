@@ -83,3 +83,10 @@ cargo check -p yuantuan --no-default-features
 测试覆盖工具和技能通过公共 API 调用、插件归属、版本和名字冲突、配置持久化与 secret 保留、热重载与失败恢复、数据键范围、会话权限、并发、超时、panic、输出限制、事件和停机生命周期。
 
 视频与图文示例见 [social-media](social-media/README.md)，当前为实验性平台适配。
+
+## 官方服务插件
+
+- [腾讯文档](tencent-docs/README.md)：官方 Streamable HTTP MCP，Token 授权，Tool + Skill 共用通道。
+- [夸克网盘](quark-drive/README.md)：官方 CLI + OAuth，受限 argv 白名单，Tool + Skill 共用通道。
+
+安装新插件依然需要源码编译。WebUI 每个插件已有独立路由 `/plugins/:name`；所有配置和授权限制复用当前插件宿主，未完成的账户连通性不可显示为通过。

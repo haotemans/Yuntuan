@@ -10,6 +10,9 @@ members = [
     "plugins/social-media",
     "plugins/moderator",
     "plugins/nai-image",
+    "plugins/tencent-docs",
+    "plugins/quark-drive",
+    "crates/mcp-http",
 ]
 
 [workspace.dependencies]

@@ -177,7 +177,8 @@
         "webui-frontend/src/views/Plugins.vue",
         "crates/plugin-api/src/membership.rs",
         "crates/core/src/capabilities.rs",
-        "crates/core/src/capabilities/schema.rs"
+        "crates/core/src/capabilities/schema.rs",
+        "webui-frontend/src/views/PluginSettings.vue"
       ],
       "tests": [
         "crates/core/tests/plugin_host.rs",
@@ -402,6 +403,28 @@
         "crates/adapter-qq/src/moderation/membership/tests.rs",
         "plugins/moderator/src/membership/tests.rs"
       ],
+      "module": "extensions/plugins"
+    },
+    {
+      "id": "plugin-tencent-docs",
+      "title": "腾讯文档：官方 MCP",
+      "status": "已新增接入代码（真实授权与网络验证待完成）",
+      "doc": "docs/features/extensions/plugins/tencent-docs.md",
+      "source": [
+        "plugins/tencent-docs/src/lib.rs"
+      ],
+      "tests": [],
+      "module": "extensions/plugins"
+    },
+    {
+      "id": "plugin-quark-drive",
+      "title": "夸克网盘：官方 Skill/CLI",
+      "status": "已新增 CLI 适配（真实 OAuth 与网盘验证待完成）",
+      "doc": "docs/features/extensions/plugins/quark-drive.md",
+      "source": [
+        "plugins/quark-drive/src/lib.rs"
+      ],
+      "tests": [],
       "module": "extensions/plugins"
     }
   ],

@@ -2880,7 +2880,9 @@ dependencies = [
  "yuantuan-plugin-api",
  "yuantuan-plugin-moderator",
  "yuantuan-plugin-nai-image",
+ "yuantuan-plugin-quark-drive",
  "yuantuan-plugin-social-media",
+ "yuantuan-plugin-tencent-docs",
  "yuantuan-webui",
 ]
 
@@ -2928,6 +2930,16 @@ dependencies = [
  "toml",
  "tracing",
  "yuantuan-plugin-api",
+]
+
+[[package]]
+name = "yuantuan-mcp-http"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2981,6 +2993,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "yuantuan-plugin-quark-drive"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde_json",
+ "tokio",
+ "yuantuan-plugin-api",
+]
+
+[[package]]
 name = "yuantuan-plugin-social-media"
 version = "0.1.0"
 dependencies = [
@@ -2995,6 +3018,18 @@ dependencies = [
  "sm3",
  "tokio",
  "url",
+ "yuantuan-plugin-api",
+]
+
+[[package]]
+name = "yuantuan-plugin-tencent-docs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde_json",
+ "tokio",
+ "yuantuan-mcp-http",
  "yuantuan-plugin-api",
 ]
 

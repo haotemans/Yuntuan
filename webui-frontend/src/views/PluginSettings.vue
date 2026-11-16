@@ -1,0 +1,265 @@
+<template>
+  <div class="yt-page plugin-settings">
+    <div class="topbar">
+      <n-button text @click="router.push('/plugins')" aria-label="返回插件列表">〈 返回插件</n-button>
+      <span class="eyebrow">插件配置</span>
+    </div>
+    <n-alert v-if="loadError" type="error" :bordered="false">{{ loadError }}
+      <n-button text @click="load">重试</n-button>
+    </n-alert>
+    <n-skeleton v-if="loading" height="360px" />
+    <template v-else-if="detail">
+      <header class="plugin-heading">
+        <div>
+          <p class="eyebrow">PLUGIN · {{ detail.name }}</p>
+          <h1>{{ detail.display_name || detail.name }}</h1>
+          <p>{{ detail.presentation?.purpose || detail.description }}</p>
+        </div>
+        <div class="heading-right">
+          <span class="connection-state">{{ detail.error ? '加载异常' : detail.loaded && detail.enabled ? '插件已加载' : '插件未运行' }}</span>
+          <n-switch :value="detail.enabled" :loading="busy" :disabled="busy || detail.pending_restart" aria-label="启用插件"
+            @update:value="toggle" />
+        </div>
+      </header>
+      <n-alert v-if="detail.error" type="warning" :bordered="false">{{ detail.error }}</n-alert>
+      <n-alert v-if="detail.pending_reload" type="warning" :bordered="false">新配置尚未正常生效，请修正后重试。</n-alert>
+      <n-alert v-if="detail.pending_restart" type="error" :bordered="false">插件无法安全停止，需要重启云团服务。</n-alert>
+      <n-alert v-if="actionError" type="error" :bordered="false" closable @close="actionError = ''">{{ actionError }}</n-alert>
+      <n-tabs v-model:value="activeTab" type="line" animated>
+        <n-tab-pane name="overview" tab="概览">
+          <div class="section-grid">
+            <section class="panel">
+              <h2>用途</h2>
+              <p>{{ detail.description }}</p>
+              <div class="small-label">命令入口</div>
+              <div class="examples"><code v-for="command in commands" :key="command">{{ command }}</code><span v-if="!commands.length">启用插件后显示可用命令</span></div>
+              <div class="small-label">用法示例</div>
+              <div class="examples"><span v-for="example in detail.presentation?.examples || []" :key="example">{{ example }}</span></div>
+            </section>
+            <section class="panel">
+              <h2>连接与授权</h2>
+              <p v-if="detail.name === 'tencent-docs'">使用腾讯文档官方 MCP。先获取个人 Token，再到「连接配置」填写。开启插件不代表已完成远端联通测试。</p>
+              <p v-else-if="detail.name === 'quark-drive'">在 Linux / WSL 中安装并登录夸克官方 Skill CLI，填写 quark-drive.cjs 的绝对路径。OAuth 凭据保留在官方 CLI 中，不存储到云团 Skill。</p>
+              <p v-else>使用云团现有插件配置、权限和调用状态管理。</p>
+              <a v-if="officialUrl" :href="officialUrl" target="_blank" rel="noopener noreferrer" class="official-link">查看官方授权及安装说明 ↗</a>
+              <p class="connection-tip">云团提供统一宿主和会话权限；插件只负责具体服务连接。</p>
+            </section>
+          </div>
+        </n-tab-pane>
+        <n-tab-pane name="config" tab="连接配置">
+          <section class="panel">
+            <div class="config-heading"><div><h2>插件设置</h2><p>密钥不会通过读取接口返回，留空表示保留原值。</p></div><span v-if="formDirty" class="unsaved">未保存</span></div>
+            <n-form label-placement="top" :show-feedback="false" :disabled="busy || detail.pending_restart" class="settings-form">
+              <n-form-item v-for="field in detail.config_fields || []" :key="field.key" :label="field.label">
+                <n-select v-if="field.kind === 'choice'" v-model:value="configDraft[field.key]" :options="field.options || []" />
+                <n-switch v-else-if="field.kind === 'boolean'" v-model:value="configDraft[field.key]" :aria-label="field.label" />
+                <n-input-number v-else-if="field.kind === 'integer'" v-model:value="configDraft[field.key]" :precision="0" />
+                <div v-else class="field-input">
+                  <n-input v-model:value="configDraft[field.key]" :type="field.secret ? 'password' : 'text'"
+                    :placeholder="field.secret ? (field.has_value ? '已保存，留空保持不变' : '尚未配置') : ''"
+                    :autocomplete="field.secret ? 'off' : 'on'" :aria-label="field.label" />
+                  <div v-if="field.secret" class="field-help">
+                    {{ field.has_value ? '密钥已保存（不显示明文）' : '尚未设置密钥' }}
+                    <n-checkbox v-if="field.has_value" v-model:checked="clearSecrets[field.key]">清除密钥</n-checkbox>
+                  </div>
+                </div>
+              </n-form-item>
+              <n-collapse>
+                <n-collapse-item title="调用限制及适用会话" name="advanced">
+                  <n-form-item label="超时（秒）"><n-input-number v-model:value="timeoutSeconds" :min="0.1" :max="360" /></n-form-item>
+                  <n-form-item label="最大并发数"><n-input-number v-model:value="limits.max_concurrency" :min="1" :max="16" :precision="0" /></n-form-item>
+                  <n-form-item label="最大文字结果（KiB）"><n-input-number v-model:value="outputKiB" :min="1" :max="1024" /></n-form-item>
+                  <n-form-item label="会话范围"><n-select v-model:value="scopeMode" :options="[{label:'全部会话',value:'all'},{label:'仅指定会话',value:'selected'}]" /></n-form-item>
+                  <n-input v-if="scopeMode === 'selected'" v-model:value="scopeText" type="textarea" placeholder="每行填写一个会话 ID" />
+                </n-collapse-item>
+              </n-collapse>
+            </n-form>
+            <div class="settings-actions">
+              <span aria-live="polite">{{ saved }}</span>
+              <n-button :disabled="busy || !formDirty" @click="resetDraft(detail)">撤销修改</n-button>
+              <n-button type="primary" :loading="busy" :disabled="busy || !formDirty" @click="saveConfig">保存并应用</n-button>
+            </div>
+          </section>
+        </n-tab-pane>
+        <n-tab-pane name="skills" tab="Skills / Tools">
+          <section class="panel">
+            <h2>已注册能力</h2><p>以下能力共享云团统一权限和调用记录；禁用后聊天与命令入口都会受到限制。</p>
+            <div v-for="skill in detail.skills || []" :key="skill.name" class="capability">
+              <div><code>{{ skill.name }}</code><p>{{ skill.description }}</p><small>{{ (skill.commands || []).join(' · ') || '自然语言调用' }}</small></div>
+              <n-switch :value="capabilityEnabled(skill.name,'skill')" :disabled="busy || !capability(skill.name,'skill')" @update:value="value => toggleCapability(skill.name,'skill',value)" />
+            </div>
+            <div v-for="tool in detail.tools || []" :key="tool.name" class="capability">
+              <div><code>{{ tool.name }}</code><p>{{ tool.description }}</p><small>Tool · 共享统一执行器</small></div>
+              <n-switch :value="capabilityEnabled(tool.name,'tool')" :disabled="busy || !capability(tool.name,'tool')" @update:value="value => toggleCapability(tool.name,'tool',value)" />
+            </div>
+            <p v-if="!detail.skills?.length && !detail.tools?.length">启用插件并完成配置后，将在这里看到工具和 Skill。</p>
+          </section>
+        </n-tab-pane>
+        <n-tab-pane name="runtime" tab="运行记录">
+          <section class="panel">
+            <h2>调用状态</h2>
+            <p>复用云团现有调用统计。以下数据在服务重启后重新计数。</p>
+            <dl class="stats">
+              <div><dt>执行中</dt><dd>{{ detail.invocations?.active || 0 }}</dd></div>
+              <div><dt>成功</dt><dd>{{ detail.invocations?.succeeded || 0 }}</dd></div>
+              <div><dt>失败</dt><dd>{{ detail.invocations?.failed || 0 }}</dd></div>
+              <div><dt>最近耗时</dt><dd>{{ pluginDuration(detail.invocations?.last_duration_ms) }}</dd></div>
+            </dl>
+            <n-alert v-if="detail.invocations?.last_error" type="warning" :bordered="false">{{ detail.invocations.last_error }}</n-alert>
+            <p v-else>尚无可显示的最新错误。</p>
+          </section>
+        </n-tab-pane>
+      </n-tabs>
+    </template>
+    <n-empty v-else-if="!loadError" description="该插件不存在或未编译安装" />
+  </div>
+</template>
+
+<script setup>
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useMessage } from 'naive-ui'
+import { api } from '../api'
+import { pluginDuration } from '../plugin-ui'
+
+const route = useRoute()
+const router = useRouter()
+const message = useMessage()
+const plugins = ref([])
+const capabilities = ref([])
+const loading = ref(true)
+const busy = ref(false)
+const loadError = ref('')
+const actionError = ref('')
+const saved = ref('')
+const activeTab = ref(['overview','config','skills','runtime'].includes(route.query.tab) ? route.query.tab : 'overview')
+const detail = computed(() => plugins.value.find(p => p.name === route.params.name))
+const officialUrl = computed(() => ({'tencent-docs':'https://docs.qq.com/open/auth/mcp.html','quark-drive':'https://github.com/quark-clouddrive/quarkclouddrive_offical'}[detail.value?.name] || ''))
+const commands = computed(() => [...new Set((detail.value?.skills || []).flatMap(s => s.commands || []))])
+const configDraft = ref({})
+const clearSecrets = ref({})
+const limits = ref({timeout_ms:30000,max_concurrency:1,max_output_bytes:65536})
+const scopeMode = ref('all')
+const scopeText = ref('')
+const baseline = ref('')
+const signature = () => JSON.stringify([configDraft.value,clearSecrets.value,limits.value,scopeMode.value,scopeText.value])
+const formDirty = computed(() => !!baseline.value && signature() !== baseline.value)
+const timeoutSeconds = computed({get:()=>limits.value.timeout_ms/1000,set:value=>{limits.value.timeout_ms=value==null?0:Math.round(value*1000)}})
+const outputKiB = computed({get:()=>limits.value.max_output_bytes/1024,set:value=>{limits.value.max_output_bytes=value==null?0:Math.round(value*1024)}})
+function capability(name,kind) { return capabilities.value.find(c => c.name===name && c.kind===kind) }
+function capabilityEnabled(name,kind) { return capability(name,kind)?.enabled ?? true }
+async function toggleCapability(name,kind,enabled) {
+  const item=capability(name,kind)
+  if (!item) return
+  try {
+    await api.post('/capabilities',{name,kind,enabled,scopes:item.scopes || []})
+    const {data}=await api.get('/capabilities')
+    capabilities.value=data.capabilities || []
+    message.success('已更新能力开关')
+  } catch(e) { actionError.value=e.response?.data?.error || '能力更新失败' }
+}
+function resetDraft(plugin) {
+  configDraft.value = Object.fromEntries((plugin.config_fields || []).map(f => [f.key, f.secret ? '' : (plugin.settings?.config?.[f.key] ?? f.default)]))
+  clearSecrets.value = {}
+  limits.value = {timeout_ms:plugin.settings?.timeout_ms ?? 30000,max_concurrency:plugin.settings?.max_concurrency ?? 1,max_output_bytes:plugin.settings?.max_output_bytes ?? 65536}
+  scopeMode.value=plugin.settings?.allowed_chats == null ? 'all' : 'selected'
+  scopeText.value=(plugin.settings?.allowed_chats || []).join('\n')
+  baseline.value=signature()
+}
+let disposed=false
+let timer
+let fetching=false
+async function load() {
+  if (disposed || fetching) return
+  fetching=true
+  try {
+    const [pluginsResponse, capResponse] = await Promise.all([api.get('/plugins/list'),api.get('/capabilities')])
+    if (disposed) return
+    plugins.value=pluginsResponse.data.plugins || []
+    capabilities.value=capResponse.data.capabilities || []
+    if (detail.value && (!baseline.value || !formDirty.value)) resetDraft(detail.value)
+    loadError.value=''
+  } catch(e) {
+    if (!disposed) loadError.value=e.response?.data?.error || '无法获取插件详情'
+  } finally { loading.value=false; fetching=false }
+}
+watch(() => route.params.name, () => {baseline.value='';void load()})
+watch(activeTab, tab => { router.replace({query:{...route.query,tab}}) })
+async function saveConfig() {
+  const plugin=detail.value
+  if (!plugin || busy.value) return
+  busy.value=true
+  actionError.value=''
+  saved.value=''
+  try {
+    const settings={...plugin.settings,...limits.value,config:{...plugin.settings?.config}}
+    for (const field of plugin.config_fields || []) {
+      const value=configDraft.value[field.key]
+      if (field.secret) {
+        delete settings.config[field.key]
+        if (clearSecrets.value[field.key]) settings.config[field.key]=''
+        else if (value) settings.config[field.key]=value
+      } else settings.config[field.key]=value
+    }
+    settings.allowed_chats=scopeMode.value==='all'?null:[...new Set(scopeText.value.split(/[\s,，]+/).filter(Boolean))]
+    const response=await api.post('/plugins/config',{name:plugin.name,settings})
+    saved.value=response.data.applying?'已提交配置，正在后台应用':'配置已应用'
+    baseline.value=signature()
+    await load()
+  } catch(e) {actionError.value=e.response?.data?.error || '保存配置失败'}
+  finally {busy.value=false}
+}
+async function toggle(enabled) {
+  if (!detail.value || busy.value) return
+  busy.value=true
+  actionError.value=''
+  try {
+    const response=await api.post('/plugins/toggle',{name:detail.value.name,enabled})
+    message.info(response.data.applying?'插件状态正在应用':'插件状态已更新')
+    await load()
+  } catch(e) {actionError.value=e.response?.data?.error || '更改启停状态失败'}
+  finally {busy.value=false}
+}
+async function poll() {
+  if (!disposed && !document.hidden && !busy.value) await load()
+  if (!disposed) timer=setTimeout(poll,2500)
+}
+onMounted(() => {void poll()})
+onUnmounted(() => {disposed=true;clearTimeout(timer)})
+</script>
+
+<style scoped>
+.plugin-settings {max-width:1180px;margin:0 auto;padding-bottom:58px}
+.topbar {display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}
+.eyebrow {font-size:11px;letter-spacing:.13em;color:var(--yt-ink-3)}
+.plugin-heading {display:flex;align-items:center;justify-content:space-between;gap:28px;margin-bottom:30px}
+.plugin-heading h1 {font:600 34px/1.3 'STSong','SimSun',serif;margin:8px 0;color:var(--yt-ink-1)}
+.plugin-heading p {color:var(--yt-ink-3);font-size:13px;margin:0}
+.heading-right {display:flex;align-items:center;gap:14px}
+.connection-state {color:var(--yt-ink-2);font-size:12px;white-space:nowrap}
+.section-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.panel {background:var(--yt-surface);border:1px solid var(--yt-card-border);border-radius:16px;padding:24px;min-width:0;margin:18px 0}
+.panel h2 {font-size:16px;color:var(--yt-ink-1);margin:0 0 12px}
+.panel p {font-size:13px;line-height:1.8;color:var(--yt-ink-2)}
+.small-label {font-size:12px;color:var(--yt-ink-3);margin:22px 0 8px}
+.examples {display:flex;flex-wrap:wrap;gap:8px}
+.examples code,.examples span {padding:7px 10px;border-radius:8px;background:var(--yt-hover-bg);font-size:12px;overflow-wrap:anywhere}
+.official-link {display:inline-flex;color:var(--yt-primary);margin:12px 0;font-size:13px}
+.connection-tip {margin-top:20px;font-size:12px!important;color:var(--yt-ink-3)!important}
+.settings-form {max-width:750px;margin-top:22px}
+.field-input {width:100%}
+.field-help {display:flex;gap:16px;align-items:center;font-size:11px;color:var(--yt-ink-3);margin-top:6px}
+.config-heading {display:flex;justify-content:space-between;align-items:start}
+.config-heading p {margin:0}
+.unsaved {font-size:12px;color:var(--yt-warning)}
+.settings-actions {display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:30px}
+.settings-actions span {color:var(--yt-ink-3);font-size:12px;margin-right:auto}
+.capability {display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 0;border-bottom:1px solid var(--yt-card-border)}
+.capability code {overflow-wrap:anywhere;color:var(--yt-ink-1)}
+.capability p {margin:7px 0}
+.capability small {color:var(--yt-ink-3)}
+.stats {display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.stats dt {font-size:12px;color:var(--yt-ink-3)}
+.stats dd {font-size:23px;margin:5px 0;font-variant-numeric:tabular-nums}
+@media(max-width:760px) {.plugin-heading{align-items:start;flex-direction:column}.section-grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}.panel{padding:18px}}
+</style>
