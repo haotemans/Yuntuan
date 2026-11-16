@@ -3020,6 +3020,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "rand 0.9.5",
  "reqwest",
  "serde_json",
  "sha2 0.10.9",

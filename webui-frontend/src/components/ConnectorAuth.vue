@@ -1,11 +1,11 @@
 <template>
   <section class="auth-panel">
     <h2>{{ quark ? '连接夸克账号' : '连接腾讯文档' }}</h2>
-    <p v-if="quark">云团准备运行组件和配置路径。你只需打开授权页登录，再回填授权结果。</p>
+    <p v-if="quark">先检查夸克官方工具是否支持当前运行环境，通过后打开 OAuth 授权页登录并回填结果。</p>
     <p v-else>打开腾讯文档授权页获取个人 Token，回填后由云团检查并保存连接。</p>
     <n-alert v-if="disabled" type="info" :bordered="false">请先保存或撤销下方尚未应用的修改。</n-alert>
     <div class="auth-actions">
-      <n-button v-if="quark" type="primary" :loading="working" :disabled="disabled || working || occupied" @click="begin">{{ phase === 'waiting' || phase === 'error' ? '重新获取授权链接' : '开始授权登录' }}</n-button>
+      <n-button v-if="quark" type="primary" :loading="working" :disabled="disabled || working || occupied" @click="begin">{{ phase === 'unsupported' ? '重新检查运行环境' : phase === 'waiting' || phase === 'error' ? '重新获取授权链接' : '开始授权登录' }}</n-button>
       <a v-else href="https://docs.qq.com/open/auth/mcp.html" target="_blank" rel="noopener noreferrer">打开腾讯文档授权页 ↗</a>
       <a v-if="phase === 'waiting' && safeLink" :href="safeLink" target="_blank" rel="noopener noreferrer">打开夸克授权页 ↗</a>
     </div>
@@ -14,9 +14,10 @@
       <n-input v-model:value="value" type="password" autocomplete="off" :input-props="{id:inputId,'aria-label':quark ? '跳转链接或授权码' : '授权页个人 Token'}"
         :disabled="disabled || working || occupied" :placeholder="quark ? '粘贴授权完成后的完整跳转链接或授权码' : '粘贴官方授权页生成的个人 Token'" />
       <p v-if="quark" class="hint">跳转页面无法打开时，也可复制地址栏链接回填。授权码仅使用一次。</p>
+      <p v-if="quark" class="hint">若授权页显示 OpenCode，它对应卷耳的工具运行服务。</p>
       <n-button type="primary" :loading="working" :disabled="disabled || working || occupied || !value.trim()" @click="complete">保存并连接</n-button>
     </template>
-    <n-alert v-if="error || status.message" :type="error || phase === 'error' ? 'error' : phase === 'connected' ? 'success' : 'info'" :bordered="false" class="auth-status">{{ error || status.message }}</n-alert>
+    <n-alert v-if="error || status.message" :type="error || ['error','unsupported'].includes(phase) ? 'error' : phase === 'connected' ? 'success' : 'info'" :bordered="false" class="auth-status">{{ error || status.message }}</n-alert>
   </section>
 </template>
 

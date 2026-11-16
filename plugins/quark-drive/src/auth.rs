@@ -19,6 +19,47 @@ pub enum Login {
     Link(String),
 }
 
+/// The official CLI rejected this runtime before any OAuth/account request.
+#[derive(Debug)]
+pub struct UnsupportedRuntime;
+impl std::fmt::Display for UnsupportedRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("夸克官方工具不支持当前 Agent 运行环境（-104），尚未进入 OAuth 登录；需要接入受支持的工具运行服务，重复登录或更换授权码无效")
+    }
+}
+impl std::error::Error for UnsupportedRuntime {}
+pub(crate) fn check_runtime(result: &Value) -> Result<()> {
+    if result["code"] == -104 {
+        return Err(UnsupportedRuntime.into());
+    }
+    Ok(())
+}
+
+pub async fn preflight(script: &Path) -> Result<()> {
+    let (success, bytes) = super::process::capture(script, &["resolve-agent".into()]).await?;
+    // Official 1.0.25's diagnostic is a channel marker, not result NDJSON.
+    if success
+        && std::str::from_utf8(&bytes).ok().is_some_and(|s| {
+            s.trim().strip_prefix("QK_AGENT_ID=").is_some_and(|id| {
+                !id.is_empty()
+                    && id.len() <= 64
+                    && id
+                        .bytes()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+            })
+        })
+    {
+        return Ok(());
+    }
+    let out = result(&bytes)?;
+    check_runtime(&out)?;
+    ensure!(
+        success && out["code"] == 0,
+        "夸克运行环境检查失败，尚未发起 OAuth 登录"
+    );
+    Ok(())
+}
+
 pub fn validate_script(path: &Path) -> Result<PathBuf> {
     ensure!(
         path.is_absolute() && path.file_name().is_some_and(|n| n == "quark-drive.cjs"),
@@ -185,8 +226,10 @@ fn auth_link(message: &str) -> Option<String> {
     })
 }
 pub async fn begin(script: &Path) -> Result<Login> {
+    preflight(script).await?;
     let (_, bytes) = super::process::capture(script, &["login".into()]).await?;
     let out = result(&bytes)?;
+    check_runtime(&out)?;
     match out["code"].as_i64() {
         Some(0 | -118) => {
             verify(script).await?;
@@ -238,6 +281,7 @@ pub async fn complete(script: &Path, code: &str) -> Result<()> {
     let (_, bytes) =
         super::process::capture(script, &["login".into(), "--token".into(), code.into()]).await?;
     let out = result(&bytes)?;
+    check_runtime(&out)?;
     ensure!(
         matches!(out["code"].as_i64(), Some(0 | -118)),
         "授权未完成或授权码已失效，请重新获取；不会自动重试"
@@ -247,6 +291,7 @@ pub async fn complete(script: &Path, code: &str) -> Result<()> {
 pub async fn verify(script: &Path) -> Result<()> {
     let (success, bytes) = super::process::capture(script, &["get-user-info".into()]).await?;
     let out = result(&bytes)?;
+    check_runtime(&out)?;
     if !success || out["code"] != 0 {
         bail!("账号连接检查未通过，请重新完成官方授权");
     }

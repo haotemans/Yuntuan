@@ -76,6 +76,7 @@ async fn official_protocol_handles_headless_nonzero_exit_paste_login_and_existin
     std::fs::write(fixture.script(),r#"
 const fs=require('fs'); const args=process.argv.slice(2);
 const result=(code,msg)=>{console.log(JSON.stringify({type:'result',code,msg}));process.exit(code===0?0:1)};
+if(args[0]==='resolve-agent') result(0,'fixture runtime');
 if(args[0]==='get-user-info') result(fs.existsSync('authorized')?0:-1408,'private account');
 if(args.includes('--token')) {
   if(args[2]!=='one-time') result(-1408,'do not leak '+args[2]);
@@ -98,6 +99,31 @@ result(-123,'🔗 [前往授权]https://pan.quark.cn/oauth?client_id=official&pa
     assert!(prepare(&fixture.0, "/missing/quark-drive.cjs")
         .await
         .is_err());
+}
+
+#[tokio::test]
+async fn unsupported_runtime_is_a_precondition_not_an_oauth_failure() {
+    let fixture = Fixture::new();
+    std::fs::write(fixture.script(),r#"
+const fs=require('fs'),args=process.argv.slice(2);
+if(args[0]==='login') fs.writeFileSync('login-started','bad');
+console.log(JSON.stringify({type:'result',code:-104,action:'runtime',msg:'untrusted diagnostics with private-token'}));process.exit(1);
+"#).unwrap();
+    let error = match begin(&fixture.script()).await {
+        Err(error) => error,
+        Ok(_) => panic!("unsupported runtime accepted"),
+    };
+    assert!(error.downcast_ref::<UnsupportedRuntime>().is_some());
+    assert!(!fixture.0.join("login-started").exists());
+    assert!(!error.to_string().contains("private-token"));
+    let error = super::super::process::run(&fixture.script(), &["get-user-info".into()])
+        .await
+        .unwrap_err();
+    assert!(error.downcast_ref::<UnsupportedRuntime>().is_some());
+    let error = complete(&fixture.script(), "one-time").await.unwrap_err();
+    assert!(error.downcast_ref::<UnsupportedRuntime>().is_some());
+    let error = verify(&fixture.script()).await.unwrap_err();
+    assert!(error.downcast_ref::<UnsupportedRuntime>().is_some());
 }
 fn zip(entries: &[(&str, &str)]) -> Vec<u8> {
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));

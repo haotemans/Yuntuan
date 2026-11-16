@@ -1004,6 +1004,7 @@ async fn connector_auth_private_quark_onboarding_persists_settings_without_leaki
     std::fs::write(&path,r#"
 const fs=require('fs'),args=process.argv.slice(2);
 const done=(code,msg)=>{console.log(JSON.stringify({type:'result',code,msg}));process.exit(code===0?0:1)};
+if(args[0]==='resolve-agent') done(0,'fixture runtime');
 if(args[0]==='get-user-info') done(fs.existsSync('authorized')?0:-1408,'private fixture');
 if(args.includes('--token')) {fs.writeFileSync('authorized','fixture');done(0,'ok')}
 done(-123,'[前往授权]https://pan.quark.cn/oauth?client_id=official&page_code=opaque');

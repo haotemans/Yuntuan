@@ -457,14 +457,18 @@
       "source": [
         "plugins/quark-drive/src/lib.rs",
         "plugins/quark-drive/src/process.rs",
-        "plugins/quark-drive/src/auth.rs"
+        "plugins/quark-drive/src/auth.rs",
+        "plugins/quark-drive/src/worker.rs"
       ],
       "tests": [
         "plugins/quark-drive/src/tests.rs",
         "webui-frontend/tests/plugins-flow.spec.js",
         "crates/core/src/scheduler.rs",
         "plugins/quark-drive/src/auth/tests.rs",
-        "crates/webui/tests/pages_api.rs"
+        "crates/webui/tests/pages_api.rs",
+        "plugins/quark-drive/src/worker/tests.rs",
+        "plugins/quark-drive/worker/job.test.cjs",
+        "plugins/quark-drive/worker/smoke.py"
       ],
       "module": "extensions/plugins"
     },
