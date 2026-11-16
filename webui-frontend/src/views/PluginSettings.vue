@@ -17,7 +17,7 @@
         </div>
         <div class="heading-right">
           <span class="connection-state">{{ detail.error ? '加载异常' : detail.loaded && detail.enabled ? '插件已加载' : '插件未运行' }}</span>
-          <n-switch :value="detail.enabled" :loading="busy" :disabled="busy || detail.pending_restart" aria-label="启用插件"
+          <n-switch :value="detail.enabled" :loading="busy" :disabled="busy || detail.updating || detail.pending_restart" aria-label="启用插件"
             @update:value="toggle" />
         </div>
       </header>
@@ -76,8 +76,8 @@
             </n-form>
             <div class="settings-actions">
               <span aria-live="polite">{{ saved }}</span>
-              <n-button :disabled="busy || !formDirty" @click="resetDraft(detail)">撤销修改</n-button>
-              <n-button type="primary" :loading="busy" :disabled="busy || !formDirty" @click="saveConfig">保存并应用</n-button>
+              <n-button :disabled="busy || detail.updating || !formDirty" @click="resetDraft(detail)">撤销修改</n-button>
+              <n-button type="primary" :loading="busy" :disabled="busy || detail.updating || !formDirty" @click="saveConfig">保存并应用</n-button>
             </div>
           </section>
         </n-tab-pane>
@@ -86,11 +86,11 @@
             <h2>已注册能力</h2><p>以下能力共享云团统一权限和调用记录；禁用后聊天与命令入口都会受到限制。</p>
             <div v-for="skill in detail.skills || []" :key="skill.name" class="capability">
               <div><code>{{ skill.name }}</code><p>{{ skill.description }}</p><small>{{ (skill.commands || []).join(' · ') || '自然语言调用' }}</small></div>
-              <n-switch :value="capabilityEnabled(skill.name,'skill')" :disabled="busy || !capability(skill.name,'skill')" @update:value="value => toggleCapability(skill.name,'skill',value)" />
+              <n-switch :value="capabilityEnabled(skill.name,'skill')" :disabled="busy || !capability(skill.name,'skill')" :aria-label="`技能 ${skill.name}`" @update:value="value => toggleCapability(skill.name,'skill',value)" />
             </div>
             <div v-for="tool in detail.tools || []" :key="tool.name" class="capability">
               <div><code>{{ tool.name }}</code><p>{{ tool.description }}</p><small>Tool · 共享统一执行器</small></div>
-              <n-switch :value="capabilityEnabled(tool.name,'tool')" :disabled="busy || !capability(tool.name,'tool')" @update:value="value => toggleCapability(tool.name,'tool',value)" />
+              <n-switch :value="capabilityEnabled(tool.name,'tool')" :disabled="busy || !capability(tool.name,'tool')" :aria-label="`工具 ${tool.name}`" @update:value="value => toggleCapability(tool.name,'tool',value)" />
             </div>
             <p v-if="!detail.skills?.length && !detail.tools?.length">启用插件并完成配置后，将在这里看到工具和 Skill。</p>
           </section>
@@ -132,7 +132,8 @@ const busy = ref(false)
 const loadError = ref('')
 const actionError = ref('')
 const saved = ref('')
-const activeTab = ref(['overview','config','skills','runtime'].includes(route.query.tab) ? route.query.tab : 'overview')
+const initialTab = typeof route.query.tab === 'string' ? route.query.tab : ''
+const activeTab = ref(['overview','config','skills','runtime'].includes(initialTab) ? initialTab : 'overview')
 const detail = computed(() => plugins.value.find(p => p.name === route.params.name))
 const officialUrl = computed(() => ({'tencent-docs':'https://docs.qq.com/open/auth/mcp.html','quark-drive':'https://github.com/quark-clouddrive/quarkclouddrive_offical'}[detail.value?.name] || ''))
 const commands = computed(() => [...new Set((detail.value?.skills || []).flatMap(s => s.commands || []))])
@@ -187,7 +188,7 @@ watch(() => route.params.name, () => {baseline.value='';void load()})
 watch(activeTab, tab => { router.replace({query:{...route.query,tab}}) })
 async function saveConfig() {
   const plugin=detail.value
-  if (!plugin || busy.value) return
+  if (!plugin || busy.value || plugin.updating) return
   busy.value=true
   actionError.value=''
   saved.value=''
@@ -210,7 +211,7 @@ async function saveConfig() {
   finally {busy.value=false}
 }
 async function toggle(enabled) {
-  if (!detail.value || busy.value) return
+  if (!detail.value || busy.value || detail.value.updating) return
   busy.value=true
   actionError.value=''
   try {

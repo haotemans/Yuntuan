@@ -50,4 +50,11 @@ feature = "plugin-anysearch"
 [[package.metadata.yuantuan.plugins]]
 dependency = "yuantuan-plugin-nai-image"
 feature = "plugin-nai-image"
-\n[[package.metadata.yuantuan.plugins]]\ndependency = "yuantuan-plugin-tencent-docs"\nfeature = "plugin-tencent-docs"\n\n[[package.metadata.yuantuan.plugins]]\ndependency = "yuantuan-plugin-quark-drive"\nfeature = "plugin-quark-drive"\n
+
+[[package.metadata.yuantuan.plugins]]
+dependency = "yuantuan-plugin-tencent-docs"
+feature = "plugin-tencent-docs"
+
+[[package.metadata.yuantuan.plugins]]
+dependency = "yuantuan-plugin-quark-drive"
+feature = "plugin-quark-drive"
