@@ -403,6 +403,17 @@
         "plugins/moderator/src/membership/tests.rs"
       ],
       "module": "extensions/plugins"
+    },
+    {
+      "id": "plugin-scheduler",
+      "title": "知时：定时 Agent 任务",
+      "status": "Rust 插件代码已提交（待编译与真实 QQ 验收）",
+      "doc": "docs/features/extensions/plugins/scheduler.md",
+      "source": [
+        "crates/core/src/scheduler.rs"
+      ],
+      "tests": [],
+      "module": "extensions/plugins"
     }
   ],
   "description": "One canonical feature document per behavior; module README files are navigation only; each managed source has exactly one primary feature owner.",

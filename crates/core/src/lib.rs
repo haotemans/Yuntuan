@@ -21,6 +21,7 @@ pub mod napcat_slot;
 pub mod personality;
 pub mod prefilter;
 pub mod reply_engine;
+pub mod scheduler;
 pub mod skills;
 pub mod state;
 pub mod supervisor;

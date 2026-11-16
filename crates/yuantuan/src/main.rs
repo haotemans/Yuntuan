@@ -166,7 +166,7 @@ async fn main() -> Result<()> {
     let reply_engine = yuantuan_core::reply_engine::ReplyEngine::new(
         db_path.clone(),
         bus.clone(),
-        send,
+        send.clone(),
         self_ids.clone(),
         reply_slot.clone(),
         mood.clone(),
@@ -183,8 +183,16 @@ async fn main() -> Result<()> {
     }
     let skill_registry = yuantuan_core::skills::SkillRegistry::new();
     let llm_slot: yuantuan_core::bot::SharedLlm = Arc::new(RwLock::new(llm.clone()));
+    // Built-in scheduled task plugin needs the real Agent bus and QQ SendFn.
+    // It remains disabled until explicitly enabled in the plugin panel.
+    let mut builtin_plugins = compiled_plugins();
+    builtin_plugins.push(yuantuan_core::scheduler::plugin(
+        db_path.clone(),
+        bus.clone(),
+        send.clone(),
+    ));
     let plugins = yuantuan_core::plugins::PluginManager::load_with_moderation(
-        compiled_plugins(),
+        builtin_plugins,
         data_root.clone(),
         std::path::PathBuf::from("plugins"),
         tools_registry.clone(),
