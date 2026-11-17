@@ -14,6 +14,27 @@ const PACKAGE: &str =
 const SHA256: &str = "56c34e9a9313ae29d39475b4ff9da9e92fbfd59699bf5843e3382e54434fffb8";
 const ZIP_LIMIT: usize = 8 * 1024 * 1024;
 
+fn package_redirect_allowed(url: &Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let cdn = host
+        .strip_prefix("pdds-")
+        .and_then(|s| s.strip_suffix("-cdn.quark.cn"))
+        .is_some_and(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+        });
+    url.scheme() == "https"
+        && url.port_or_known_default() == Some(443)
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.fragment().is_none()
+        && (host == "pdds.quark.cn" || cdn)
+}
+
 pub enum Login {
     Authorized,
     Link(String),
@@ -93,7 +114,13 @@ pub async fn prepare(data_root: &Path, configured: &str) -> Result<PathBuf> {
         return validate_script(&target.join("scripts/quark-drive.cjs"));
     }
     let mut response = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() <= 3 && package_redirect_allowed(attempt.url()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(60))
         .build()?

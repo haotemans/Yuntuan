@@ -1,5 +1,27 @@
 use super::*;
 use serde_json::json;
+
+#[test]
+fn official_package_redirects_allow_only_https_quark_download_cdn() {
+    for value in [
+        "https://pdds.quark.cn/file.zip",
+        "https://pdds-c1-cdn.quark.cn/file.zip?signature=temporary",
+        "https://pdds-c2-cdn.quark.cn/file.zip",
+    ] {
+        assert!(package_redirect_allowed(&Url::parse(value).unwrap()));
+    }
+    for value in [
+        "http://pdds-c1-cdn.quark.cn/file.zip",
+        "https://pdds.quark.cn.evil.test/file.zip",
+        "https://pdds-c1.evil-cdn.quark.cn/file.zip",
+        "https://pan.quark.cn/file.zip",
+        "https://user:password@pdds.quark.cn/file.zip",
+        "https://pdds.quark.cn:444/file.zip",
+        "https://pdds-c1-cdn.quark.cn/file.zip#fragment",
+    ] {
+        assert!(!package_redirect_allowed(&Url::parse(value).unwrap()));
+    }
+}
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
