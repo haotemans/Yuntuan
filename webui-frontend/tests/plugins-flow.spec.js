@@ -90,11 +90,15 @@ async function openPlugins(page, { deferred=false,error=false }={}) {
       return route.fulfill({json:{ok:true}})
     }
     if (pathname==='/api/capabilities') {
-      if (route.request().method()==='POST') {
+      if (route.request().method()==='PATCH') {
         const body=route.request().postDataJSON()
         state.capabilityWrites.push(body)
-        Object.assign(state.capabilities.find(c=>c.name===body.name&&c.kind===body.kind),body)
-        return route.fulfill({json:{ok:true}})
+        if (body.scopes?.some(scope => !/^(group|private):\S+$/.test(scope))) {
+          return route.fulfill({status:400,json:{error:'会话范围格式不正确'}})
+        }
+        const item=state.capabilities.find(c=>c.name===body.name&&c.kind===body.kind)
+        Object.assign(item,body)
+        return route.fulfill({json:{ok:true,enabled:item.enabled,scopes:item.scopes}})
       }
       return route.fulfill({json:{capabilities:state.capabilities}})
     }
@@ -182,14 +186,46 @@ test('tool toggle retains scopes and is independent of the skill with identical 
   await page.getByText('Skills / Tools',{exact:true}).click()
   const tool=page.getByRole('switch',{name:'工具 nai-image.generate'})
   await expect(tool).toBeVisible()
-  const row=tool.locator('..');
+  const row=page.locator('.capability').filter({has:tool})
   await row.getByText('调用参数',{exact:true}).click()
   await expect(row.locator('.tool-schema')).toContainText('prompt')
   await tool.click()
   await expect.poll(()=>state.capabilityWrites.length).toBe(1)
-  expect(state.capabilityWrites[0]).toEqual({name:'nai-image.generate',kind:'tool',enabled:false,scopes:['group:42']})
+  expect(state.capabilityWrites[0]).toEqual({name:'nai-image.generate',kind:'tool',enabled:false})
+  expect(state.capabilities.find(c=>c.name==='nai-image.generate'&&c.kind==='tool').scopes).toEqual(['group:42'])
   expect(state.capabilities.find(c=>c.name==='nai-image.generate'&&c.kind==='skill').enabled).toBe(true)
   await expect(tool).toHaveAttribute('aria-checked','false')
+})
+
+test('edits only the selected capability scope and keeps the draft on rejection', async ({page}) => {
+  const state=await openPlugins(page)
+  await openConfig(page)
+  await page.getByText('Skills / Tools',{exact:true}).click()
+  const edit=page.getByRole('button',{name:'编辑工具 nai-image.generate 的会话范围'})
+  await edit.click()
+  const input=page.getByRole('textbox',{name:'会话 ID'})
+  await expect(input).toHaveValue('group:42')
+  const save=page.getByRole('button',{name:'保存范围'})
+  await input.fill('')
+  await save.click()
+  await expect(page.getByText('请填写至少一个会话，或选择全部会话。')).toBeVisible()
+  expect(state.capabilityWrites).toHaveLength(0)
+  await input.fill('group:')
+  await save.click()
+  await expect(page.getByText('会话范围格式不正确')).toBeVisible()
+  await expect(input).toHaveValue('group:')
+  await input.fill('group:12\nprivate:dm_345\ngroup:12')
+  await save.click()
+  await expect(edit).toHaveText('2 个会话')
+  expect(state.capabilityWrites[1]).toEqual({
+    name:'nai-image.generate',kind:'tool',scopes:['group:12','private:dm_345'],
+  })
+  const skill=state.capabilities.find(c=>c.name==='nai-image.generate'&&c.kind==='skill')
+  expect(skill.scopes).toEqual(['group:42'])
+  await expect(page.getByRole('switch',{name:'工具 nai-image.generate'})).toHaveAttribute('aria-checked','true')
+  await page.reload()
+  await edit.click()
+  await expect(input).toHaveValue('group:12\nprivate:dm_345')
 })
 
 
@@ -209,8 +245,9 @@ test('QQ Space uses the common independent settings route without asking for coo
   await page.getByText('Skills / Tools',{exact:true}).click()
   const tool=page.getByRole('switch',{name:'工具 qzone.publish'})
   await expect(tool).toBeVisible()
-  await tool.locator('..').getByText('调用参数',{exact:true}).click()
-  await expect(tool.locator('..').locator('.tool-schema')).toContainText('content')
+  const row=page.locator('.capability').filter({has:tool})
+  await row.getByText('调用参数',{exact:true}).click()
+  await expect(row.locator('.tool-schema')).toContainText('content')
 })
 
 test('quark share watcher uses the shared persistent schedule API',async ({page})=>{
