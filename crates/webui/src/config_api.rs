@@ -162,9 +162,13 @@ pub async fn post_config(
         let orig = read_toml_as_json(&state.extras.config_path).unwrap_or_else(|| json!({}));
         unmask_in_place(&mut cfg_clean, &orig);
         if let Some(section) = cfg_clean.get("qq_official") {
+            let invalid = |message: String| {
+                (StatusCode::BAD_REQUEST, Json(json!({"error":message})))
+            };
             let config: yuantuan_core::platform::OfficialQqConfig =
-                serde_json::from_value(section.clone()).map_err(|_| err("QQ 官方机器人配置格式错误"))?;
-            config.validate().map_err(|error| err(&error.to_string()))?;
+                serde_json::from_value(section.clone())
+                    .map_err(|_| invalid("QQ 官方机器人配置格式错误".into()))?;
+            config.validate().map_err(|error| invalid(error.to_string()))?;
         }
         if cfg_clean.get("qq_official") != orig.get("qq_official") {
             requires_restart.push("qq_official（重启云团后生效）".into());
