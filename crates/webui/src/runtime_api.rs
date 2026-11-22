@@ -8,7 +8,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row;
-use yuantuan_core::db::{params, SqliteExt};
+use yuantuan_core::db::SqliteExt;
 type Response = Result<Json<Value>, (StatusCode, Json<Value>)>;
 fn error(e: impl std::fmt::Display) -> (StatusCode, Json<Value>) {
     (
@@ -61,23 +61,71 @@ pub async fn toggle(State(s): State<AppState>, Json(b): Json<Switch>) -> Respons
     {
         return Err(error("会话范围格式应为 group:群号 或 private:会话号"));
     }
-    let mut c = s.open_db().await.map_err(error)?;
-    let n = c
-        .execute(
-            "UPDATE capability_catalog SET enabled=?3,scopes=?4 WHERE name=?1 AND kind=?2",
-            params![
-                b.name,
-                b.kind,
-                b.enabled,
-                serde_json::to_string(&b.scopes).map_err(error)?
-            ],
-        )
-        .await
-        .map_err(error)?;
-    if n != 1 {
-        return Err(error("能力尚未注册"));
-    }
+    update_capability(&s, &b.name, &b.kind, Some(b.enabled), Some(b.scopes)).await?;
     Ok(Json(json!({"ok":true})))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CapabilityPatch {
+    name: String,
+    kind: String,
+    enabled: Option<bool>,
+    scopes: Option<Vec<String>>,
+}
+
+pub async fn patch_capability(State(s): State<AppState>, Json(b): Json<CapabilityPatch>) -> Response {
+    if b.enabled.is_none() && b.scopes.is_none() {
+        return Err(error("请提供开关或会话范围"));
+    }
+    if b.scopes.as_ref().is_some_and(|scopes| {
+        scopes.len() > 100
+            || scopes.iter().any(|scope| {
+                let id = scope
+                    .strip_prefix("group:")
+                    .or_else(|| scope.strip_prefix("private:"))
+                    .unwrap_or("");
+                id.is_empty()
+                    || id.chars().count() > 128
+                    || id.chars().any(|c| c.is_whitespace() || c.is_control() || c == ':')
+            })
+    }) {
+        return Err(error("最多填写100个会话，格式为 group:群号 或 private:会话ID"));
+    }
+    update_capability(&s, &b.name, &b.kind, b.enabled, b.scopes).await
+}
+
+async fn update_capability(
+    s: &AppState,
+    name: &str,
+    kind: &str,
+    enabled: Option<bool>,
+    scopes: Option<Vec<String>>,
+) -> Response {
+    let scopes = scopes
+        .map(|values| serde_json::to_string(&values))
+        .transpose()
+        .map_err(error)?;
+    let mut c = s.open_db().await.map_err(error)?;
+    let row = sqlx::query(
+        "UPDATE capability_catalog SET enabled=COALESCE(?3,enabled),scopes=COALESCE(?4,scopes)
+         WHERE name=?1 AND kind=?2 RETURNING enabled,scopes",
+    )
+    .bind(name)
+    .bind(kind)
+    .bind(enabled)
+    .bind(scopes)
+    .fetch_optional(&mut *c)
+    .await
+    .map_err(error)?
+    .ok_or_else(|| error("能力尚未注册"))?;
+    let enabled: bool = row.try_get("enabled").map_err(error)?;
+    let scopes: String = row.try_get("scopes").map_err(error)?;
+    Ok(Json(json!({
+        "ok": true,
+        "enabled": enabled,
+        "scopes": serde_json::from_str::<Value>(&scopes).unwrap_or(json!([])),
+    })))
 }
 #[derive(Deserialize)]
 pub struct Control {

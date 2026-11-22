@@ -53,7 +53,11 @@ Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统
 
 工具调用易用性补充：基础Schema检查移到[`schema.rs`](../../../crates/plugin-api/src/schema.rs)，错误包含JSON Pointer字段路径和期望类型/范围，不回显用户实参。支持type（含类型数组）、required、enum、properties、additionalProperties、items、min/maxItems、min/maxLength及minimum/maximum；递归检查限32层，$ref/组合Schema等完整标准仍不支持，业务校验继续由Tool负责。回归见[`tool_usability.rs`](../../../crates/core/tests/tool_usability.rs)。
 
-插件页“调用状态→能力与存储信息”增加Tool独立开关、持久调用计数与折叠输入Schema；同名Skill和Tool按kind分别控制。切换任一能力都携带原scopes，避免开关操作清空会话范围。这里只开关已注册实现，不绕过插件总开关、业务权限或底层依赖。浏览器回归[`plugins-flow.spec.js`](../../../webui-frontend/tests/plugins-flow.spec.js)验证Tool/Skill独立、范围保留及参数查看，加入Linux前端CI。
+插件详情页「Skills / Tools」显示 Tool 独立开关、持久调用计数和可展开的输入 Schema。同名 Skill 和 Tool 以 kind 区分，启停操作保留原会话范围。浏览器回归 [`plugins-flow.spec.js`](../../../webui-frontend/tests/plugins-flow.spec.js) 覆盖开关与参数查看，纳入 Linux 前端 CI。
+
+插件详情页「Skills / Tools」可编辑每个能力的会话范围。选择「仅指定会话」后逐行输入带类型的会话 ID，例如 `group:123456` 或 `private:dm_123456`。明确选择「全部会话」会清空这一层的限制，实际调用仍同时检查插件范围、能力启停和业务权限。Skill 与同名 Tool 独立保存。保存失败会保留编辑内容。
+
+面板使用已认证的 `PATCH /api/capabilities` 分别提交 `enabled` 或 `scopes`，SQLite 原子更新提供的字段，因此修改范围和开关相互独立。旧 `POST` 请求格式保留。回归见 [`plugins-flow.spec.js`](../../../webui-frontend/tests/plugins-flow.spec.js) 和 [`pages_api.rs`](../../../crates/webui/tests/pages_api.rs)。
 
 
 ## 独立配置页与共享执行权限

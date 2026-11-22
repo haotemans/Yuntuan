@@ -94,7 +94,9 @@ pub async fn serve(db_path: PathBuf, host: &str, port: u16, extras: Extras) -> R
         )
         .route(
             "/api/capabilities",
-            get(runtime_api::capabilities).post(runtime_api::toggle),
+            get(runtime_api::capabilities)
+                .post(runtime_api::toggle)
+                .patch(runtime_api::patch_capability),
         )
         .route("/api/tasks/{id}/runtime", get(runtime_api::task))
         .route("/api/tasks/{id}/control", post(runtime_api::control))

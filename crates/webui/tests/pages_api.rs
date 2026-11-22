@@ -534,6 +534,74 @@ impl Rig {
     }
 }
 
+#[tokio::test]
+async fn capability_patch_updates_scope_and_switch_independently() {
+    let rig = start().await;
+    let name = "fixture.shared";
+    let url = format!("{}/api/capabilities", rig.base);
+    for kind in ["skill", "tool"] {
+        yuantuan_core::capabilities::register(&rig.db_path, name, kind, "fixture", &json!({}))
+            .await
+            .unwrap();
+    }
+    let patch = |change: Value| {
+        rig.http
+            .patch(&url)
+            .bearer_auth(&rig.token)
+            .json(&change)
+            .send()
+    };
+    let tool = |change: Value| {
+        let mut body = json!({"name":name,"kind":"tool"});
+        body.as_object_mut()
+            .unwrap()
+            .extend(change.as_object().unwrap().clone());
+        body
+    };
+    assert_eq!(
+        rig.http
+            .patch(&url)
+            .json(&tool(json!({"enabled":false})))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
+        401
+    );
+    let (scoped, toggled) = tokio::join!(
+        patch(tool(json!({"scopes":["group:42","private:dm_123"]}))),
+        patch(tool(json!({"enabled":false}))),
+    );
+    assert_eq!(scoped.unwrap().status().as_u16(), 200);
+    assert_eq!(toggled.unwrap().status().as_u16(), 200);
+    for change in [json!({}), json!({"scopes":["group:"]})] {
+        assert_eq!(patch(tool(change)).await.unwrap().status().as_u16(), 400);
+    }
+    let (_, catalog) = rig.get("/api/capabilities").await;
+    let find = |kind: &str| {
+        catalog["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["name"] == name && row["kind"] == kind)
+            .unwrap()
+    };
+    assert_eq!(find("tool")["enabled"], false);
+    assert_eq!(find("tool")["scopes"], json!(["group:42", "private:dm_123"]));
+    assert_eq!(find("skill")["enabled"], true);
+    assert_eq!(find("skill")["scopes"], json!([]));
+    let cleared: Value = patch(tool(json!({"scopes":[]})))
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(cleared, json!({"ok":true,"enabled":false,"scopes":[]}));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn pages_api_full_pass() {
     let rig = start().await;

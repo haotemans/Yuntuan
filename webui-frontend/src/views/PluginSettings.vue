@@ -91,17 +91,25 @@
             <h2>已注册能力</h2><p>管理技能与工具的启用状态和适用范围。</p>
             <div v-for="skill in detail.skills || []" :key="skill.name" class="capability">
               <div><code>{{ skill.name }}</code><p>{{ skill.description }}</p><small>{{ (skill.commands || []).join(' · ') || '自然语言调用' }}</small></div>
-              <n-switch :value="capabilityEnabled(skill.name,'skill')" :disabled="busy || !capability(skill.name,'skill')" :aria-label="`技能 ${skill.name}`" @update:value="value => toggleCapability(skill.name,'skill',value)" />
+              <div class="capability-actions">
+                <n-button v-if="capability(skill.name,'skill')" size="tiny" secondary :disabled="busy || capabilityBusy"
+                  :aria-label="`编辑技能 ${skill.name} 的会话范围`" @click="editCapabilityScope(skill.name,'skill')">{{ scopeLabel(skill.name,'skill') }}</n-button>
+                <n-switch :value="capabilityEnabled(skill.name,'skill')" :disabled="busy || capabilityBusy || !capability(skill.name,'skill')" :aria-label="`技能 ${skill.name}`" @update:value="value => toggleCapability(skill.name,'skill',value)" />
+              </div>
             </div>
             <div v-for="tool in detail.tools || []" :key="tool.name" class="capability">
-              <div><code>{{ tool.name }}</code><p>{{ tool.description }}</p><small>Tool · 累计调用 {{ capability(tool.name,'tool')?.calls || 0 }} 次</small>
+              <div><code>{{ tool.name }}</code><p>{{ capability(tool.name,'tool')?.description || tool.description }}</p><small>Tool · 累计调用 {{ capability(tool.name,'tool')?.calls || 0 }} 次</small>
                 <details v-if="capability(tool.name,'tool')?.tool_contract" class="tool-contract">
                   <summary>调用参数</summary>
                   <pre class="tool-schema">{{ JSON.stringify(capability(tool.name,'tool').tool_contract.input_schema,null,2) }}</pre>
                   <small>{{ capability(tool.name,'tool').tool_contract.policy?.effect || 'unknown' }} · {{ capability(tool.name,'tool').tool_contract.policy?.timeout_ms || 0 }} ms</small>
                 </details>
               </div>
-              <n-switch :value="capabilityEnabled(tool.name,'tool')" :disabled="busy || !capability(tool.name,'tool')" :aria-label="`工具 ${tool.name}`" @update:value="value => toggleCapability(tool.name,'tool',value)" />
+              <div class="capability-actions">
+                <n-button v-if="capability(tool.name,'tool')" size="tiny" secondary :disabled="busy || capabilityBusy"
+                  :aria-label="`编辑工具 ${tool.name} 的会话范围`" @click="editCapabilityScope(tool.name,'tool')">{{ scopeLabel(tool.name,'tool') }}</n-button>
+                <n-switch :value="capabilityEnabled(tool.name,'tool')" :disabled="busy || capabilityBusy || !capability(tool.name,'tool')" :aria-label="`工具 ${tool.name}`" @update:value="value => toggleCapability(tool.name,'tool',value)" />
+              </div>
             </div>
             <p v-if="!detail.skills?.length && !detail.tools?.length">启用插件并完成配置后，将在这里看到工具和 Skill。</p>
           </section>
@@ -149,6 +157,29 @@
           </section>
         </n-tab-pane>
       </n-tabs>
+      <n-modal :show="!!scopeEditor" preset="card" title="编辑会话范围" class="capability-scope-dialog"
+        :style="{ width: 'min(480px, calc(100vw - 32px))' }" :closable="!capabilityBusy"
+        :mask-closable="!capabilityBusy" :close-on-esc="!capabilityBusy" @update:show="closeCapabilityScope">
+        <template v-if="scopeEditor">
+          <p><code>{{ scopeEditor.name }}</code> · {{ scopeEditor.kind === 'tool' ? 'Tool' : 'Skill' }}</p>
+          <p>此范围与插件设置、账号权限共同生效。</p>
+          <n-form :disabled="capabilityBusy" :show-feedback="false">
+            <n-form-item label="允许调用的会话">
+              <n-select v-model:value="scopeEditor.mode" aria-label="允许调用的会话"
+                :options="[{label:'全部会话',value:'all'},{label:'仅指定会话',value:'selected'}]" />
+            </n-form-item>
+            <n-form-item v-if="scopeEditor.mode === 'selected'" label="会话 ID">
+              <n-input v-model:value="scopeEditor.text" type="textarea"
+                :input-props="{'aria-label':'会话 ID'}" placeholder="每行填写一项，如 group:123456 或 private:dm_123456" />
+            </n-form-item>
+          </n-form>
+          <n-alert v-if="scopeEditor.error" type="error" :bordered="false">{{ scopeEditor.error }}</n-alert>
+          <div class="settings-actions">
+            <n-button :disabled="capabilityBusy" @click="closeCapabilityScope(false)">取消</n-button>
+            <n-button type="primary" :loading="capabilityBusy" @click="saveCapabilityScope">保存范围</n-button>
+          </div>
+        </template>
+      </n-modal>
     </template>
     <EmptyState v-else-if="!loadError" title="该插件不存在或未编译安装" />
   </div>
@@ -272,15 +303,55 @@ const timeoutSeconds = computed({get:()=>limits.value.timeout_ms/1000,set:value=
 const outputKiB = computed({get:()=>limits.value.max_output_bytes/1024,set:value=>{limits.value.max_output_bytes=value==null?0:Math.round(value*1024)}})
 function capability(name,kind) { return capabilities.value.find(c => c.name===name && c.kind===kind) }
 function capabilityEnabled(name,kind) { return capability(name,kind)?.enabled ?? true }
-async function toggleCapability(name,kind,enabled) {
-  const item=capability(name,kind)
-  if (!item) return
+const capabilityBusy = ref(false)
+const scopeEditor = ref(null)
+let capabilityRevision = 0
+function scopeLabel(name,kind) {
+  const count = capability(name,kind)?.scopes?.length || 0
+  return count ? `${count} 个会话` : '全部会话'
+}
+function editCapabilityScope(name,kind) {
+  const item = capability(name,kind)
+  if (!item || capabilityBusy.value) return
+  const scopes = item.scopes || []
+  scopeEditor.value = {name, kind, mode:scopes.length ? 'selected' : 'all', text:scopes.join('\n'), error:''}
+}
+function closeCapabilityScope(show) {
+  if (!show && !capabilityBusy.value) scopeEditor.value = null
+}
+async function saveCapabilityScope() {
+  const editor = scopeEditor.value
+  if (!editor || capabilityBusy.value) return
+  editor.error = ''
+  const scopes = editor.mode === 'all' ? [] : [...new Set(editor.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean))]
+  if (editor.mode === 'selected' && !scopes.length) {
+    editor.error = '请填写至少一个会话，或选择全部会话。'
+    return
+  }
+  const saved = await updateCapability(editor.name, editor.kind, {scopes}, editor)
+  if (saved && scopeEditor.value === editor) scopeEditor.value = null
+}
+function toggleCapability(name,kind,enabled) {
+  return updateCapability(name,kind,{enabled})
+}
+async function updateCapability(name,kind,change,editor = null) {
+  if (!capability(name,kind) || busy.value || capabilityBusy.value) return false
+  const plugin = route.params.name
+  capabilityBusy.value = true
+  actionError.value = ''
   try {
-    await api.post('/capabilities',{name,kind,enabled,scopes:item.scopes || []})
-    const {data}=await api.get('/capabilities')
-    capabilities.value=data.capabilities || []
-    message.success('已更新能力开关')
-  } catch(e) { actionError.value=e.response?.data?.error || '能力更新失败' }
+    const {data} = await api.patch('/capabilities',{name,kind,...change})
+    capabilityRevision++
+    const item = capability(name,kind)
+    if (item) Object.assign(item,{enabled:data.enabled,scopes:data.scopes})
+    if (!disposed && route.params.name === plugin) message.success(editor ? '已保存会话范围' : '已更新能力开关')
+    return true
+  } catch(e) {
+    const error = e.response?.data?.error || '能力更新失败'
+    if (editor) editor.error = error
+    else if (route.params.name === plugin) actionError.value = error
+    return false
+  } finally { capabilityBusy.value = false }
 }
 function resetDraft(plugin) {
   configDraft.value = Object.fromEntries((plugin.config_fields || []).map(f => [f.key, f.secret ? '' : (plugin.settings?.config?.[f.key] ?? f.default)]))
@@ -296,11 +367,12 @@ let fetching=false
 async function load() {
   if (disposed || fetching) return
   fetching=true
+  const loadedCapabilityRevision = capabilityRevision
   try {
     const [pluginsResponse, capResponse] = await Promise.all([api.get('/plugins/list'),api.get('/capabilities')])
     if (disposed) return
     plugins.value=pluginsResponse.data.plugins || []
-    capabilities.value=capResponse.data.capabilities || []
+    if (loadedCapabilityRevision === capabilityRevision) capabilities.value=capResponse.data.capabilities || []
     if (detail.value && (!baseline.value || !formDirty.value)) resetDraft(detail.value)
     loadError.value=''
     if (activeTab.value === 'links' && !watchBusy.value) await loadWatches()
@@ -308,7 +380,7 @@ async function load() {
     if (!disposed) loadError.value=e.response?.data?.error || '无法获取插件详情'
   } finally { loading.value=false; fetching=false }
 }
-watch(() => route.params.name, () => {baseline.value='';connectionResult.value='';showAdvanced.value=false;authBusy.value=false;void load()})
+watch(() => route.params.name, () => {baseline.value='';connectionResult.value='';showAdvanced.value=false;authBusy.value=false;scopeEditor.value=null;void load()})
 watch(activeTab, tab => { router.replace({query:{...route.query,tab}}); if (tab === 'links') void loadWatches() })
 async function saveConfig() {
   const plugin=detail.value
@@ -346,7 +418,7 @@ async function toggle(enabled) {
   finally {busy.value=false}
 }
 async function poll() {
-  if (!disposed && !document.hidden && !busy.value) await load()
+  if (!disposed && !document.hidden && !busy.value && !capabilityBusy.value) await load()
   if (!disposed) timer=setTimeout(poll,2500)
 }
 onMounted(() => {void poll()})
@@ -381,6 +453,9 @@ onUnmounted(() => {disposed=true;clearTimeout(timer)})
 .settings-actions {display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:30px}
 .settings-actions span {color:var(--yt-ink-3);font-size:12px;margin-right:auto}
 .capability {display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 0;border-bottom:1px solid var(--yt-card-border)}
+.capability > div:first-child {min-width:0}
+.capability-actions {display:flex;align-items:center;gap:10px;flex-shrink:0}
+.capability-scope-dialog code {overflow-wrap:anywhere}
 .tool-contract {margin-top:10px}.tool-contract summary {cursor:pointer;font-size:12px}.tool-schema {white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;max-width:100%;max-height:320px;overflow:auto}
 .capability code {overflow-wrap:anywhere;color:var(--yt-ink-1)}
 .capability p {margin:7px 0}
@@ -398,4 +473,5 @@ onUnmounted(() => {disposed=true;clearTimeout(timer)})
 .watch-empty {padding:22px 0}
 @media(max-width:760px) { .watch-form {grid-template-columns:1fr} .watch-item {flex-direction:column} .watch-actions {flex-wrap:wrap} }
 @media(max-width:760px) {.plugin-heading{align-items:start;flex-direction:column}.section-grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}.panel{padding:18px}}
+@media(max-width:480px) {.capability{align-items:flex-start;flex-direction:column;gap:12px}}
 </style>
