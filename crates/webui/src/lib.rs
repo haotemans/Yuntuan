@@ -41,6 +41,7 @@ pub async fn serve(db_path: PathBuf, host: &str, port: u16, extras: Extras) -> R
     // /api/* 中除 login 外一律过 token 校验
     let protected = Router::new()
         .route("/api/overview", get(overview::overview))
+        .route("/api/platforms", get(overview::platforms))
         .route("/api/dashboard", get(dashboard::dashboard))
         .route("/api/events", get(events_api::list))
         .route("/api/decisions/status", get(events_api::decision_status))

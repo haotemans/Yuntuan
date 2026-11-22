@@ -12,14 +12,20 @@
         "crates/adapter-qq/src/delivery.rs",
         "crates/adapter-qq/src/ingest.rs",
         "crates/adapter-qq/src/lib.rs",
+        "crates/adapter-qq/src/official.rs",
+        "crates/adapter-qq/src/official/gateway.rs",
+        "crates/adapter-qq/src/official/ingest.rs",
         "crates/adapter-qq/src/server.rs",
         "crates/core/src/napcat_slot.rs",
+        "crates/core/src/platform.rs",
         "webui-frontend/src/views/Platform.vue"
       ],
       "tests": [
         "crates/adapter-qq/tests/ingest.rs",
         "crates/adapter-qq/tests/reply.rs",
-        "crates/adapter-qq/tests/delayed_delivery.rs"
+        "crates/adapter-qq/tests/delayed_delivery.rs",
+        "crates/adapter-qq/src/official/tests.rs",
+        "webui-frontend/tests/platforms-flow.spec.js"
       ],
       "module": "adapter-qq"
     },

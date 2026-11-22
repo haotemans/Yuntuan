@@ -4,7 +4,7 @@
 
 **当前状态：已接入（需真实 QQ 验收）**。此判断基于当前 `main` 的代码入口静态核对；真实模型、NapCat 与外部 API 需在目标环境单独验收。
 
-> NapCat / OneBot 11 反向 WebSocket、消息段解析、连接鉴权与发送回执。
+> OneBot 11 反向 WebSocket、QQ 官方机器人网关、平台配置与发送回执。
 
 ## 实际行为
 
@@ -12,7 +12,7 @@
 - 发送者的机器人/系统判定随原消息在同一事务保存，周期补读和重启恢复继续遵守原始过滤结果。
 - 图片消息保存原消息与图片来源关联，供定向视觉观察、引用复用与表情采集使用；普通聊天刷图不自动触发定向识图。
 - 视觉理解由核心层按请求类型和成本限制调用 BotChat；适配层只提供消息原始关联，保留真实 @ 对象，不能把截图内的昵称当协议身份。
-- WebUI 的「平台接入」页可查看连接状态与配置。连接成功不等于模型角色已配置。
+- WebUI 的「平台接入」页按接入通道并列显示 OneBot 11 与 QQ 官方机器人的运行状态和配置。两条通道可独立启用，状态以宿主探针为准。
 
 好友与入群 `request` 事件校验登录账号、申请人及类型后先去重落库，再发布观察事件；不混入聊天消息、画像或普通对话提示。握手期按事件自身账号暂存，后续审核仍绑定真实登录QQ；申请处理和权限约束见[主理人](../extensions/plugins/moderator.md)。
 
@@ -22,14 +22,28 @@
 - 普通文件附件仍需 NapCat 能读取路径，库存表情使用 base64；图片结合服务器返回的消息 ID、序号、目标、发送者和媒体段核验，回执不明确时保持待确认，不盲目重复发送。
 - 相关实现规则见[信息流参考](../../reference/message-flow-rules.md)和[ADR-0001](../../adr/0001-napcat-as-qq-protocol-endpoint.md)。
 
+## QQ 官方机器人
+
+在 [QQ 开放平台](https://q.qq.com/)创建机器人，并开通单聊及群 @ 事件。将 AppID、AppSecret 填入「平台接入 → QQ 官方机器人」，启用后保存并重启云团。开放平台要求 IP 白名单时，填入运行云团的服务器公网出口 IP。未发布的机器人需使用配置的沙箱成员和群聊。
+
+配置存于主配置文件的 `[qq_official]`，默认关闭。管理面板只显示密钥是否已保存，留空保留原值。云团获取访问令牌并主动连接安全 WebSocket，收到 READY 或 RESUMED 后显示已连接。断线时退避重连，使用尚可恢复的网关会话续接。协议见 [腾讯官方 Node SDK 指南](https://github.com/tencent-connect/qqbot-nodejs/blob/main/USAGE.md)。
+
+当前接收 `C2C_MESSAGE_CREATE` 和 `GROUP_AT_MESSAGE_CREATE`，带受支持图源的图片可交给现有视觉链路。回复通过官方 API 被动发送文本。引用、主动推送、频道和出站富媒体留待扩展。账号、人物与会话使用平台和 AppID 命名空间，原始消息 ID 独立保存。平台重复派发按账号与消息 ID 去重。回复只允许使用同会话的真实锚点，群内 5 分钟、私聊 60 分钟，每个锚点最多 5 次，序号先持久化，回执不明时不盲重发。平台与有效期规则见 [腾讯发送消息文档](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)。
+
+验证覆盖本地模拟网关、真实 SQLite 与模拟回复 HTTP 接口，以及面板两套配置的独立提交。真实账号权限、网络和 QQ 客户端收发仍需在目标环境验收。
+
 ## 对应实现（本页负责的主源码）
 
 - [`crates/adapter-qq/src/client.rs`](../../../crates/adapter-qq/src/client.rs)
 - [`crates/adapter-qq/src/delivery.rs`](../../../crates/adapter-qq/src/delivery.rs)
 - [`crates/adapter-qq/src/ingest.rs`](../../../crates/adapter-qq/src/ingest.rs)
 - [`crates/adapter-qq/src/lib.rs`](../../../crates/adapter-qq/src/lib.rs)
+- [`crates/adapter-qq/src/official.rs`](../../../crates/adapter-qq/src/official.rs)
+- [`crates/adapter-qq/src/official/gateway.rs`](../../../crates/adapter-qq/src/official/gateway.rs)
+- [`crates/adapter-qq/src/official/ingest.rs`](../../../crates/adapter-qq/src/official/ingest.rs)
 - [`crates/adapter-qq/src/server.rs`](../../../crates/adapter-qq/src/server.rs)
 - [`crates/core/src/napcat_slot.rs`](../../../crates/core/src/napcat_slot.rs)
+- [`crates/core/src/platform.rs`](../../../crates/core/src/platform.rs)
 - [`webui-frontend/src/views/Platform.vue`](../../../webui-frontend/src/views/Platform.vue)
 
 ## 验证入口
@@ -37,6 +51,8 @@
 - [`crates/adapter-qq/tests/ingest.rs`](../../../crates/adapter-qq/tests/ingest.rs)
 - [`crates/adapter-qq/tests/reply.rs`](../../../crates/adapter-qq/tests/reply.rs)
 - [`crates/adapter-qq/tests/delayed_delivery.rs`](../../../crates/adapter-qq/tests/delayed_delivery.rs)
+- [`crates/adapter-qq/src/official/tests.rs`](../../../crates/adapter-qq/src/official/tests.rs)
+- [`webui-frontend/tests/platforms-flow.spec.js`](../../../webui-frontend/tests/platforms-flow.spec.js)
 
 维护规则：修改上列源码的功能行为时，同一 PR 更新本页；新增、删除或迁移模块时同步更新 `catalog.json`。测试入口只代表可追踪的验证位置，不代表本次执行通过。
 

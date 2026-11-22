@@ -3,16 +3,36 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[tokio::test]
 async fn task_outbox_delivers_once_and_cancelled_revision_never_sends() {
+    verify_task_outbox("42", "p_a", None).await;
+}
+
+#[tokio::test]
+async fn official_task_outbox_uses_original_platform_and_opaque_receipt() {
+    verify_task_outbox(
+        "qq-official_group_123_room",
+        "qq-official_user_123_member",
+        Some(crate::platform::QQ_OFFICIAL_ID),
+    )
+    .await;
+}
+
+async fn verify_task_outbox(chat: &'static str, actor: &str, platform: Option<&'static str>) {
     let path = std::env::temp_dir().join(format!("yt-task-outbox-{}.db", rand::random::<u64>()));
     let mut conn = crate::db::connect(&path).await.unwrap();
     crate::db::migrate(&mut conn).await.unwrap();
-    conn.execute_batch("INSERT INTO persons VALUES('p_a','A',1,1,NULL);INSERT INTO messages(msg_id,chat_id,chat_type,sender_pid,text,ts) VALUES(1,'42','group','p_a','请处理任务',1)").await.unwrap();
+    conn.execute(
+        "INSERT INTO persons VALUES(?1,'A',1,1,NULL)",
+        params![actor],
+    )
+    .await
+    .unwrap();
+    conn.execute("INSERT INTO messages(msg_id,chat_id,chat_type,sender_pid,text,ts) VALUES(1,?1,'group',?2,'请处理任务',1)",params![chat,actor]).await.unwrap();
     let id = crate::agent::create_scoped_task(
         &path,
         &EventBus::default(),
-        "42",
+        chat,
         "group",
-        "p_a",
+        actor,
         Some(1),
         "任务",
         crate::agent::TaskPlan::default(),
@@ -34,9 +54,22 @@ async fn task_outbox_delivers_once_and_cancelled_revision_never_sends() {
     .unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let captured = calls.clone();
-    let send: SendFn = Arc::new(move |_| {
+    let send: SendFn = Arc::new(move |request| {
         captured.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { Ok(json!({"message_id":9})) })
+        assert_eq!(
+            request.platform_reply.as_ref().map(|route| route.platform),
+            platform
+        );
+        Box::pin(async move {
+            if let Some(route) = request.platform_reply {
+                assert_eq!(route.chat_id, chat);
+                assert_eq!(route.anchor_msg_id, 1);
+                Ok(json!({"platform_message_id":"reply!opaque"}))
+            } else {
+                assert_eq!(request.target, 42);
+                Ok(json!({"message_id":9}))
+            }
+        })
     });
     let eng = Arc::new(ReplyEngine::new(
         path.clone(),
@@ -46,14 +79,15 @@ async fn task_outbox_delivers_once_and_cancelled_revision_never_sends() {
         Arc::new(std::sync::RwLock::new(ReplyCfg::default())),
         MoodState::default(),
     ));
+    let (chat_type, target, mention_qq) = route_conversation("group", chat, actor).unwrap();
     let job = ReplyJob {
         freshness: None,
-        chat_id: "42".into(),
-        chat_type: ChatType::Group,
-        target: 42,
+        chat_id: chat.into(),
+        chat_type,
+        target,
         anchor_msg_id: 1,
         mention: false,
-        mention_qq: None,
+        mention_qq,
         kind: JobKind::TaskResult {
             task_id: id.clone(),
             revision: 1,
@@ -70,6 +104,19 @@ async fn task_outbox_delivers_once_and_cancelled_revision_never_sends() {
             .await
             .unwrap();
     assert_eq!(sent, "sent");
+    let receipt: String = sqlx::query_scalar("SELECT receipt FROM task_outbox WHERE task_id=?")
+        .bind(&id)
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap();
+    assert_eq!(
+        receipt,
+        if platform.is_some() {
+            "reply!opaque"
+        } else {
+            "9"
+        }
+    );
     let bot: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM messages WHERE sender_pid='self' AND reply_anchor_id=1",
     )

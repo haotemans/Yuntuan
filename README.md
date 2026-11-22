@@ -20,7 +20,7 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 私聊与群聊 | 通过 NapCat / OneBot 11 接入 QQ，处理私聊、群聊、@、引用和图片消息。 |
+| 私聊与群聊 | 「平台接入」支持 NapCat / OneBot 11 和 QQ 官方机器人；官方通道接收私聊与群内 @，支持文本回复。 |
 | 对话与记忆 | 一人一份跨会话档案，结合相关人物短画像、群画像、近期对话及按需历史检索回答；资料保留来源、版本与有效状态。 |
 | 专属表情包 | 附带去重后的云团 60 张表情、60 个文字标签，首次启动自动导入；默认优先选云团专属，支持按上下文配图及“你自己的呢”的承接。面板可按图包筛选、删除、停用或改分类，重启保留调整。[素材清单](crates/core/assets/cloud-memes/README.md) |
 | 有分寸地参与 | 结合群聊热度、当前话题与真实回复归属，自然接话、答疑或调用能力；控制发言占比与间隔，不对每条消息机械作答。 |
@@ -179,7 +179,7 @@ Docker 开发沙箱是可选工具能力，默认关闭，配置见[开发沙箱
 
 ### 准备条件
 
-QQ 接入需要一个已能正常登录的 NapCat 实例；对话与任务执行需要配置可用的 LLM provider。当前 QQ 接入采用 **OneBot 11 反向 WebSocket**：云团监听，NapCat 主动连接。
+对话与任务执行需要可用的 LLM provider。「平台接入」页支持两条 QQ 通道，可同时启用。OneBot 11 需要一个已登录的 NapCat 实例，由 NapCat 拨入反向 WebSocket。官方机器人在面板填写 QQ 开放平台的 AppID 和 AppSecret，保存并重启云团后主动连接官方网关。事件权限、支持范围与验证方式见 [QQ 平台接入](docs/features/adapter-qq/qq.md)。
 
 从源码构建还需要 **Rust stable** 与 **Node.js 24 + npm**，与仓库 CI 的工具链选择保持一致。Node.js 仅用于前端构建。
 
@@ -273,7 +273,7 @@ sqlite3 data/yuantuan.db "DELETE FROM state_kv WHERE key='admin_pass_hash';"
 ```text
 crates/
   core/          对话、Agent、参与判断、记忆、工具、归纳、表情与数据库等领域逻辑
-  adapter-qq/    NapCat / OneBot 11 适配，反向 WebSocket 接入与消息收发
+  adapter-qq/    NapCat / OneBot 11 与 QQ 官方机器人接入和消息收发
   plugin-api/    插件接口与共享契约
   webui/         Axum API、WebSocket 事件推送与内嵌前端
   yuantuan/      配置加载、系统装配与程序入口（保留现有包名）

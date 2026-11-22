@@ -15,7 +15,7 @@ use std::path::Path;
 use yuantuan_core::db::SqliteExt;
 
 /// 掩码的键名（大小写不敏感）
-const MASK_KEYS: [&str; 5] = ["token", "api_key", "api_key_env", "password", "secret"];
+const MASK_KEYS: [&str; 6] = ["token", "api_key", "api_key_env", "password", "secret", "app_secret"];
 
 pub async fn get_config(
     State(state): State<AppState>,
@@ -58,7 +58,9 @@ fn masked(v: Value) -> Value {
         Value::Object(m) => Value::Object(
             m.into_iter()
                 .map(|(k, val)| {
-                    if MASK_KEYS.iter().any(|mk| k.eq_ignore_ascii_case(mk)) {
+                    if k.eq_ignore_ascii_case("app_secret") && val.as_str() == Some("") {
+                        (k, val)
+                    } else if MASK_KEYS.iter().any(|mk| k.eq_ignore_ascii_case(mk)) {
                         (k, json!("***"))
                     } else {
                         (k, masked(val))
@@ -159,6 +161,18 @@ pub async fn post_config(
         let mut cfg_clean = cfg.clone();
         let orig = read_toml_as_json(&state.extras.config_path).unwrap_or_else(|| json!({}));
         unmask_in_place(&mut cfg_clean, &orig);
+        if let Some(section) = cfg_clean.get("qq_official") {
+            let invalid = |message: String| {
+                (StatusCode::BAD_REQUEST, Json(json!({"error":message})))
+            };
+            let config: yuantuan_core::platform::OfficialQqConfig =
+                serde_json::from_value(section.clone())
+                    .map_err(|_| invalid("QQ 官方机器人配置格式错误".into()))?;
+            config.validate().map_err(|error| invalid(error.to_string()))?;
+        }
+        if cfg_clean.get("qq_official") != orig.get("qq_official") {
+            requires_restart.push("qq_official（重启云团后生效）".into());
+        }
         if let Some(section) = cfg_clean.get("consolidation") {
             let options: yuantuan_core::consolidation::ConsolidationCfg =
                 serde_json::from_value(section.clone()).map_err(|e| {

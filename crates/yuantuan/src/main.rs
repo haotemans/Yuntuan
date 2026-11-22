@@ -10,6 +10,10 @@ include!(concat!(env!("OUT_DIR"), "/plugins.rs"));
 use anyhow::Result;
 use std::sync::{Arc, RwLock};
 use tracing::{info, warn};
+use yuantuan_core::{
+    platform::{PlatformStatus, ONEBOT_ID, QQ_OFFICIAL_ID},
+    reply_engine::SendFn,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -149,20 +153,40 @@ async fn main() -> Result<()> {
             roster_mem_per: cfg.context.roster_mem_per,
         }),
     );
-    let send = adapter
-        .as_ref()
-        .map(|h| yuantuan_adapter_qq::send_fn(h.clone()))
-        .unwrap_or_else(|| {
-            std::sync::Arc::new(|_req| {
-                Box::pin(async move { anyhow::bail!("adapter 未接入（[napcat].enabled=false）") })
-                    as std::pin::Pin<
-                        Box<
-                            dyn std::future::Future<Output = anyhow::Result<serde_json::Value>>
-                                + Send,
-                        >,
-                    >
-            })
-        });
+    let official = yuantuan_adapter_qq::official::OfficialQq::new(
+        cfg.qq_official.clone(),
+        db_path.clone(),
+        bus.clone(),
+    );
+    let official_error = official.as_ref().err().map(ToString::to_string);
+    if let Some(error) = &official_error {
+        warn!(%error, "QQ 官方机器人配置不可用");
+    }
+    let official = official.ok();
+    let mut transports = std::collections::HashMap::<&str, SendFn>::new();
+    if let Some(handle) = &adapter {
+        transports.insert(ONEBOT_ID, yuantuan_adapter_qq::send_fn(handle.clone()));
+    }
+    if let Some(handle) = &official {
+        let handle = handle.clone();
+        transports.insert(
+            QQ_OFFICIAL_ID,
+            Arc::new(move |request| {
+                let handle = handle.clone();
+                Box::pin(async move { handle.send(request).await })
+            }),
+        );
+    }
+    let send: SendFn = Arc::new(move |request| {
+        let id = request
+            .platform_reply
+            .as_ref()
+            .map_or(ONEBOT_ID, |route| route.platform);
+        let transport = transports.get(id).cloned();
+        Box::pin(async move {
+            transport.ok_or_else(|| anyhow::anyhow!("消息平台 {id} 未接入"))?(request).await
+        })
+    });
     let reply_engine = yuantuan_core::reply_engine::ReplyEngine::new(
         db_path.clone(),
         bus.clone(),
@@ -427,6 +451,38 @@ async fn main() -> Result<()> {
         } else {
             None
         },
+        platform_status: {
+            let onebot = adapter.clone();
+            let official = official.clone();
+            Arc::new(move || {
+                let onebot_state = match &onebot {
+                    Some(handle) if handle.is_connected() => "online",
+                    Some(_) => "offline",
+                    None => "disabled",
+                };
+                vec![
+                    PlatformStatus {
+                        id: ONEBOT_ID,
+                        state: onebot_state,
+                        account: onebot
+                            .as_ref()
+                            .map(|h| h.self_qq())
+                            .filter(|id| *id != 0)
+                            .map(|id| id.to_string()),
+                        detail: None,
+                    },
+                    official
+                        .as_ref()
+                        .map(|h| h.status())
+                        .unwrap_or_else(|| PlatformStatus {
+                            id: QQ_OFFICIAL_ID,
+                            state: "error",
+                            account: None,
+                            detail: official_error.clone(),
+                        }),
+                ]
+            })
+        },
         backup_cfg: backup_cfg_slot.clone(),
         tools_registry: tools_registry.clone(),
         skill_registry: skill_registry.clone(),
@@ -439,15 +495,21 @@ async fn main() -> Result<()> {
     };
     let webui_serve =
         yuantuan_webui::serve(db_path.clone(), &cfg.webui.host, cfg.webui.port, extras);
+    let official_gateway = official
+        .as_ref()
+        .filter(|_| cfg.qq_official.enabled)
+        .map(|adapter| adapter.spawn());
 
     // 同时接收 Docker SIGTERM 与终端 SIGINT；信号处理在启动回放前已注册。
     tokio::select! {
         res = webui_serve => {
+            if let Some(gateway) = official_gateway { gateway.abort(); let _ = gateway.await; }
             info!(result = ?res, "WebUI 退出(服务自然结束)");
             plugins.shutdown().await;
             res
         }
         signal = shutdown_signal.wait() => {
+            if let Some(gateway) = official_gateway { gateway.abort(); let _ = gateway.await; }
             info!(signal = signal?, "收到停止信号，开始优雅停机");
             _backup_scheduler.abort();
             if let Some(handle) = consolidation_handle.lock().unwrap().take() { handle.abort(); }
