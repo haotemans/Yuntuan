@@ -58,6 +58,9 @@ jobs:
       - name: Model configuration browser tests
         working-directory: webui-frontend
         run: npm run test:models
+      - name: Platform connection browser tests
+        working-directory: webui-frontend
+        run: npx playwright test platforms-flow.spec.js
 
   build-linux:
     runs-on: ubuntu-latest

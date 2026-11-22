@@ -151,6 +151,31 @@ impl Rig {
     }
 }
 
+#[tokio::test]
+async fn official_platform_config_is_validated_masked_and_requires_restart() {
+    let rig = start().await;
+    assert_eq!(
+        rig.http.get(format!("{}/api/platforms", rig.base)).send().await.unwrap().status().as_u16(),
+        401
+    );
+    let mut config = rig.get_config().await["config"].clone();
+    config["qq_official"] = json!({"enabled":true,"app_id":"123"});
+    assert_eq!(rig.post_config(config.clone()).await.0, 400);
+    config["qq_official"]["app_secret"] = json!("fixture-secret");
+    let (status, body) = rig.post_config(config).await;
+    assert_eq!(status, 200);
+    assert!(body["requires_restart"].as_array().unwrap().iter()
+        .any(|item| item.as_str().is_some_and(|item| item.contains("qq_official"))));
+    let readback = rig.get_config().await;
+    assert_eq!(readback["config"]["qq_official"]["app_secret"], "***");
+    assert!(!readback.to_string().contains("fixture-secret"));
+    let mut config = readback["config"].clone();
+    config["qq_official"]["enabled"] = json!(false);
+    assert_eq!(rig.post_config(config).await.0, 200);
+    let disk = std::fs::read_to_string(&rig.extras.config_path).unwrap();
+    assert!(disk.contains("fixture-secret"));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn config_hot_apply_full_pass() {
     let rig = start().await;

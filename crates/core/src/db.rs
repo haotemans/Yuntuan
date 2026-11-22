@@ -436,6 +436,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "V0.20 持久只读工具定时任务",
         include_str!("db/scheduler_v20.sql"),
     ),
+    (
+        "V0.21 平台消息来源与回复序号",
+        include_str!("db/platform_v21.sql"),
+    ),
 ];
 
 pub async fn migrate(conn: &mut sqlx::SqliteConnection) -> Result<()> {

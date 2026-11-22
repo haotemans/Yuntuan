@@ -96,12 +96,8 @@ async fn queue_ready(
         let chat: String = row.try_get("chat_id")?;
         let kind: String = row.try_get("chat_type")?;
         let actor: String = row.try_get("created_by_pid")?;
-        let target = if kind == "private" {
-            actor.strip_prefix("p_").unwrap_or("")
-        } else {
-            &chat
-        }
-        .parse()?;
+        let (chat_type, target, mention_qq) =
+            crate::reply_engine::route_conversation(&kind, &chat, &actor)?;
         let claimed=c.execute("UPDATE task_outbox SET state='queued',updated_at=unixepoch() WHERE task_id=?1 AND revision=?2 AND state='ready'",params![id,revision]).await?;
         if claimed != 1 {
             continue;
@@ -109,15 +105,11 @@ async fn queue_ready(
         engine.enqueue(crate::reply_engine::ReplyJob {
             freshness: None,
             chat_id: chat,
-            chat_type: if kind == "private" {
-                crate::reply_engine::ChatType::Private
-            } else {
-                crate::reply_engine::ChatType::Group
-            },
+            chat_type,
             target,
             anchor_msg_id: row.try_get("anchor_id")?,
             mention: kind == "group",
-            mention_qq: actor.strip_prefix("p_").and_then(|s| s.parse().ok()),
+            mention_qq,
             kind: crate::reply_engine::JobKind::TaskResult {
                 task_id: id,
                 revision,

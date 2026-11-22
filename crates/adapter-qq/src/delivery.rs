@@ -193,6 +193,7 @@ mod tests {
             chat_type: ChatType::Group,
             target: 42,
             operation: yuantuan_core::reply_engine::SendOperation::Message,
+            platform_reply: None,
             segments: json!([{"type":"image","data":{"file":"base64://aW1hZ2U="}},{"type":"text","data":{"text":"NAI 4.5 · 3:4"}}]),
         };
         let mut expected = ExpectedDelivery::from_request(&request, 100).await.unwrap();

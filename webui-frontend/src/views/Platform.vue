@@ -1,212 +1,184 @@
 <template>
   <div class="yt-page">
     <div class="yt-page-head">
-      <div class="yt-page-head-left">
-        <span class="yt-page-title">平台接入</span>
-        <span class="yt-page-sub mono">OneBot 11</span>
-      </div>
-      <n-space align="center" :size="10">
-        <n-tag size="small" :type="d.adapter_connected ? 'success' : 'default'" :bordered="false">
-          {{ d.adapter_connected ? '已连接' : '离线' }}
-        </n-tag>
-        <n-button size="small" secondary @click="reload">刷新</n-button>
-      </n-space>
+      <span class="yt-page-title">平台接入</span>
+      <n-button size="small" secondary :loading="loading" :disabled="busy" @click="load">刷新</n-button>
     </div>
+    <n-alert v-if="loadError" type="error" :bordered="false">{{ loadError }}</n-alert>
+    <n-alert v-if="statusError" type="warning" :bordered="false">{{ statusError }}</n-alert>
+    <div class="platform-grid">
+      <n-card v-for="platform in platforms" :key="platform.id" size="small" :title="platform.title">
+        <template #header-extra>
+          <n-tag size="small" :type="status(platform.id)?.state === 'online' ? 'success' : status(platform.id)?.state === 'error' ? 'error' : 'default'">
+            {{ labels[status(platform.id)?.state] || '状态未知' }}
+          </n-tag>
+        </template>
+        <p class="platform-description">{{ platform.description }}</p>
+        <dl class="platform-facts">
+          <div>
+            <dt>运行账号</dt>
+            <dd class="mono">{{ status(platform.id)?.account || '—' }}</dd>
+          </div>
+          <div v-if="platform.endpoint">
+            <dt>{{ platform.endpoint.label }}</dt>
+            <dd class="mono">{{ platform.endpoint.format(savedAddresses[platform.id]) }}</dd>
+          </div>
+        </dl>
+        <n-alert v-if="status(platform.id)?.detail" type="warning" :bordered="false" class="platform-detail">
+          {{ status(platform.id)?.detail }}
+        </n-alert>
 
-    <n-grid cols="1 s:2 l:4" :x-gap="16" :y-gap="16" responsive="screen">
-      <n-gi>
-        <n-card class="stat-card" size="small">
-          <div class="stat-label">
-            <span class="stat-chip" :style="{ background: d.adapter_connected ? 'var(--yt-ok)' : 'var(--yt-danger)' }" />
-            通道状态
-          </div>
-          <div class="stat-foot">
-            <span class="stat-num" :style="{ color: d.adapter_connected ? 'var(--yt-ok)' : 'var(--yt-ink-1)' }">
-              {{ d.adapter_connected ? '在线' : '未连接' }}
-            </span>
-          </div>
-        </n-card>
-      </n-gi>
-
-      <n-gi>
-        <n-card class="stat-card" size="small">
-          <div class="stat-label">
-            <span class="stat-chip" style="background: var(--yt-primary)" />
-            当前账号
-          </div>
-          <div class="stat-foot">
-            <span class="stat-num mono">{{ d.self_qq || '—' }}</span>
-          </div>
-        </n-card>
-      </n-gi>
-
-      <n-gi>
-        <n-card class="stat-card" size="small">
-          <div class="stat-label">
-            <span class="stat-chip" style="background: var(--yt-violet)" />
-            反向 WebSocket 端点
-          </div>
-          <div class="stat-foot">
-            <span class="stat-num mono" style="font-size: 16px">ws://{{ form.listen_addr || '127.0.0.1:6199' }}/ws</span>
-          </div>
-        </n-card>
-      </n-gi>
-
-      <n-gi>
-        <n-card class="stat-card" size="small">
-          <div class="stat-label">
-            <span class="stat-chip" style="background: var(--yt-warning)" />
-            鉴权 Token
-          </div>
-          <div class="stat-foot">
-            <span class="stat-num">{{ hasToken ? '已设置' : '未设置' }}</span>
-          </div>
-        </n-card>
-      </n-gi>
-    </n-grid>
-
-    <n-card title="NapCat 反向 WebSocket 配置" size="small">
-      <n-form label-placement="left" label-width="110" :show-feedback="false" class="clean-form" style="max-width: 560px">
-        <n-form-item label="启用接入">
-          <n-switch v-model:value="form.enabled" />
-        </n-form-item>
-        <n-form-item label="监听地址">
-          <n-input v-model:value="form.listen_addr" placeholder="127.0.0.1:6199" />
-        </n-form-item>
-        <n-form-item label="连接 Token">
-          <n-input v-model:value="form.token" type="password" show-password-on="click"
-                   placeholder="留空则保持原 Token 不变" />
-        </n-form-item>
-      </n-form>
-
-      <div class="form-actions">
-        <n-button type="primary" size="small" :loading="saving" @click="save(false)">保存配置</n-button>
-        <n-button type="warning" size="small" secondary :loading="saving || restarting" @click="save(true)">保存并重启服务</n-button>
-        <span v-if="msg" :class="['save-msg', ok ? 'ok' : 'fail']">{{ msg }}</span>
-      </div>
-    </n-card>
+        <n-form :show-feedback="false" :disabled="busy || !configReady">
+          <n-form-item label="启用接入">
+            <n-switch v-model:value="forms[platform.id].enabled" :aria-label="`启用 ${platform.title}`" />
+          </n-form-item>
+          <n-form-item :label="platform.addressLabel">
+            <n-input v-model:value="forms[platform.id].address" :placeholder="platform.addressPlaceholder"
+              :input-props="{'aria-label':platform.addressLabel}" />
+          </n-form-item>
+          <n-form-item :label="platform.secretLabel">
+            <n-input v-model:value="forms[platform.id].secret" type="password" show-password-on="click"
+              :input-props="{'aria-label':platform.secretLabel,autocomplete:'new-password'}"
+              :placeholder="forms[platform.id].hasSecret ? '已设置，留空保留原值' : '尚未设置'" />
+          </n-form-item>
+        </n-form>
+        <a v-if="platform.help" :href="platform.help.url" target="_blank" rel="noopener noreferrer">{{ platform.help.label }} ↗</a>
+        <div class="form-actions">
+          <n-button type="primary" size="small" :loading="saving === platform.id" :disabled="busy || !configReady" @click="save(platform.id, false)">保存配置</n-button>
+          <n-button size="small" secondary :disabled="busy || !configReady" @click="save(platform.id, true)">保存并重启云团</n-button>
+        </div>
+        <p v-if="feedback[platform.id]" role="status" :class="['save-msg', feedback[platform.id].ok ? 'ok' : 'fail']">{{ feedback[platform.id].message }}</p>
+      </n-card>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
-import { subscribeWs } from '../ws'
 
-/** @type {import('vue').Ref<Record<string, any>>} */
-const d = ref({ adapter_connected: false, self_qq: 0 })
-const form = ref({ enabled: true, listen_addr: '127.0.0.1:6199', token: '' })
-const hasToken = ref(false)
-/** @type {import('vue').Ref<Record<string, any>>} */
-const whole = ref({})
-const saving = ref(false)
+const platforms = [
+  {
+    id:'onebot', title:'OneBot 11', description:'通过 NapCat 连接 QQ。',
+    configKey:'napcat', addressKey:'listen_addr', secretKey:'token',
+    defaultEnabled:true, defaultAddress:'127.0.0.1:6199',
+    addressLabel:'监听地址', addressPlaceholder:'127.0.0.1:6199', secretLabel:'连接 Token',
+    endpoint:{label:'反向 WebSocket', format:address => `ws://${address}/ws`},
+  },
+  {
+    id:'qq_official', title:'QQ 官方机器人', description:'通过 QQ 开放平台接收私聊和群内 @，支持文本回复。',
+    configKey:'qq_official', addressKey:'app_id', secretKey:'app_secret',
+    defaultEnabled:false, defaultAddress:'',
+    addressLabel:'AppID', addressPlaceholder:'开放平台的机器人 AppID', secretLabel:'AppSecret',
+    help:{url:'https://q.qq.com/',label:'QQ 开放平台'},
+  },
+]
+const byId = Object.fromEntries(platforms.map(platform => [platform.id,platform]))
+const labels = {online:'已连接', offline:'未连接', disabled:'未启用', connecting:'连接中', reconnecting:'重连中', error:'连接异常'}
+const statuses = ref([])
+const status = id => statuses.value.find(item => item.id === id)
+const forms = ref(Object.fromEntries(platforms.map(platform => [platform.id,{
+  enabled:platform.defaultEnabled,address:platform.defaultAddress,secret:'',hasSecret:false,
+}])))
+const feedback = ref({})
+const savedAddresses = ref(Object.fromEntries(platforms.map(platform => [platform.id,platform.defaultAddress])))
+const loading = ref(false)
+const saving = ref('')
 const restarting = ref(false)
-const msg = ref('')
-const ok = ref(false)
+const busy = computed(() => !!saving.value || restarting.value)
+const configReady = ref(false)
+const loadError = ref('')
+const statusError = ref('')
 
-async function loadDashboard() {
+async function loadStatuses() {
   try {
-    const { data } = await api.get('/dashboard')
-    d.value.adapter_connected = !!data.adapter_connected
-    d.value.self_qq = data.self_qq || 0
-  } catch { /* ignore */ }
-}
-
-async function loadConfig() {
-  const { data } = await api.get('/config')
-  whole.value = data.config
-  const n = data.config.napcat || {}
-  form.value = {
-    enabled: n.enabled ?? true,
-    listen_addr: n.listen_addr ?? '127.0.0.1:6199',
-    token: '',
+    const {data} = await api.get('/platforms')
+    statuses.value = data.platforms || []
+    statusError.value = ''
+  } catch {
+    statuses.value = []
+    statusError.value = '无法获取运行状态'
   }
-  hasToken.value = !!(n.token && n.token !== '')
 }
 
-async function reload() {
-  await Promise.all([loadDashboard(), loadConfig()])
+function readSection(config, id) {
+  const platform = byId[id]
+  const section = config[platform.configKey] || {}
+  forms.value[id] = {
+    enabled: section.enabled ?? platform.defaultEnabled,
+    address: section[platform.addressKey] ?? platform.defaultAddress,
+    secret: '',
+    hasSecret: !!section[platform.secretKey],
+  }
+  savedAddresses.value[id] = forms.value[id].address
 }
 
-async function save(andRestart = false) {
-  saving.value = true
-  msg.value = ''
+async function load() {
+  if (loading.value) return
+  loading.value = true
+  const statusRequest = loadStatuses()
   try {
-    const newNapcat = { ...whole.value.napcat }
-    newNapcat.enabled = form.value.enabled
-    newNapcat.listen_addr = form.value.listen_addr
-    delete newNapcat.ws_url
-    if (form.value.token) newNapcat.token = form.value.token
-    const config = { ...whole.value, napcat: newNapcat }
-    const { data } = await api.post('/config', { config })
-    whole.value = config
-    form.value.token = ''
-    ok.value = true
-    if (andRestart) {
-      restarting.value = true
-      msg.value = '已保存，正在重启服务…'
-      const reloadTimer = setTimeout(() => { window.location.reload() }, 3200)
-      try {
-        await api.post('/config/restart')
-      } catch (err) {
-        if (err.response?.status === 409) {
-          clearTimeout(reloadTimer)
-          restarting.value = false
-          ok.value = false
-          msg.value = err.response?.data?.error || '容器环境请使用 docker compose restart'
-          saving.value = false
-          return
-        }
-      }
-      return
-    }
-    const restarts = (data.requires_restart || []).filter(r => r.includes('napcat'))
-    const parts = []
-    if ((data.applied || []).some(a => a.includes('token'))) parts.push('Token 已生效')
-    if (restarts.length) parts.push('监听地址变更需重启服务')
-    msg.value = `已保存${parts.length ? '（' + parts.join('，') + '）' : ''}`
-    await loadConfig()
+    const {data} = await api.get('/config')
+    for (const {id} of platforms) readSection(data.config || {}, id)
+    configReady.value = true
+    loadError.value = ''
   } catch (e) {
-    ok.value = false
-    msg.value = e.response?.data?.error || '保存失败'
+    loadError.value = e.response?.data?.error || '无法读取平台配置'
   } finally {
-    saving.value = false
+    await statusRequest
+    loading.value = false
   }
 }
 
-function onWsEvent(ev) {
-  if (!ev || !ev.kind) return
-  if (ev.kind === 'ConfigReloaded') loadConfig()
+async function save(id, restart) {
+  if (busy.value || !configReady.value) return
+  saving.value = id
+  delete feedback.value[id]
+  const {configKey:key,addressKey,secretKey} = byId[id]
+  const form = forms.value[id]
+  try {
+    const response = await api.get('/config')
+    const config = response.data.config || {}
+    const section = {...config[key], enabled:form.enabled, [addressKey]:form.address.trim()}
+    if (form.secret) section[secretKey] = form.secret.trim()
+    const {data} = await api.post('/config', {config:{...config,[key]:section}})
+    if (form.secret) section[secretKey] = '***'
+    readSection({[key]:section}, id)
+    const needsRestart = (data.requires_restart || []).some(item => item.includes(key))
+    feedback.value[id] = {ok:true,message:needsRestart ? '已保存，重启云团后生效。' : '配置已保存。'}
+  } catch (e) {
+    feedback.value[id] = {ok:false,message:e.response?.data?.error || '保存失败'}
+    return
+  } finally { saving.value = '' }
+  if (!restart) return
+  restarting.value = true
+  try {
+    await api.post('/config/restart')
+    feedback.value[id] = {ok:true,message:'正在重启云团…'}
+    restartTimer = setTimeout(() => window.location.reload(), 3200)
+  } catch (e) {
+    restarting.value = false
+    feedback.value[id] = {ok:false,message:e.response?.data?.error || '配置已保存，重启请求未确认。'}
+  }
 }
 
-let timer = null
-let off = null
+let timer
+let restartTimer
 onMounted(() => {
-  reload()
-  timer = setInterval(loadDashboard, 8000)
-  off = subscribeWs(onWsEvent)
+  void load()
+  timer = setInterval(() => { if (!document.hidden && !busy.value && !loading.value) void loadStatuses() }, 5000)
 })
-onUnmounted(() => { clearInterval(timer); off && off() })
+onUnmounted(() => { clearInterval(timer); clearTimeout(restartTimer) })
 </script>
 
 <style scoped>
-.clean-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.form-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid var(--yt-card-border);
-}
-.save-msg {
-  font-size: 12.5px;
-  font-weight: 500;
-}
-.save-msg.ok { color: var(--yt-ok); }
-.save-msg.fail { color: var(--yt-danger); }
+.platform-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr)); gap:16px; align-items:start }
+.platform-description,.save-msg { color:var(--yt-ink-2); font-size:13px }
+.platform-facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin:18px 0 }
+dt { color:var(--yt-ink-3); font-size:12px }
+dd { margin:4px 0 0; overflow-wrap:anywhere }
+.platform-detail { margin-bottom:16px }
+.form-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px }
+.save-msg.ok { color:var(--yt-ok) }
+.save-msg.fail { color:var(--yt-danger) }
 </style>

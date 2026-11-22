@@ -49,6 +49,14 @@ pub struct SendRequest {
     /// OneBot 段数组
     pub segments: Value,
     pub operation: SendOperation,
+    pub platform_reply: Option<PlatformReply>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlatformReply {
+    pub platform: &'static str,
+    pub chat_id: String,
+    pub anchor_msg_id: i64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -408,6 +416,24 @@ pub struct ReplyJob {
     /// @目标 QQ 号（mention 或泡内 ::at 用）
     pub mention_qq: Option<u64>,
     pub kind: JobKind,
+}
+
+impl ReplyJob {
+    fn send_request(&self, operation: SendOperation, segments: Value) -> SendRequest {
+        SendRequest {
+            chat_type: self.chat_type,
+            target: self.target,
+            segments,
+            operation,
+            platform_reply: crate::platform::chat_platform(&self.chat_id).map(|platform| {
+                PlatformReply {
+                    platform,
+                    chat_id: self.chat_id.clone(),
+                    anchor_msg_id: self.anchor_msg_id,
+                }
+            }),
+        }
+    }
 }
 
 /// 回复形态参数（热应用槽：ReplyEngine/管线每次读取当前值，WebUI 写回即换槽）
@@ -858,33 +884,39 @@ async fn process_task_result(
     segments.extend(media);
     segments.push(json!({"type":"text","data":{"text":text}}));
     // One attempt. An ambiguous timeout is not evidence that no message was delivered.
-    let result = (eng.send)(SendRequest {
-        chat_type: job.chat_type,
-        target: job.target,
-        segments: json!(segments),
-        operation: SendOperation::Message,
-    })
-    .await;
+    let result = (eng.send)(job.send_request(SendOperation::Message, json!(segments))).await;
     let confirmed = result.as_ref().ok().and_then(|v| v["message_id"].as_i64());
+    let receipt = if crate::platform::chat_platform(&job.chat_id).is_some() {
+        result
+            .as_ref()
+            .ok()
+            .and_then(|v| v["platform_message_id"].as_str())
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+    } else {
+        confirmed.map(|id| id.to_string())
+    };
     if let Some(message_id) = confirmed {
         eng.self_ids.record(message_id);
+    }
+    if receipt.is_some() {
         insert_self_message_ex(
             &eng.db_path,
             job,
             text,
             !artifacts.is_empty(),
-            Some(message_id),
+            confirmed,
         )
         .await;
     }
     let mut conn = crate::db::connect(&eng.db_path).await?;
     let mut tx = conn.begin_immediate().await?;
-    let status = if confirmed.is_some() {
+    let status = if receipt.is_some() {
         "sent"
     } else {
         "unknown"
     };
-    tx.execute("UPDATE task_outbox SET state=?3,receipt=?4,updated_at=unixepoch() WHERE task_id=?1 AND revision=?2",params![id,revision,status,confirmed.map(|v|v.to_string())]).await?;
+    tx.execute("UPDATE task_outbox SET state=?3,receipt=?4,updated_at=unixepoch() WHERE task_id=?1 AND revision=?2",params![id,revision,status,receipt]).await?;
     tx.execute(
         "UPDATE task_runtime SET delivery_state=?3 WHERE task_id=?1 AND revision=?2",
         params![id, revision, status],
@@ -895,8 +927,8 @@ async fn process_task_result(
         chat_id: job.chat_id.clone(),
         bubble_index: 0,
         total: 1,
-        ok: confirmed.is_some(),
-        note: if confirmed.is_some() {
+        ok: status == "sent",
+        note: if status == "sent" {
             None
         } else {
             Some("任务回复送达未确认，未自动重发".into())
@@ -934,15 +966,13 @@ async fn recall_source(eng: &ReplyEngine, job: &ReplyJob) -> Result<()> {
         .filter(|id| *id > 0)
         .context("原消息发送者无效")?;
     // IDs come only from the recorded source in this chat, never from model/plugin slots.
-    (eng.send)(SendRequest {
-        chat_type: job.chat_type,
-        target: job.target,
-        segments: json!([]),
-        operation: SendOperation::RecallSource {
+    (eng.send)(job.send_request(
+        SendOperation::RecallSource {
             message_id,
             sender_qq,
         },
-    })
+        json!([]),
+    ))
     .await?;
     Ok(())
 }
@@ -995,12 +1025,7 @@ async fn process_plugin_result(
             let kind = media_kind(path).expect("validated attachment extension");
             nodes.push(json!({"type":"node","data":{"content":[{"type":kind,"data":{"file":meme::file_url(path)}}]}}));
         }
-        let req = SendRequest {
-            chat_type: job.chat_type,
-            target: job.target,
-            operation: SendOperation::Forward,
-            segments: json!(nodes),
-        };
+        let req = job.send_request(SendOperation::Forward, json!(nodes));
         let result = send_with_retry(eng, job, &req).await;
         let (ok, note) = match result {
             Ok(data) => {
@@ -1252,12 +1277,7 @@ async fn process_media_caption_with_file(
     if let Some(text) = caption.filter(|text| !text.trim().is_empty()) {
         segments.push(json!({"type":"text","data":{"text":text}}));
     }
-    let req = SendRequest {
-        operation: SendOperation::Message,
-        chat_type: job.chat_type,
-        target: job.target,
-        segments: json!(segments),
-    };
+    let req = job.send_request(SendOperation::Message, json!(segments));
     match send_with_retry(eng, job, &req).await {
         Ok(data) => {
             let message_id = data.get("message_id").and_then(|x| x.as_i64());
@@ -1444,12 +1464,7 @@ async fn process_bubbles_with_meme(
         if segs.is_empty() {
             continue;
         }
-        let req = SendRequest {
-            operation: SendOperation::Message,
-            chat_type: job.chat_type,
-            target: job.target,
-            segments: json!(segs),
-        };
+        let req = job.send_request(SendOperation::Message, json!(segs));
         match send_with_retry(eng, job, &req).await {
             Ok(data) => {
                 if let Some(id) = data.get("message_id").and_then(|x| x.as_i64()) {
@@ -1528,6 +1543,7 @@ async fn send_bubble_meme(
 async fn send_with_retry(eng: &ReplyEngine, job: &ReplyJob, req: &SendRequest) -> Result<Value> {
     match (eng.send)(req.clone()).await {
         Ok(v) => Ok(v),
+        Err(error) if req.platform_reply.is_some() => Err(error),
         Err(e1) if e1.downcast_ref::<DeliveryUnconfirmed>().is_some() => Err(e1),
         Err(e1) => {
             tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1811,23 +1827,36 @@ pub async fn prepare_and_enqueue(
 }
 
 pub(crate) fn route_of(msg: &MessageReceivedPayload) -> Result<(ChatType, u64, Option<u64>)> {
-    let sender_qq = msg
-        .sender_pid
+    route_conversation(&msg.chat_type, &msg.chat_id, &msg.sender_pid)
+}
+
+pub(crate) fn route_conversation(
+    kind: &str,
+    chat_id: &str,
+    actor: &str,
+) -> Result<(ChatType, u64, Option<u64>)> {
+    let chat_type = match kind {
+        "group" => ChatType::Group,
+        "private" => ChatType::Private,
+        other => return Err(anyhow!("未知 chat_type: {other}")),
+    };
+    if crate::platform::chat_platform(chat_id).is_some() {
+        return Ok((chat_type, 0, None));
+    }
+    let sender_qq = actor
         .strip_prefix("p_")
         .and_then(|s| s.parse::<u64>().ok());
-    match msg.chat_type.as_str() {
-        "group" => {
-            let gid = msg
-                .chat_id
+    match chat_type {
+        ChatType::Group => {
+            let gid = chat_id
                 .parse::<u64>()
-                .with_context(|| format!("群号无法解析: {}", msg.chat_id))?;
-            Ok((ChatType::Group, gid, sender_qq))
+                .with_context(|| format!("群号无法解析: {chat_id}"))?;
+            Ok((chat_type, gid, sender_qq))
         }
-        "private" => {
-            let uid = sender_qq.with_context(|| format!("私聊对象无法解析: {}", msg.sender_pid))?;
-            Ok((ChatType::Private, uid, None))
+        ChatType::Private => {
+            let uid = sender_qq.with_context(|| format!("私聊对象无法解析: {actor}"))?;
+            Ok((chat_type, uid, None))
         }
-        other => Err(anyhow!("未知 chat_type: {other}")),
     }
 }
 

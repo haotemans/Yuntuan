@@ -141,6 +141,7 @@ pub fn send_fn(handle: AdapterHandle) -> yuantuan_core::reply_engine::SendFn {
     std::sync::Arc::new(move |req| {
         let h = handle.clone();
         Box::pin(async move {
+            anyhow::ensure!(req.platform_reply.is_none(), "OneBot 不接收其他平台的回复");
             let s = h
                 .sender()
                 .await
