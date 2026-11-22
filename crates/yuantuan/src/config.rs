@@ -9,6 +9,7 @@ use std::path::Path;
 pub struct Config {
     pub data: DataConfig,
     pub napcat: NapcatConfig,
+    pub qq_official: yuantuan_core::platform::OfficialQqConfig,
     pub webui: WebuiConfig,
     pub prefilter: PrefilterSection,
     pub consolidation: ConsolidationSection,
@@ -82,6 +83,7 @@ impl Default for Config {
         Self {
             data: DataConfig::default(),
             napcat: NapcatConfig::default(),
+            qq_official: Default::default(),
             webui: WebuiConfig::default(),
             prefilter: PrefilterSection::default(),
             consolidation: ConsolidationSection::default(),
@@ -294,6 +296,12 @@ dir = "data"
 enabled = true
 listen_addr = "127.0.0.1:6199"
 token = ""
+
+[qq_official]
+# QQ 开放平台的 AppID / AppSecret。默认关闭，保存后重启云团。
+enabled = false
+app_id = ""
+app_secret = ""
 
 [webui]
 # 管理面板监听地址（仅本机；公网暴露走反代，见架构文档安全小节）

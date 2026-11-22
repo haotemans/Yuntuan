@@ -19,6 +19,7 @@ pub mod meme_review;
 pub mod memory;
 pub mod napcat_slot;
 pub mod personality;
+pub mod platform;
 pub mod prefilter;
 pub mod reply_engine;
 pub mod scheduler;

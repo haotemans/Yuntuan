@@ -5,6 +5,7 @@
 mod client;
 mod ingest;
 mod moderation;
+pub mod official;
 mod qzone;
 mod server;
 pub use moderation::moderation_service;

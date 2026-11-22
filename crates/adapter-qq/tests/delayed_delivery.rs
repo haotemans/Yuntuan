@@ -117,6 +117,7 @@ async fn reconcile_image(early_success: bool) {
         chat_type: ChatType::Group,
         target: 42,
         operation: SendOperation::Message,
+        platform_reply: None,
         segments: json!([{"type":"image","data":{"file":yuantuan_core::meme::file_url(&path)}},{"type":"at","data":{"qq":"456"}},{"type":"text","data":{"text":"\nprompt: adult reading, artist:example"}}]),
     };
     let receipt = tokio::time::timeout(Duration::from_secs(10), (send_fn(handle))(request))

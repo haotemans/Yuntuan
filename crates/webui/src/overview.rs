@@ -48,3 +48,6 @@ pub async fn overview(
         "db_size_bytes": db_size_bytes,
     })))
 }
+pub async fn platforms(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(json!({"platforms":(state.extras.platform_status)()}))
+}
