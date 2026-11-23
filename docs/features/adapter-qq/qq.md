@@ -30,7 +30,7 @@
 
 接收 `C2C_MESSAGE_CREATE`、`GROUP_AT_MESSAGE_CREATE`，以及群侧授权后的 `GROUP_MESSAGE_CREATE`。全量事件由官方 `mentions.is_you` 标记判定是否 @ 当前机器人，普通消息按现有群聊策略参与决策和记忆。可识别的图片交给现有视觉链路。回复通过官方 API 被动发送文本，两种场景均在 60 分钟内，默认群聊每条最多 5 次、单聊最多 4 次，暂按标准群额度执行。回复使用原通道、原会话的锚点。不同事件类型重复派发按账号和原始消息 ID 去重，发送序号先持久化，回执不明时保持待确认。引用、主动推送、频道、出站富媒体与群管理留待扩展。详见 [全量群消息](https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_message_create.html) 和 [发送规则](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/overview.html)。
 
-两条通道使用同一个记忆库。管理员可在「平台接入 → QQ 官方机器人 → 跨通道记忆关联」每行填写 `OpenID = OneBot QQ 号`，保存后重启。配置文件等价字段为 `[qq_official.memory_links]`，QQ 号需用字符串。可由管理员从记忆人物列表 API `/api/memories/people` 中读取 `qq-official_user_<AppID>_<OpenID>` 对应的 OpenID；只有确认身份一致后才应填写。原人物、会话、回执和权限保留各自的标识，人物记忆的读取规则详见[记忆库](../core/memory.md)。
+两条通道使用同一个记忆库。管理员可在「平台接入 → QQ 官方机器人 → 跨通道记忆关联」每行填写 `OpenID = OneBot QQ 号`，保存后重启。配置文件等价字段为 `[qq_official.memory_links]`，QQ 号需用字符串。管理员可从记忆人物列表 API `/api/memories/people` 的 `id` 或 `aliases` 中读取 `qq-official_user_<AppID>_<OpenID>` 对应的 OpenID。确认属于同一人的身份合并展示为一张卡，原人物、会话、回执和权限保留各自的标识。人物记忆的读取规则详见[记忆库](../core/memory.md)。
 
 验证覆盖模拟官方网关及重复事件、SQLite 与模拟回复接口、跨通道历史记忆的范围限制，以及面板两套配置的独立提交。真实账号权限、网络和 QQ 客户端收发仍需在目标环境验收。
 

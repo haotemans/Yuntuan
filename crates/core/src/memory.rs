@@ -116,23 +116,47 @@ pub async fn profiles(
     people: &[String],
     cutoff: i64,
 ) -> Result<BTreeMap<String, Vec<ProfileFact>>> {
+    profiles_for(conn, people, cutoff, false).await
+}
+
+/// The authenticated memory directory combines profiles without changing source identities.
+pub async fn directory_profiles(
+    conn: &mut sqlx::SqliteConnection,
+    people: &[String],
+    cutoff: i64,
+) -> Result<BTreeMap<String, Vec<ProfileFact>>> {
+    profiles_for(conn, people, cutoff, true).await
+}
+
+async fn profiles_for(
+    conn: &mut sqlx::SqliteConnection,
+    people: &[String],
+    cutoff: i64,
+    directory: bool,
+) -> Result<BTreeMap<String, Vec<ProfileFact>>> {
     ensure!(people.len() <= 96, "每次最多读取96个人物画像");
     let mut result: BTreeMap<String, Vec<ProfileFact>> = BTreeMap::new();
     if people.is_empty() {
         return Ok(result);
     }
-    let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-        "WITH history AS (SELECT p.*,ROW_NUMBER() OVER(PARTITION BY p.person_id,p.field ORDER BY p.source_msg_id DESC,p.id DESC) AS rank
-         FROM person_profile_versions p JOIN messages m ON m.msg_id=p.source_msg_id
-         WHERE m.sender_pid=p.person_id AND instr(m.text,p.evidence_quote)>0 AND p.source_msg_id<=",
-    );
-    query.push_bind(cutoff).push(" AND p.person_id IN (");
+    let (directory_id, directory_join) = if directory {
+        ("d.directory_id", "JOIN qq_memory_directory d ON d.person_id=p.person_id")
+    } else {
+        ("p.person_id", "")
+    };
+    let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(format!(
+        "WITH history AS (SELECT p.*, {directory_id} AS subject,
+         ROW_NUMBER() OVER(PARTITION BY {directory_id},p.field ORDER BY p.source_msg_id DESC,p.id DESC) AS rank
+         FROM person_profile_versions p JOIN messages m ON m.msg_id=p.source_msg_id {directory_join}
+         WHERE m.sender_pid=p.person_id AND instr(m.text,p.evidence_quote)>0 AND p.source_msg_id<="
+    ));
+    query.push_bind(cutoff).push(format!(" AND {directory_id} IN ("));
     let mut ids = query.separated(",");
     for id in people {
         ids.push_bind(id);
     }
     ids.push_unseparated(")");
-    query.push(") SELECT person_id,field,content,source_msg_id,evidence_quote,source_ts AS updated_at FROM history WHERE rank=1 ORDER BY person_id,field");
+    query.push(") SELECT subject AS person_id,field,content,source_msg_id,evidence_quote,source_ts AS updated_at FROM history WHERE rank=1 ORDER BY subject,field");
     for row in query.build().fetch_all(&mut *conn).await? {
         let facts = result.entry(row.try_get("person_id")?).or_default();
         if facts.len() < PROFILE_FIELDS {

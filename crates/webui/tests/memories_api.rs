@@ -438,6 +438,57 @@ async fn people_unify_multiple_groups_and_private_chats_with_exact_paging_and_id
 }
 
 #[tokio::test]
+async fn linked_platform_accounts_share_one_directory_card_and_keep_original_sources() {
+    let r = Rig::start().await;
+    let official = "qq-official_user_123_OPEN_1";
+    let mut c = db::connect(&r.dir.join("db.sqlite")).await.unwrap();
+    c.execute_batch("INSERT INTO persons(person_id,display_name,first_seen,last_seen) VALUES
+        ('qq-official_user_123_OPEN_1','官方群名片',1,99),('qq-official_user_123_OPEN_2','官方私聊昵称',1,98);
+      INSERT INTO qq_memory_links(official_pid,onebot_pid) VALUES
+        ('qq-official_user_123_OPEN_1','p_101'),('qq-official_user_123_OPEN_2','p_101');
+      INSERT INTO messages(msg_id,chat_id,chat_type,sender_pid,text,ts) VALUES
+        (51,'official_group','group','qq-official_user_123_OPEN_1','我现在用 Python',51),
+        (52,'official_private','private','qq-official_user_123_OPEN_2','私聊原文',52);
+      INSERT INTO person_profile_facts(person_id,field,content,source_msg_id,evidence_quote,updated_at) VALUES
+        ('qq-official_user_123_OPEN_1','technical_preferences','现在用 Python',51,'我现在用 Python',51);
+      INSERT INTO long_memories(owner_type,owner_id,content,source,created_at,updated_at,source_chat_id,source_msg_id) VALUES
+        ('person','qq-official_user_123_OPEN_1','官方群记忆','explicit',51,51,'official_group',51);").await.unwrap();
+
+    let page = r.get("/api/memories/people?page_size=1").await;
+    assert_eq!(page["total"], 2);
+    assert_eq!(page["people"][0]["id"], "p_101");
+    assert_eq!(page["people"][0]["aliases"].as_array().unwrap().len(), 2);
+    assert_eq!(page["people"][0]["profile"].as_array().unwrap().len(), 1);
+    assert_eq!(page["people"][0]["profile"][0]["content"], "现在用 Python");
+    let search = r.get("/api/memories/people?search=OPEN_1&chat_id=official_group&chat_type=group").await;
+    assert_eq!(search["total"], 1);
+    assert_eq!(search["people"][0]["id"], "p_101");
+    let detail = r.get("/api/relations/person/p_101").await;
+    assert_eq!(detail["profile"][0]["source_msg_id"], 51);
+    let history = r.get("/api/memories/people/p_101/profile-history").await;
+    assert_eq!(history["total"], 2);
+    assert_eq!(history["versions"][0]["current"], true);
+    assert_eq!(history["versions"][1]["current"], false);
+    let messages = r.get("/api/memories/people/p_101/messages?page_size=1").await;
+    assert_eq!(messages["total"], 5);
+    assert_eq!(messages["messages"][0]["msg_id"], 52);
+    let conversations = r.get("/api/memories/conversations?person_id=p_101").await;
+    assert_eq!(conversations["conversations"].as_array().unwrap().len(), 5);
+    let activity = r.get("/api/memories/people/p_101/activity").await;
+    assert_eq!(activity["total"], 5);
+    let memories = r.get("/api/memories?person_id=p_101&chat_id=official_group").await;
+    assert_eq!(memories["total"], 1);
+    let row = &memories["memories"][0];
+    assert_eq!(row["owner_id"], official);
+    assert_eq!(row["owner"]["id"], "p_101");
+    let source = r.get(&format!("/api/memories/{}/source", row["id"])).await;
+    assert_eq!(source["messages"][0]["person_id"], official);
+
+    c.execute_batch("DELETE FROM qq_memory_links;").await.unwrap();
+    assert_eq!(r.get("/api/memories/people").await["total"], 4);
+}
+
+#[tokio::test]
 async fn a_person_has_one_current_portrait_across_conversations_and_new_facts_replace_old_fields() {
     use yuantuan_core::memory::{self, ProfileField, ProfileUpdate};
     let r = Rig::start().await;
