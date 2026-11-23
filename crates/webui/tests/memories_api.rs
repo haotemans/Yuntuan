@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 use yuantuan_core::db::{self, params, SqliteExt};
-use yuantuan_webui::{serve, Extras};
+use yuantuan_webui::{serve_on, Extras};
 
 struct Rig {
     dir: PathBuf,
@@ -59,10 +59,9 @@ impl Rig {
         drop(conn);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        drop(listener);
         let extras = Extras::for_test(dir.join("config.toml"), dir.join("providers.toml"));
         let server =
-            tokio::spawn(async move { serve(path, "127.0.0.1", port, extras).await.unwrap() });
+            tokio::spawn(async move { serve_on(listener, path, extras).await.unwrap() });
         let http = reqwest::Client::new();
         let base = format!("http://127.0.0.1:{port}");
         let deadline = Instant::now() + Duration::from_secs(20);
