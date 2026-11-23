@@ -1,0 +1,330 @@
+//! Read-only, caller-scoped diagnostics from existing durable runtime records.
+use super::{Tool, ToolCancellation, ToolCtx, ToolEffect, ToolOutput, ToolPolicy};
+use crate::{
+    db::SqliteExt,
+    skills::{Skill, SkillDef},
+};
+use anyhow::{ensure, Result};
+use async_trait::async_trait;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use sqlx::Row;
+use std::path::PathBuf;
+
+pub const NAME: &str = "diagnostics.recent";
+
+#[derive(Clone)]
+pub struct Diagnostics {
+    db_path: PathBuf,
+}
+
+impl Diagnostics {
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct Query {
+    minutes: i64,
+    limit: i64,
+    message_id: Option<i64>,
+}
+
+impl Default for Query {
+    fn default() -> Self {
+        Self {
+            minutes: 60,
+            limit: 10,
+            message_id: None,
+        }
+    }
+}
+
+/// Only fixed codes leave the runtime. Provider bodies and URLs may contain secrets.
+pub(crate) fn error_code(error: &str) -> &'static str {
+    let text = error.to_lowercase();
+    if text.contains("401") || text.contains("unauthorized") {
+        "authentication_rejected"
+    } else if text.contains("403") || text.contains("permission_denied") {
+        "permission_denied"
+    } else if text.contains("429") || text.contains("rate limit") || text.contains("成本闸") {
+        "rate_limited"
+    } else if text.contains("timeout") || text.contains("timed out") || text.contains("超时") {
+        "timeout"
+    } else if text.contains("未配置") || text.contains("unavailable") {
+        "unavailable"
+    } else if text.contains("invalid_arguments") {
+        "invalid_arguments"
+    } else if text.contains("invalid_observation") || text.contains("schema") || text.contains("格式") {
+        "invalid_output"
+    } else if text.contains("时限") || text.contains("过期") || text.contains("时效") {
+        "expired"
+    } else {
+        "failure_recorded"
+    }
+}
+
+fn explanation(code: &str) -> &'static str {
+    match code {
+        "authentication_rejected" => "服务拒绝认证，请管理员检查凭据和服务权限",
+        "permission_denied" => "权限检查未通过，请检查能力开关和会话授权",
+        "rate_limited" => "遇到限流，请稍后再试并检查调用额度",
+        "timeout" => "处理超时，需检查对应服务的响应情况",
+        "unavailable" => "所需能力或模型未就绪，请检查配置与运行状态",
+        "invalid_arguments" => "工具参数校验失败，请核对请求条件",
+        "invalid_output" => "返回格式校验失败，请检查模型或接口兼容性",
+        "expired" => "请求或回复已超过处理时限",
+        "image_unseen" => "图片已收到，尚未触发识图，可引用该图并 @ 云团提问",
+        "image_processing" => "已开始识图，记录尚未出现结果",
+        "image_or_provider" => "识图失败，现有记录未细分图片下载与模型服务原因",
+        "unknown" => "执行结果待核实，请核对实际回执",
+        _ => "已记录失败，现有记录未提供更具体的原因",
+    }
+}
+
+#[async_trait]
+impl Tool for Diagnostics {
+    fn name(&self) -> &'static str {
+        NAME
+    }
+
+    fn description(&self) -> &'static str {
+        "查询云团自身最近的运行错误、识图状态与工具回执，仅查询当前会话中提问者自己的请求。解释报错前先读取实际记录。"
+    }
+
+    fn available_in_chat(&self, ctx: &ToolCtx) -> bool {
+        matches!(ctx.chat_type.as_str(), "group" | "private")
+            && !ctx.chat_id.is_empty()
+            && !ctx.sender_pid.is_empty()
+            && ctx.sender_pid != "self"
+    }
+
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy {
+            effect: ToolEffect::ReadOnly,
+            timeout_ms: 10_000,
+            cancellation: ToolCancellation::DropFuture,
+            parallel_safe: true,
+        }
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({"type":"object","additionalProperties":false,"properties":{
+            "minutes":{"type":"integer","minimum":1,"maximum":1440,"description":"最近多少分钟，默认60"},
+            "limit":{"type":"integer","minimum":1,"maximum":20,"description":"最多返回多少条，默认10"},
+            "message_id":{"type":"integer","minimum":1,"description":"可选的本地消息编号，只能查询本人在当前会话的消息"}
+        }})
+    }
+
+    async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<ToolOutput> {
+        ensure!(
+            <Self as Tool>::available_in_chat(self, ctx),
+            "诊断需要真实的会话与提问者身份"
+        );
+        crate::capabilities::check_tool(
+            &self.db_path, NAME, ctx, &self.parameters_schema(), &args,
+        ).await?;
+        let query: Query = serde_json::from_value(args)?;
+        let now = crate::window::now();
+        let mut db = crate::db::connect(&self.db_path).await?;
+        // Every source is joined to the caller's typed conversation and identity.
+        // Raw descriptions are used only to map a fixed diagnostic code locally.
+        let rows = sqlx::query(
+            "WITH mine AS (
+                SELECT * FROM messages WHERE chat_id=?1 AND chat_type=?2 AND sender_pid=?3
+                AND ts>=?4 AND ts<=?5 AND (?6 IS NULL OR msg_id=?6)
+            ), records AS (
+                SELECT 'decision' AS stage, 'messages' AS source, msg_id AS source_id,
+                    msg_id AS message_id, ts, decision_state AS state, decision_error AS detail
+                FROM mine WHERE decision_state IN ('failed','uncertain') OR decision_error IS NOT NULL
+                UNION ALL
+                SELECT 'image','message_images',i.msg_id,i.msg_id,
+                    CASE WHEN i.observed_at>0 THEN i.observed_at ELSE m.ts END,i.status,
+                    CASE i.status WHEN 'pending' THEN 'image_unseen' WHEN 'processing' THEN 'image_processing'
+                    ELSE COALESCE(s.value,'image_or_provider') END
+                FROM message_images i JOIN mine m ON m.msg_id=i.msg_id
+                LEFT JOIN state_kv s ON s.key='vision:failure:'||i.msg_id||':'||i.image_index
+                WHERE i.status IN ('pending','processing','failed')
+                UNION ALL
+                SELECT 'skill','capability_invocations',i.id,i.anchor_id,i.started_at,i.state,NULL
+                FROM capability_invocations i JOIN mine m ON m.msg_id=i.anchor_id
+                WHERE i.chat_id=?1 AND i.chat_type=?2 AND i.actor=?3 AND i.state IN ('failed','unknown')
+                UNION ALL
+                SELECT 'tool','task_invocations',i.id,r.anchor_id,i.started_at,i.state,
+                    json_extract(CASE WHEN json_valid(x.error_json) THEN x.error_json ELSE '{}' END,'$.kind')
+                FROM task_invocations i JOIN tasks t ON t.task_id=i.task_id
+                JOIN task_runtime r ON r.task_id=t.task_id
+                LEFT JOIN tool_invocation_records x ON x.invocation_id=i.id
+                WHERE t.chat_id=?1 AND r.chat_type=?2 AND t.created_by_pid=?3 AND i.started_at>=?4
+                    AND i.started_at<=?5 AND (?6 IS NULL OR r.anchor_id=?6)
+                    AND (i.state IN ('failed','unknown') OR x.status IN ('failed','unknown','rejected','cancelled'))
+                UNION ALL
+                SELECT json_extract(e.payload,'$.stage'),'events',e.id,m.msg_id,e.ts,'failed',
+                    json_extract(e.payload,'$.code')
+                FROM events e JOIN mine m ON m.msg_id=json_extract(e.payload,'$.source_msg_id')
+                WHERE e.kind='RuntimeFailure' AND json_extract(e.payload,'$.chat_id')=?1
+                    AND json_extract(e.payload,'$.chat_type')=?2 AND e.ts>=?4 AND e.ts<=?5
+            ) SELECT * FROM records ORDER BY ts DESC, source, source_id DESC LIMIT ?7",
+        )
+        .bind(&ctx.chat_id)
+        .bind(&ctx.chat_type)
+        .bind(&ctx.sender_pid)
+        .bind(now - query.minutes * 60)
+        .bind(now)
+        .bind(query.message_id)
+        .bind(query.limit + 1)
+        .fetch_all(&mut *db)
+        .await?;
+        let has_more = rows.len() > query.limit as usize;
+        let mut entries = Vec::new();
+        let mut lines = vec![format!("最近{}分钟，当前会话中你的请求诊断", query.minutes)];
+        for row in rows.into_iter().take(query.limit as usize) {
+            let detail = row.try_get::<Option<String>, _>("detail")?.unwrap_or_default();
+            let state: String = row.try_get("state")?;
+            let code = match detail.as_str() {
+                "image_unseen" | "image_processing" | "image_or_provider" | "timeout" => detail.as_str(),
+                "authentication_rejected" | "permission_denied" | "rate_limited" | "unavailable"
+                | "invalid_arguments" | "invalid_output" | "expired" | "failure_recorded" => detail.as_str(),
+                _ if state == "unknown" || state == "uncertain" => "unknown",
+                _ => error_code(&detail),
+            };
+            let stage: String = row.try_get("stage")?;
+            let ts: i64 = row.try_get("ts")?;
+            let message_id: Option<i64> = row.try_get("message_id")?;
+            let source_id: Value = match row.try_get::<i64, _>("source_id") {
+                Ok(id) => json!(id),
+                Err(_) => json!(row.try_get::<String, _>("source_id")?),
+            };
+            let label = match stage.as_str() {
+                "decision" => "参与判断",
+                "image" => "图片识别",
+                "tool" => "工具调用",
+                "skill" => "技能执行",
+                "chat" => "回复生成",
+                "delivery" => "消息发送",
+                _ => "运行记录",
+            };
+            let reason = explanation(code);
+            let message_label = message_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "未关联".into());
+            lines.push(format!(
+                "{}分钟前 · {} · 消息{} · {}",
+                (now - ts).max(0) / 60, label, message_label, reason
+            ));
+            entries.push(json!({"stage":stage,"source":row.try_get::<String,_>("source")?,
+                "source_id":source_id,"message_id":message_id,"ts":ts,"state":state,"code":code,"explanation":reason}));
+        }
+        if entries.is_empty() {
+            lines.push("这段时间内没有可查询的失败或未处理图片记录。".into());
+        }
+        if has_more {
+            lines.push("还有更早的记录，可缩短时间范围或指定消息编号。".into());
+        }
+        lines.push("依据来自已保存的运行记录，当前服务状态和未记录的故障仍需进一步核实。".into());
+        let rendered = lines.join("\n");
+        Ok(ToolOutput {
+            summary: format!("读取到{}条诊断记录", entries.len()), artifacts: vec![],
+            data: json!({"entries":entries,"has_more":has_more,"from_ts":now-query.minutes*60,
+                "until_ts":now,"scope":"current_actor_in_current_conversation","rendered":rendered}),
+        })
+    }
+}
+
+#[async_trait]
+impl Skill for Diagnostics {
+    fn def(&self) -> SkillDef {
+        SkillDef {
+            name: NAME,
+            description: <Self as Tool>::description(self),
+            prompt_template: String::new(),
+            tools: vec![NAME],
+            role_hint: None,
+        }
+    }
+    fn is_information_lookup(&self) -> bool {
+        true
+    }
+    fn commands(&self) -> &'static [&'static str] {
+        &["/自检", "/diagnose"]
+    }
+    fn accepts_empty_command(&self) -> bool {
+        true
+    }
+    async fn invoke(&self, ctx: &ToolCtx, slots: Value) -> Result<ToolOutput> {
+        let text = slots["user_text"].as_str().unwrap_or("").trim();
+        let message_id = if slots["explicit_command"] == true && !text.is_empty() {
+            Some(text.parse::<i64>().map_err(|_| anyhow::anyhow!("用法为 /自检 或 /自检 消息编号"))?)
+        } else {
+            slots["message_id"].as_i64()
+        };
+        let args = match message_id {
+            Some(id) => json!({"message_id":id}),
+            None => json!({}),
+        };
+        <Self as Tool>::call(self, ctx, args).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::params;
+
+    #[tokio::test]
+    async fn reports_real_sources_without_exposing_other_people_or_raw_errors() {
+        let path = std::env::temp_dir().join(format!("yt-diagnostics-{}.db", rand::random::<u64>()));
+        let mut db = crate::db::connect(&path).await.unwrap();
+        crate::db::migrate(&mut db).await.unwrap();
+        db.execute_batch(
+            "INSERT INTO persons(person_id,first_seen,last_seen) VALUES('p_1',1,1),('p_2',1,1);
+             INSERT INTO messages(msg_id,chat_id,chat_type,sender_pid,text,ts,decision_state,decision_error) VALUES
+             (1,'42','group','p_1','own',unixepoch(),'failed','HTTP 401 Bearer secret-provider-key'),
+             (2,'42','group','p_2','other member',unixepoch(),'failed','private error'),
+             (3,'42','private','p_1','same id private',unixepoch(),'failed','private error'),
+             (4,'43','group','p_1','other group',unixepoch(),'failed','private error'),
+             (5,'42','group','p_1','too old',unixepoch()-90000,'failed','old error');
+             INSERT INTO message_images(msg_id,image_index,url,status) VALUES
+             (1,0,'https://signed.test/private?token=secret','pending'),
+             (2,0,'https://signed.test/other','failed');
+             INSERT INTO capability_invocations(name,kind,chat_id,chat_type,actor,anchor_id,state,started_at)
+             VALUES('plugin.example','skill','42','group','p_1',1,'unknown',unixepoch());
+             INSERT INTO events(kind,payload,ts) VALUES('RuntimeFailure',
+             '{\"chat_id\":\"42\",\"chat_type\":\"group\",\"source_msg_id\":1,\"stage\":\"delivery\",\"code\":\"timeout\"}',unixepoch());
+             INSERT INTO tasks(task_id,goal,state,budget_max_calls,created_by_pid,chat_id,created_at)
+             VALUES('t','private goal','failed',1,'p_1','42',unixepoch());
+             INSERT INTO task_runtime(task_id,root_id,chat_type,anchor_id,deadline,max_tokens,updated_at)
+             VALUES('t','t','group',1,unixepoch()+60,10000,unixepoch());
+             INSERT INTO task_invocations(id,task_id,revision,tool_name,args,state,started_at)
+             VALUES('call','t',1,'private-tool','{\"key\":\"secret-argument\"}','failed',unixepoch());",
+        ).await.unwrap();
+        let ctx = ToolCtx { task_id: None, chat_id: "42".into(), chat_type: "group".into(),
+            sender_pid: "p_1".into(), locale: None };
+        let tool = Diagnostics::new(path.clone());
+        let output = tool.call(&ctx, json!({})).await.unwrap();
+        let entries = output.data["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 5);
+        assert!(entries.iter().all(|item| item["message_id"] == 1));
+        assert!(entries.iter().any(|item| item["code"] == "authentication_rejected"));
+        assert!(entries.iter().any(|item| item["code"] == "image_unseen" && item["state"] == "pending"));
+        assert!(entries.iter().any(|item| item["stage"] == "delivery" && item["code"] == "timeout"));
+        let text = serde_json::to_string(&output).unwrap();
+        for private in ["secret", "private error", "signed.test", "private goal", "private-tool", "old error"] {
+            assert!(!text.contains(private), "leaked {private}");
+        }
+        let limited = tool.call(&ctx, json!({"limit":1})).await.unwrap();
+        assert_eq!(limited.data["entries"].as_array().unwrap().len(), 1);
+        assert_eq!(limited.data["has_more"], true);
+        let foreign = tool.call(&ctx, json!({"message_id":2})).await.unwrap();
+        assert_eq!(foreign.data["entries"], json!([]));
+        for args in [json!({"minutes":0}), json!({"limit":100}), json!({"chat_id":"43"}), json!({"message_id":-1})] {
+            assert!(tool.call(&ctx, args).await.is_err());
+        }
+        crate::tools::executor::register(&path, &tool).await.unwrap();
+        db.execute("UPDATE capability_catalog SET enabled=0 WHERE name=?1 AND kind='tool'",params![NAME]).await.unwrap();
+        assert!(tool.call(&ctx, json!({})).await.is_err());
+        assert!(Skill::invoke(&tool, &ctx, json!({})).await.is_err());
+    }
+}

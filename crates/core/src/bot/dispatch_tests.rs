@@ -523,6 +523,40 @@ async fn vague_question_and_quoted_mentions_produce_one_clarification() {
     assert_eq!(anchor, ambient.msg_id);
 }
 
+#[tokio::test]
+async fn diagnostics_command_uses_records_without_a_model() {
+    let model = Model::default();
+    let mut deps = fixture(model.clone()).await;
+    *deps.llm.write().unwrap() = None;
+    let diagnostics = Arc::new(crate::tools::diagnostics::Diagnostics::new(deps.db_path.clone()));
+    let skills = crate::skills::SkillRegistry::new();
+    skills.register_arc(diagnostics);
+    deps.skill_registry = Some(skills);
+    let captures = Arc::new(Mutex::new(Vec::new()));
+    let sent = captures.clone();
+    let send: reply_engine::SendFn = Arc::new(move |request| {
+        sent.lock().unwrap().push(request.segments);
+        Box::pin(async { Ok(json!({"message_id":77})) })
+    });
+    let engine = reply_engine::ReplyEngine::new(
+        deps.db_path.clone(), deps.bus.clone(), send, deps.self_ids.clone(),
+        Arc::new(RwLock::new(reply_engine::ReplyCfg { total_budget_ms: 0, ..Default::default() })),
+        deps.mood.clone(),
+    ).spawn();
+    deps.reply = Some(engine.clone());
+    let mut db = crate::db::connect(&deps.db_path).await.unwrap();
+    let failed = message(&deps, true, "p_1", "图片为何失败").await;
+    db.execute("UPDATE messages SET decision_state='failed',decision_error='Decision角色未配置' WHERE msg_id=?1",params![failed.msg_id]).await.unwrap();
+    let command = message(&deps, false, "p_1", "/自检").await;
+    assert!(is_immediate(&deps, &command));
+    assert!(handle_inner(&deps, &command, command.msg_id).await.is_none());
+    assert!(engine.shutdown(Duration::from_secs(10)).await);
+    assert!(model.inputs.lock().unwrap().is_empty());
+    let text = serde_json::to_string(&*captures.lock().unwrap()).unwrap();
+    assert!(text.contains("参与判断"));
+    assert!(text.contains("所需能力或模型未就绪"));
+}
+
 struct WorkProbe(Arc<std::sync::atomic::AtomicUsize>);
 #[async_trait::async_trait]
 impl crate::tools::Tool for WorkProbe {

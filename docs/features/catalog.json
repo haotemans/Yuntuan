@@ -3,6 +3,15 @@
   "scope": "Current primary Rust modules and Vue views, not a claim of end-to-end acceptance",
   "features": [
     {
+      "id": "diagnostics",
+      "title": "云团运行自检",
+      "status": "新增代码入口（真实 QQ 验收待完成）",
+      "doc": "docs/features/core/diagnostics.md",
+      "source": ["crates/core/src/tools/diagnostics.rs"],
+      "tests": ["crates/core/src/tools/diagnostics.rs", "crates/core/src/bot/dispatch_tests.rs"],
+      "module": "core"
+    },
+    {
       "id": "qq",
       "title": "QQ 接入与消息采集",
       "status": "已接入（需真实 QQ 验收）",

@@ -17,6 +17,7 @@
 | [表情包采集、图库与发送](memes.md) | 已实现流程（偷图需审核） | 3 |
 | [SQLite 数据与事件追踪](storage.md) | 已实现（代码入口） | 3 |
 | [统一每日只读工具调度](scheduler.md) | 已新增，实际账号验收待完成 | 2 |
+| [云团运行自检](diagnostics.md) | 当前会话、本人请求的诊断记录与自检命令 | 1 |
 
 依赖关系：来自 [QQ 接入](../adapter-qq/README.md) 的事件进入对话管线；插件执行能力由 [扩展模块](../extensions/README.md) 注册，管理页面参见 [WebUI](../webui/README.md)。
 

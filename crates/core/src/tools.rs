@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub mod discovery;
+pub mod diagnostics;
 pub mod executor;
 pub mod sandbox;
 

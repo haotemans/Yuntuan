@@ -103,6 +103,8 @@ Router明确选中事项但材料缺失时，任务创建整体回滚，失败�
 
 ## 工具发现与参数修正
 
+内置 `diagnostics.recent` 同时注册为 Tool 与 Skill，目录和 Agent 执行均沿用现有能力开关及类型化会话范围。记录来源与参数见[运行自检](diagnostics.md)。
+
 插件页可单独设置 Tool 的会话范围，Agent 目录和调用继续使用同一 SQLite 能力策略。面板更新字段及交互见[扩展宿主](../extensions/host.md)。
 
 [`discovery.rs`](../../../crates/core/src/tools/discovery.rs) 复用执行器的当前就绪、SQLite启停及类型化范围过滤，为Router和Chat提供工具名、用途、参数名/类型及必填项概览。它不执行工具、不授予权限，也不要求用户知道工具ID或填写JSON；Skill可直接完成时仍走原入口，只有底层Tool或组合工作才交Agent。目录最多48项、条目约3600字符；超预算先缩工具提示，保留total/omitted标记，不把省略或读取失败冒充没有能力。完整Schema仍由Agent按实际任务范围读取。

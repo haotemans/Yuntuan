@@ -837,6 +837,13 @@ async fn execute_outcome(
                         return;
                     }
                     warn!(chat_id = %m.chat_id, error = %format!("{e:#}"), "bot_chat 回复准备失败");
+                    deps.bus.publish(Event::RuntimeFailure {
+                        chat_id: m.chat_id.clone(),
+                        chat_type: m.chat_type.clone(),
+                        source_msg_id: m.msg_id,
+                        stage: "chat",
+                        code: crate::tools::diagnostics::error_code(&format!("{e:#}")),
+                    });
                     deps.bus.publish(Event::BubbleSent(BubbleSentPayload {
                         chat_id: m.chat_id.clone(),
                         bubble_index: 0,
@@ -851,6 +858,13 @@ async fn execute_outcome(
             }
             _ => {
                 debug!(chat_id = %m.chat_id, "bot_chat 角色未配置或回复引擎未接入，reply 跳过");
+                deps.bus.publish(Event::RuntimeFailure {
+                    chat_id: m.chat_id.clone(),
+                    chat_type: m.chat_type.clone(),
+                    source_msg_id: m.msg_id,
+                    stage: "chat",
+                    code: "unavailable",
+                });
                 deps.bus.publish(Event::BubbleSent(BubbleSentPayload {
                     chat_id: m.chat_id.clone(),
                     bubble_index: 0,
