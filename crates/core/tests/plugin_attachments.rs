@@ -94,10 +94,26 @@ async fn plugin_media_uses_correct_segments_and_records_delivery_outcome() {
         .enqueue_attachment("group".into(), ChatType::Group, 123, root.join("movie.mp4"))
         .unwrap();
     assert!(failed.shutdown(Duration::from_secs(3)).await);
-    match events.try_recv().unwrap() {
-        Event::BubbleSent(p) => assert!(!p.ok),
-        _ => panic!("missing delivery outcome"),
+    let mut failure_recorded = false;
+    let mut outcome_recorded = false;
+    while let Ok(event) = events.try_recv() {
+        match event {
+            Event::RuntimeFailure { chat_id, chat_type, stage, code, .. } => {
+                assert_eq!(chat_id, "group");
+                assert_eq!(chat_type, "group");
+                assert_eq!(stage, "delivery");
+                assert_eq!(code, "failure_recorded");
+                failure_recorded = true;
+            }
+            Event::BubbleSent(p) => {
+                assert!(!p.ok);
+                outcome_recorded = true;
+            }
+            _ => {}
+        }
     }
+    assert!(failure_recorded, "missing scoped diagnostic event");
+    assert!(outcome_recorded, "missing delivery outcome");
     drop(conn);
     let _ = std::fs::remove_dir_all(root);
 }
