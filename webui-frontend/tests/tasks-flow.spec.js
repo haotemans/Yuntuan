@@ -42,3 +42,60 @@ test('task controls expose waiting, delivery and errors without repeating a reje
   await page.getByRole('button', { name: '刷新', exact: true }).click()
   await expect(page.locator('.task-brief').getByText(goal, { exact: true })).toBeVisible()
 })
+
+test('creates a daily tool task from the navigation and manages its result and time', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('yt_token', 'test-only'))
+  await page.routeWebSocket('**/ws**', () => {})
+  const tasks = []
+  const writes = []
+  const option = { tool_name: 'quark-drive.search', label: '搜索夸克网盘', input: 'keyword', unavailable: null }
+  await page.route('**/api/**', async route => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path === '/api/schedules') {
+      if (request.method() === 'GET') return route.fulfill({ json: { tasks, options: [option] } })
+      const body = request.postDataJSON()
+      writes.push(body)
+      const [local_hour, local_minute] = body.daily_time.split(':').map(Number)
+      tasks.push({ id: 1, title: body.title, tool_name: body.tool_name, local_hour, local_minute,
+        enabled: true, running: false, next_run_at: 1810000000, last_run_at: null, last_status: 'pending' })
+    } else if (path === '/api/schedules/1/run') {
+      Object.assign(tasks[0], { last_run_at: 1800000000, last_status: 'accessible', last_summary: '找到 2 个文件' })
+    } else if (path === '/api/schedules/1/time') {
+      const [local_hour, local_minute] = request.postDataJSON().daily_time.split(':').map(Number)
+      Object.assign(tasks[0], { local_hour, local_minute })
+    } else if (path === '/api/schedules/1') {
+      if (request.method() === 'DELETE') tasks.splice(0)
+      else tasks[0].enabled = request.postDataJSON().enabled
+    }
+    return route.fulfill({ json: { ok: true } })
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/tasks')
+  await page.getByRole('button', { name: '切换导航栏' }).click()
+  await page.getByText('定时任务', { exact: true }).click()
+  await expect(page).toHaveURL(/\/schedules$/)
+  await page.getByLabel('执行工具').click()
+  await page.getByText('搜索夸克网盘', { exact: true }).click()
+  await page.getByLabel('搜索关键词').fill('工作记录')
+  await page.getByLabel('任务名称').fill('每日找资料')
+  await page.getByLabel('每日执行时间', { exact: true }).fill('18:15')
+  await page.getByRole('button', { name: '创建定时任务' }).click()
+  const row = page.locator('.schedule-row')
+  await expect(row).toContainText('每日找资料')
+  expect(writes).toEqual([{ tool_name: option.tool_name, title: '每日找资料', daily_time: '18:15', input: '工作记录' }])
+  await row.getByRole('button', { name: '更改时间' }).click()
+  await row.getByLabel('新的每日执行时间').fill('08:30')
+  await row.getByRole('button', { name: '保存时间' }).click()
+  await expect(row).toContainText('08:30')
+  await row.getByRole('button', { name: '立即执行' }).click()
+  await expect(row).toContainText('执行成功')
+  await row.getByText('查看最近结果').click()
+  await expect(row.getByText('找到 2 个文件')).toBeVisible()
+  await row.getByRole('button', { name: '暂停' }).click()
+  await expect(row.getByRole('button', { name: '立即执行' })).toBeDisabled()
+  await row.getByRole('button', { name: '删除' }).click()
+  await page.getByRole('button', { name: '删除任务', exact: true }).click()
+  await expect(page.getByText('暂无定时任务')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})

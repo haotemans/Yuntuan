@@ -485,12 +485,15 @@
       "doc": "docs/features/core/scheduler.md",
       "source": [
         "crates/core/src/scheduler.rs",
-        "crates/webui/src/schedule_api.rs"
+        "crates/webui/src/schedule_api.rs",
+        "webui-frontend/src/views/Schedules.vue"
       ],
       "tests": [
         "crates/core/tests/sqlx_storage.rs",
         "webui-frontend/tests/plugins-flow.spec.js",
-        "crates/core/src/scheduler.rs"
+        "crates/core/src/scheduler.rs",
+        "crates/webui/tests/pages_api.rs",
+        "webui-frontend/tests/tasks-flow.spec.js"
       ],
       "module": "core"
     }

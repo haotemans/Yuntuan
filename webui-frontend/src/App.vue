@@ -101,6 +101,7 @@ const groups = [
     ['dashboard', '总览', 'dashboard'],
     ['trace', '决策追踪', 'trace'],
     ['tasks', '任务回放', 'tasks'],
+    ['schedules', '定时任务', 'schedule'],
   ]],
   ['数据与认知', [
     ['memories', '记忆库', 'memories'],
