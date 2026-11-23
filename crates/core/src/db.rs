@@ -440,6 +440,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "V0.21 平台消息来源与回复序号",
         include_str!("db/platform_v21.sql"),
     ),
+    (
+        "V0.22 QQ 跨通道记忆关联",
+        include_str!("db/qq_memory_v22.sql"),
+    ),
 ];
 
 pub async fn migrate(conn: &mut sqlx::SqliteConnection) -> Result<()> {

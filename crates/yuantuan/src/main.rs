@@ -56,6 +56,7 @@ async fn main() -> Result<()> {
     let database = conn.database();
     info!(db = %data_root.join("yuantuan.db").display(), "SQLite 已打开（WAL）");
     yuantuan_core::db::migrate(&mut conn).await?;
+    cfg.qq_official.sync_memory_links(&mut conn).await?;
     if yuantuan_core::context_builder::ensure_default_persona(&mut conn).await? {
         info!("已初始化默认人格，可在面板中编辑");
     }

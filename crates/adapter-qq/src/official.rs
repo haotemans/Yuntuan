@@ -14,12 +14,13 @@ use tokio::sync::Mutex;
 use yuantuan_core::{
     db,
     event::EventBus,
-    platform::{OfficialQqConfig, PlatformStatus, QQ_OFFICIAL_ID},
+    platform::{valid_openid, OfficialQqConfig, PlatformStatus, QQ_OFFICIAL_ID},
     reply_engine::{ChatType, DeliveryUnconfirmed, SendOperation, SendRequest},
 };
 
-const TOKEN_URL: &str = "https://bots.qq.com/app/getAppAccessToken";
-const API_ROOT: &str = "https://api.sgroup.qq.com";
+const TOKEN_URL: &str = "https://api.bot.qq.com/app/getAppAccessToken";
+const API_ROOT: &str = "https://api.bot.qq.com";
+const REPLY_TTL_SECONDS: i64 = 3600;
 
 #[derive(Clone)]
 pub struct OfficialQq(Arc<Inner>);
@@ -141,7 +142,7 @@ impl OfficialQq {
         ensure!(
             url.scheme() == "wss"
                 && url.host_str().is_some_and(|host| {
-                    host == "api.sgroup.qq.com" || host.ends_with(".sgroup.qq.com")
+                    host == "api.bot.qq.com" || host.ends_with(".sgroup.qq.com")
                 })
                 && url.username().is_empty()
                 && url.password().is_none()
@@ -168,15 +169,15 @@ impl OfficialQq {
             content.push_str(segment["data"]["text"].as_str().unwrap_or_default());
         }
         ensure!(!content.trim().is_empty(), "QQ 官方机器人回复正文为空");
-        let (scope, kind, ttl) = match req.chat_type {
-            ChatType::Group => ("groups", "group", 300),
-            ChatType::Private => ("users", "private", 3600),
+        let (scope, kind, limit) = match req.chat_type {
+            ChatType::Group => ("groups", "group", 5_i64),
+            ChatType::Private => ("users", "private", 4_i64),
         };
         let token = self.token().await?;
         let mut c = db::connect(&self.0.db_path).await?;
         let (recipient, msg_id, seq): (String, String, i64) = sqlx::query_as(
             "UPDATE platform_messages SET next_seq=next_seq+1
-             WHERE platform=?1 AND account=?2 AND msg_id=?3 AND next_seq<=5
+             WHERE platform=?1 AND account=?2 AND msg_id=?3 AND next_seq<=?7
              AND EXISTS(SELECT 1 FROM messages m WHERE m.msg_id=?3 AND m.chat_id=?4
                  AND m.chat_type=?5 AND m.ts>=unixepoch()-?6 AND m.sender_pid!='self')
              RETURNING recipient,message_key,next_seq-1",
@@ -186,11 +187,12 @@ impl OfficialQq {
         .bind(source.anchor_msg_id)
         .bind(&source.chat_id)
         .bind(kind)
-        .bind(ttl)
+        .bind(REPLY_TTL_SECONDS)
+        .bind(limit)
         .fetch_optional(&mut *c)
         .await?
         .context("QQ 官方回复来源不匹配、已过期或达到回复次数上限")?;
-        ensure!(ingest::valid_openid(&recipient), "QQ 官方回复目标无效");
+        ensure!(valid_openid(&recipient), "QQ 官方回复目标无效");
         drop(c);
         let response = self
             .request(

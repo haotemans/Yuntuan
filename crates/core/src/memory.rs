@@ -241,9 +241,19 @@ pub async fn recall_scoped(
         "SELECT id,owner_type,owner_id,substr(content,1,800),source,updated_at,
                 source_chat_id,source_msg_id,source_end_msg_id,length(content)>800,
                 (SELECT evidence_quote FROM memory_facts f WHERE f.owner_type=long_memories.owner_type AND f.owner_id=long_memories.owner_id AND f.content=long_memories.content AND f.source_msg_id=long_memories.source_msg_id LIMIT 1)
-         FROM long_memories WHERE ((owner_type='person' AND owner_id=?1) OR (owner_type='chat' AND owner_id=?2))
-         AND (owner_type<>'chat' OR ?4='' OR NOT EXISTS(SELECT 1 FROM messages s WHERE s.msg_id=long_memories.source_msg_id AND s.chat_id=COALESCE(long_memories.source_chat_id,long_memories.owner_id) AND s.chat_type<>?4))
-         AND (?4='' OR EXISTS(SELECT 1 FROM messages src WHERE src.msg_id=long_memories.source_msg_id AND src.chat_id=?2 AND src.chat_type=?4))
+         FROM long_memories WHERE (
+            (((owner_type='person' AND owner_id=?1) OR (owner_type='chat' AND owner_id=?2))
+             AND (owner_type<>'chat' OR ?4='' OR NOT EXISTS(SELECT 1 FROM messages s WHERE s.msg_id=long_memories.source_msg_id AND s.chat_id=COALESCE(long_memories.source_chat_id,long_memories.owner_id) AND s.chat_type<>?4))
+             AND (?4='' OR EXISTS(SELECT 1 FROM messages src WHERE src.msg_id=long_memories.source_msg_id AND src.chat_id=?2 AND src.chat_type=?4)))
+            OR (owner_type='person' AND source_end_msg_id IS NULL
+                AND owner_id IN (SELECT alias FROM qq_memory_aliases WHERE person_id=?1)
+                AND EXISTS(SELECT 1 FROM memory_facts f JOIN messages m ON m.msg_id=f.source_msg_id
+                    WHERE f.owner_type='person' AND f.owner_id=long_memories.owner_id
+                      AND f.content=long_memories.content AND f.source_msg_id=long_memories.source_msg_id
+                      AND f.source_chat_id=long_memories.source_chat_id AND f.source_chat_type='group'
+                      AND m.sender_pid=f.owner_id AND m.chat_id=f.source_chat_id AND m.chat_type='group'
+                      AND instr(m.text,f.evidence_quote)>0))
+         )
          AND (source_msg_id IS NULL OR source_msg_id<=?3) AND (source_end_msg_id IS NULL OR source_end_msg_id<=?3)
          AND ({conditions}) ORDER BY updated_at DESC,id DESC LIMIT 128"
     );

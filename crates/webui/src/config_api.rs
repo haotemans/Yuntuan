@@ -169,6 +169,15 @@ pub async fn post_config(
                 serde_json::from_value(section.clone())
                     .map_err(|_| invalid("QQ 官方机器人配置格式错误".into()))?;
             config.validate().map_err(|error| invalid(error.to_string()))?;
+            let previous = &orig["qq_official"];
+            let app_changed = previous["app_id"]
+                .as_str()
+                .is_some_and(|app| !app.is_empty() && app != config.app_id.as_str());
+            if app_changed
+                && config.memory_links.keys().any(|openid| previous["memory_links"].get(openid).is_some())
+            {
+                return Err(invalid("更换 AppID 时请移除旧应用的 OpenID 记忆关联".into()));
+            }
         }
         if cfg_clean.get("qq_official") != orig.get("qq_official") {
             requires_restart.push("qq_official（重启云团后生效）".into());

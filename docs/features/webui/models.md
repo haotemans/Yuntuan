@@ -8,7 +8,7 @@
 
 ## 实际行为
 
-QQ 官方机器人配置独立于模型服务，主配置写入时会校验 AppID 和 AppSecret，并返回重启要求。字段与运行状态见 [QQ 接入](../adapter-qq/qq.md)。
+QQ 官方机器人配置独立于模型服务，主配置写入时会校验 AppID、AppSecret 及跨通道记忆关联，并返回重启要求。更换 AppID 时须移除旧应用的 OpenID 关联。字段与运行状态见 [QQ 接入](../adapter-qq/qq.md)。
 
 - `LlmGateway` 对 `decision`、`bot_chat`、`agent_exec` 分别绑定 Provider/Model；角色职责独立，但可使用同一实际模型。
 - 模型服务页支持列出/测试可用服务，运行参数页维护配置；API 写回对 Provider、Prefilter、回复参数、上下文预算和表情开关等执行按节热应用。

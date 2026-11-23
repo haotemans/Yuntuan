@@ -162,6 +162,9 @@ async fn official_platform_config_is_validated_masked_and_requires_restart() {
     config["qq_official"] = json!({"enabled":true,"app_id":"123"});
     assert_eq!(rig.post_config(config.clone()).await.0, 400);
     config["qq_official"]["app_secret"] = json!("fixture-secret");
+    config["qq_official"]["memory_links"] = json!({"member": 42});
+    assert_eq!(rig.post_config(config.clone()).await.0, 400);
+    config["qq_official"]["memory_links"] = json!({"member": "42"});
     let (status, body) = rig.post_config(config).await;
     assert_eq!(status, 200);
     assert!(body["requires_restart"].as_array().unwrap().iter()
@@ -170,6 +173,10 @@ async fn official_platform_config_is_validated_masked_and_requires_restart() {
     assert_eq!(readback["config"]["qq_official"]["app_secret"], "***");
     assert!(!readback.to_string().contains("fixture-secret"));
     let mut config = readback["config"].clone();
+    assert_eq!(config["qq_official"]["memory_links"], json!({"member": "42"}));
+    config["qq_official"]["app_id"] = json!("456");
+    assert_eq!(rig.post_config(config.clone()).await.0, 400);
+    config["qq_official"]["app_id"] = json!("123");
     config["qq_official"]["enabled"] = json!(false);
     assert_eq!(rig.post_config(config).await.0, 200);
     let disk = std::fs::read_to_string(&rig.extras.config_path).unwrap();
