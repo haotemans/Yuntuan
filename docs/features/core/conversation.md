@@ -12,6 +12,7 @@
 
 - 普通群聊落库后等待独立时钟，每30秒读取新增消息；没有待判断消息不调用模型。每个 `(chat_type, chat_id)` 最多运行一个普通批次，不按每条消息重启计时。
 - @、私聊、直接呼叫、已识别的回复承接及插件匹配走独立即时队列，普通批次模型缓慢不占住即时 worker。队列容量沿用已有配置，满时保留数据库待处理状态，下一周期补读。
+- OneBot 戳一戳直接进入现有回复队列。云团在原私聊或原群发送「在呢。」，群里 @ 发起者。同一会话 10 秒内最多入队一次，无需调用 Decision 或 Chat，也无需从历史消息补处理。
 - `Prefilter` 先过滤自身消息、硬规则和节流；命中插件命令或消息匹配器可直接调用 Skill，不必走模型 Decision。
 - SQLite 原子领取限制同一消息重复派发。每批最多40条、消息JSON最多10,000字符，取最早未处理前缀，溢出留待后续；单条长文显式截取2,000字符，全文不改。模型读取到的批次成员才可能完成覆盖，不提前把后续消息标为已处理。
 - 成功忽略也算判断完成；Decision或快照失败保留有限重试，累计失败最多3次，首次后间隔30秒、60秒；达到上限标记failed并保留停止原因。重启恢复推理中的消息；执行中断则标记uncertain供核实，旧插件命令不自动重放，待处理消息按文末90秒/10分钟分级停止自动补答，原文不删除。sender_bot在摄取事务内持久化，恢复扫描不把其他机器人当群友。
@@ -34,6 +35,7 @@
 ## 验证入口
 
 - [`crates/adapter-qq/tests/pipeline.rs`](../../../crates/adapter-qq/tests/pipeline.rs)
+- [`crates/adapter-qq/tests/reply.rs`](../../../crates/adapter-qq/tests/reply.rs)
 - [`crates/core/tests/bot_context.rs`](../../../crates/core/tests/bot_context.rs)
 - [`crates/core/src/bot/dispatch_tests.rs`](../../../crates/core/src/bot/dispatch_tests.rs)
 - [`crates/core/src/window/tests.rs`](../../../crates/core/src/window/tests.rs)

@@ -42,6 +42,7 @@
       ],
       "tests": [
         "crates/adapter-qq/tests/pipeline.rs",
+        "crates/adapter-qq/tests/reply.rs",
         "crates/core/tests/bot_context.rs",
         "crates/core/src/bot/dispatch_tests.rs",
         "crates/core/src/window/tests.rs"

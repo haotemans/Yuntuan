@@ -15,10 +15,13 @@ use crate::prefilter::{SelfMsgIds, Verdict};
 use crate::reply_engine::{self, EngineHandle};
 use crate::state::MoodState;
 use sqlx::Row;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
 /// LLM 共享槽（配置热应用：WebUI 写回 providers.toml 后整体换槽）
@@ -133,6 +136,7 @@ fn spawn_pipeline_with_period(deps: PipelineDeps, period: std::time::Duration) -
         };
         let deps = Arc::new(deps);
         let mut lanes = DirectLanes::new();
+        let mut recent_pokes = HashMap::new();
         let mut busy = std::collections::HashSet::new();
         let periodic_slots = Arc::new(tokio::sync::Semaphore::new(
             crate::window::DEFAULT_PERIODIC_CONCURRENCY,
@@ -158,6 +162,9 @@ fn spawn_pipeline_with_period(deps: PipelineDeps, period: std::time::Duration) -
                         }
                         // Ordinary messages were persisted by ingest. No timer
                         // reset, model request, or processed flag on arrival.
+                    }
+                    Ok(Event::QqPoked { sender_qq, group_id }) => {
+                        enqueue_poke_reply(&deps, &mut recent_pokes, sender_qq, group_id);
                     }
                     Ok(_) => {},
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => warn!(skipped=n,"消息事件滞后，将由 SQLite 增量补读"),
@@ -206,6 +213,45 @@ fn spawn_pipeline_with_period(deps: PipelineDeps, period: std::time::Duration) -
             }
         }
     })
+}
+
+fn enqueue_poke_reply(
+    deps: &PipelineDeps,
+    recent_pokes: &mut HashMap<String, Instant>,
+    sender_qq: u64,
+    group_id: Option<u64>,
+) {
+    const COOLDOWN: Duration = Duration::from_secs(10);
+    let Some(engine) = &deps.reply else { return };
+    let (chat_type, chat_id, target) = match group_id {
+        Some(id) => (reply_engine::ChatType::Group, id.to_string(), id),
+        None => (
+            reply_engine::ChatType::Private,
+            format!("dm_{sender_qq}"),
+            sender_qq,
+        ),
+    };
+    let now = Instant::now();
+    recent_pokes.retain(|_, last| now.duration_since(*last) < COOLDOWN);
+    if recent_pokes.contains_key(&chat_id) {
+        return;
+    }
+    recent_pokes.insert(chat_id.clone(), now);
+
+    engine.enqueue(reply_engine::ReplyJob {
+        freshness: None,
+        chat_id,
+        chat_type,
+        target,
+        anchor_msg_id: 0,
+        mention: group_id.is_some(),
+        mention_qq: group_id.map(|_| sender_qq),
+        kind: reply_engine::JobKind::Bubbles(vec![reply_engine::Bubble {
+            text: "在呢。".into(),
+            at: false,
+            meme: None,
+        }]),
+    });
 }
 
 fn decision_ready(llm: &SharedLlm) -> bool {
