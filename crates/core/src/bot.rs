@@ -5,6 +5,7 @@
 //! 热应用（组件级）：llm / prefilter 走共享 RwLock 槽位，每条消息读取当前值，
 //! WebUI config 写回后换槽即生效（其余组件 TODO，见 WebUI config_api）。
 
+use crate::context_builder::ReplySnapshot;
 use crate::db::SqliteExt;
 use crate::decision::{self, DecisionAction};
 use crate::event::{BubbleSentPayload, Event, EventBus, MessageReceivedPayload};
@@ -340,6 +341,22 @@ async fn handle_inner(
                     return pending_failure("回复上下文或处理状态暂时不可用");
                 }
             };
+            if let Some(anchor_id) = unresolved_question_anchor(m, &snapshot) {
+                // Official QQ replies need the current event as their platform anchor.
+                let anchor_id = if crate::platform::chat_platform(&m.chat_id).is_some() {
+                    m.msg_id
+                } else {
+                    anchor_id
+                };
+                enqueue_direct_reply_at(
+                    deps,
+                    m,
+                    anchor_id,
+                    "你指的是哪条？引用一下原消息，我接着看。",
+                    Some(reply_engine::ReplyFreshness::before_first_answer(m)),
+                );
+                return None;
+            }
             if is_bare_mention(m) {
                 let source = snapshot.dialogue["attention_request"]["source"]["msg_id"].as_i64();
                 if source.is_none() {
@@ -439,7 +456,7 @@ async fn handle_inner(
 async fn execute_outcome(
     deps: &PipelineDeps,
     m: &MessageReceivedPayload,
-    mut snapshot: crate::context_builder::ReplySnapshot,
+    mut snapshot: ReplySnapshot,
     gw: Arc<LlmGateway>,
     mut outcome: decision::DecisionOutcome,
     ctx_cfg: crate::context_builder::ContextCfg,
@@ -816,6 +833,10 @@ async fn handle_periodic(deps: &PipelineDeps, mut batch: crate::window::PendingB
         {
             continue;
         }
+        if !m.has_image && m.reply_to.is_none() && references_unspecified_question(&m.text) {
+            mark_processed(&deps.db_path, m.msg_id).await;
+            continue;
+        }
         if matches!(
             crate::prefilter::check(&pf, self_pid.as_deref(), &deps.self_ids, &deps.db_path, &m)
                 .await,
@@ -898,7 +919,64 @@ fn is_bare_mention(m: &MessageReceivedPayload) -> bool {
     m.at_me && m.text.trim().is_empty() && !m.has_image && m.reply_to.is_none()
 }
 
+fn references_unspecified_question(text: &str) -> bool {
+    let punctuation = |c: char| c.is_whitespace() || "，,。.!！?？：:".contains(c);
+    let text = text.trim_matches(punctuation);
+    let text = text
+        .strip_prefix("云团")
+        .unwrap_or(text)
+        .trim_start_matches(punctuation);
+    let text = text.strip_prefix('请').unwrap_or(text).trim_start();
+    ["回答一下", "答一下", "回一下", "回答"]
+        .iter()
+        .filter_map(|prefix| text.strip_prefix(*prefix))
+        .any(|reference| {
+            matches!(
+                reference.trim(),
+                "上面的问题" | "前面的问题" | "刚才的问题" | "上一个问题" | "上一条问题"
+            )
+        })
+}
+
+fn unresolved_question_anchor(m: &MessageReceivedPayload, snapshot: &ReplySnapshot) -> Option<i64> {
+    if crate::vision::related_source(
+        &snapshot.anchor,
+        &snapshot.quoted_messages,
+        &snapshot.recent_messages,
+    )
+    .is_some()
+    {
+        return None;
+    }
+    if m.text.trim().is_empty() {
+        if let Some(quote) = snapshot.quoted_messages.first() {
+            return (quote.person_id == m.sender_pid && references_unspecified_question(&quote.text))
+                .then_some(quote.msg_id);
+        }
+        let source = &snapshot.dialogue["attention_request"]["source"];
+        return source["text"]
+            .as_str()
+            .filter(|text| references_unspecified_question(text))
+            .and_then(|_| source["msg_id"].as_i64());
+    }
+    (references_unspecified_question(&m.text)
+        && !snapshot.quoted_messages.iter().any(|quote| {
+            !quote.text.trim().is_empty() && !references_unspecified_question(&quote.text)
+        }))
+    .then_some(m.msg_id)
+}
+
 fn enqueue_direct_reply(deps: &PipelineDeps, m: &MessageReceivedPayload, text: &str) {
+    enqueue_direct_reply_at(deps, m, m.msg_id, text, None);
+}
+
+fn enqueue_direct_reply_at(
+    deps: &PipelineDeps,
+    m: &MessageReceivedPayload,
+    anchor_msg_id: i64,
+    text: &str,
+    freshness: Option<reply_engine::ReplyFreshness>,
+) {
     let Some(engine) = deps.reply.as_ref() else {
         return;
     };
@@ -906,11 +984,11 @@ fn enqueue_direct_reply(deps: &PipelineDeps, m: &MessageReceivedPayload, text: &
         return;
     };
     engine.enqueue(reply_engine::ReplyJob {
-        freshness: None,
+        freshness,
         chat_id: m.chat_id.clone(),
         chat_type,
         target,
-        anchor_msg_id: m.msg_id,
+        anchor_msg_id,
         mention: m.chat_type == "group",
         mention_qq,
         kind: reply_engine::JobKind::Bubbles(vec![reply_engine::Bubble {

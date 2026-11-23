@@ -144,6 +144,8 @@ Context为实际发送来源或精确文件命中附加registered_asset，包含
 
 [`crates/core/src/context_builder/conversation.rs`](../../../crates/core/src/context_builder/conversation.rs)在同一快照内补充`dialogue.attention_request.source`：仅关联当前作者在同一chat_id/chat_type、当前消息之前近5分钟的最近非空发言，且未被实际Bot发送记录回答。它与`anchor`分别保留真实消息编号、作者、时间和原文截断标记；`execution_authorization=false`，不会把旧指令拼进当前原话。明确面向其他人、过期或已有回答的发言不命中，后来的消息不能进入旧快照；参考保留在固定JSON字段，不依赖最近消息列表是否被裁剪。
 
+未关联到本轮请求的群聊图片仅在已有观察时作为背景进入 `visual_context`。显式附件、引用图片和成功关联的追问继续保留识图状态。收到图片但未触发识图时，数据库中的 `pending` 表示等待识图；进入处理后失败才有对应的失败状态。文字引用附近的未处理图片不会被投影为本轮识图失败。
+
 `dialogue.pending_requests`最多3条该作者尚处于deciding/executing的请求，正文最多160字。真实状态不等于成功凭据，不能据此编造“加载卡住”等原因。普通群聊仍每30秒判断增量，@仍走即时入口；不把30天原文全量塞进上下文。详见[会话调度](conversation.md)。新增`bot_context`与`dispatch_tests`回归覆盖归属、上界、在途请求和已答去重；真实模型选择与QQ送达需另行验收。
 
 

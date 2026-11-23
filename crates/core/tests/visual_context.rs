@@ -116,6 +116,30 @@ async fn images_and_person_context_share_sources_without_promoting_visual_guesse
         image_urls: vec![],
         ts: 3,
     };
+    let mut text_only = MessageReceivedPayload {
+        msg_id: 80,
+        text: "帮我解释一下这句".into(),
+        has_image: false,
+        reply_to: Some(102),
+        ts: 6,
+        ..msg.clone()
+    };
+    conn.execute_batch("INSERT INTO messages(msg_id,chat_id,chat_type,sender_pid,text,ts,reply_to,at_me) VALUES(80,'g','group','p_a','帮我解释一下这句',6,102,1);").await.unwrap();
+    let quoted_text = capture_reply_snapshot(&path, &text_only, 80, &ContextCfg::default())
+        .await
+        .unwrap();
+    assert_eq!(quoted_text.quoted_messages[0].msg_id, 2);
+    assert!(quoted_text.visual_context.is_empty());
+    assert!(!vision::observe(&path, &llm, &text_only, &quoted_text).await.unwrap());
+
+    text_only.reply_to = Some(103);
+    let quoted_image = capture_reply_snapshot(&path, &text_only, 80, &ContextCfg::default())
+        .await
+        .unwrap();
+    assert_eq!(quoted_image.visual_context.len(), 1);
+    assert_eq!(quoted_image.visual_context[0]["source_msg_id"], 3);
+    assert_eq!(quoted_image.visual_context[0]["reference_kind"], "quoted");
+    assert_eq!(quoted_image.visual_context[0]["status"], "pending");
     let before = capture_reply_snapshot(&path, &msg, 3, &ContextCfg::default())
         .await
         .unwrap();
