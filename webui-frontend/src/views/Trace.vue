@@ -9,7 +9,8 @@
     </div>
 
     <n-alert v-if="status?.blocked_reason" type="warning" :bordered="false">{{ status.blocked_reason }}</n-alert>
-    <n-alert v-if="error" type="error" :bordered="false">{{ error }}</n-alert>
+    <n-alert v-if="statusError" type="error" :bordered="false">{{ statusError }}</n-alert>
+    <n-alert v-if="view === 'events' && eventsError" type="error" :bordered="false">{{ eventsError }}</n-alert>
     <div class="decision-metrics">
       <button v-for="metric in metrics" :key="metric.key" class="decision-metric" @click="showQueue(metric.key)">
         <span>{{ metric.label }}</span><strong class="mono">{{ status?.counts?.[metric.key] ?? '—' }}</strong>
@@ -25,10 +26,15 @@
     <div class="yt-toolbar">
       <n-select v-if="view === 'events'" v-model:value="kind" :options="kindOptions" clearable placeholder="事件类型" size="small" style="width: 190px" @update:value="reset" />
       <n-select v-else v-model:value="queueState" :options="stateOptions" clearable placeholder="处理状态" size="small" style="width: 190px" @update:value="refreshStatus" />
+      <label v-if="view === 'events'" class="trace-date">
+        日期 <input v-model="date" type="date" aria-label="决策日期" @change="resetEvents" />
+      </label>
+      <n-button v-if="view === 'events' && date" size="small" text @click="clearDate">清除日期</n-button>
       <n-input v-model:value="chat" placeholder="会话 ID" size="small" style="width: 180px" @keyup.enter="reset" />
       <n-button size="small" type="primary" secondary @click="reset">筛选</n-button>
       <span class="spacer" />
-      <n-tag size="small" :type="wsConnected ? 'success' : 'default'" :bordered="false">
+      <n-tag v-if="view === 'events' && date" size="small" :bordered="false">历史记录</n-tag>
+      <n-tag v-else size="small" :type="wsConnected ? 'success' : 'default'" :bordered="false">
         {{ wsConnected ? '实时流已连接' : '实时流已断开' }}
       </n-tag>
     </div>
@@ -58,7 +64,7 @@
                 </span>
                 <span v-if="e.payload?.fallback" class="tl-badge">判断未完成</span>
                 <span v-if="e.payload?.trigger" class="tl-badge">{{ triggerLabel(e.payload.trigger) }}<template v-if="e.payload.trigger === 'periodic'"> · {{ e.payload.batch_message_ids?.length || 0 }} 条</template></span>
-                <span class="tl-time">{{ fmtAgo(e.ts) }}</span>
+                <time class="tl-time" :title="fmtTs(e.ts)">{{ date ? fmtTs(e.ts) : fmtAgo(e.ts) }}</time>
               </div>
               <div v-if="e.payload?.sender_name" class="tl-chat">{{ e.payload.sender_name }}</div>
               <div class="tl-text">{{ summary(e) }}</div>
@@ -66,10 +72,10 @@
             </div>
           </div>
         </div>
-        <n-card v-else size="small">
+        <n-card v-else-if="!loading && !eventsError" size="small">
           <empty-state title="暂无匹配事件" />
         </n-card>
-        <n-button v-if="items.length" block size="small" secondary style="margin-top: 10px" :loading="loading" @click="loadMore">
+        <n-button v-if="hasMore" block size="small" secondary style="margin-top: 10px" :loading="loading" @click="loadMore">
           加载更早记录
         </n-button>
       </section>
@@ -133,8 +139,11 @@ const items = ref([])
 const sel = ref(null)
 const kind = ref(null)
 const chat = ref('')
+const date = ref('')
 const loading = ref(false)
-const error = ref('')
+const hasMore = ref(false)
+const statusError = ref('')
+const eventsError = ref('')
 const view = ref('events')
 const queueState = ref(null)
 /** @type {import('vue').Ref<any>} */
@@ -163,8 +172,8 @@ async function refreshStatus() {
     if (request !== statusRequest) return
     status.value = data
     now.value = Math.floor(Date.now() / 1000)
-    error.value = ''
-  } catch (e) { if (request === statusRequest) error.value = e.response?.data?.error || '读取消息处理状态失败' }
+    statusError.value = ''
+  } catch (e) { if (request === statusRequest) statusError.value = e.response?.data?.error || '读取消息处理状态失败' }
   finally { if (request === statusRequest) statusLoading = false }
 }
 
@@ -188,44 +197,78 @@ function actionTagColor(a) {
   return { color: `color-mix(in srgb, ${c} 10%, transparent)`, textColor: c }
 }
 
-async function fetchPage(beforeId) {
+let eventsRequest = null
+async function fetchPage(beforeId = null) {
+  eventsRequest?.abort()
+  const request = new AbortController()
+  eventsRequest = request
   loading.value = true
+  eventsError.value = ''
   try {
     const params = new URLSearchParams({ limit: '50' })
     if (kind.value) params.set('kind', kind.value)
-    if (chat.value) params.set('chat_id', chat.value)
+    if (chat.value.trim()) params.set('chat_id', chat.value.trim())
     if (beforeId) params.set('before_id', String(beforeId))
-    const { data } = await api.get(`/events?${params}`)
-    return data.events
+    if (date.value) {
+      const start = new Date(`${date.value}T00:00:00`)
+      const end = new Date(start)
+      end.setDate(end.getDate() + 1)
+      params.set('from_ts', String(start.getTime() / 1000))
+      params.set('until_ts', String(end.getTime() / 1000))
+    }
+    const { data } = await api.get(`/events?${params}`, { signal: request.signal })
+    if (request.signal.aborted) return
+    if (beforeId) {
+      items.value = items.value.concat(data.events)
+    } else {
+      items.value = data.events
+      sel.value = items.value[0] || null
+    }
+    hasMore.value = data.has_more ?? (data.events.length === 50)
+  } catch (error) {
+    if (!request.signal.aborted) eventsError.value = error.response?.data?.error || '读取决策记录失败'
   } finally {
-    loading.value = false
+    if (eventsRequest === request) {
+      eventsRequest = null
+      loading.value = false
+    }
   }
 }
 
-async function reset() {
-  await refreshStatus()
-  try { items.value = await fetchPage(); sel.value = items.value[0] || null }
-  catch (e) { error.value = e.response?.data?.error || '读取决策记录失败' }
+function resetEvents() {
+  items.value = []
+  sel.value = null
+  hasMore.value = false
+  return fetchPage()
+}
+function clearDate() {
+  date.value = ''
+  return resetEvents()
+}
+function reset() {
+  return Promise.all([refreshStatus(), resetEvents()])
 }
 async function loadMore() {
+  if (loading.value || !hasMore.value) return
   const oldest = items.value[items.value.length - 1]
   if (!oldest?.id) return
-  items.value = items.value.concat(await fetchPage(oldest.id))
+  await fetchPage(oldest.id)
 }
 
 let off = null
 let poll = null
-onMounted(async () => {
-  await reset()
+onMounted(() => {
+  void reset()
   poll = setInterval(() => { if (!document.hidden && !statusLoading) refreshStatus() }, 10000)
   off = subscribeWs((ev) => {
+    if (date.value) return
     if (kind.value && ev.kind !== kind.value) return
     if (chat.value && ev.chat_id !== chat.value && ev.payload?.chat_id !== chat.value) return
     items.value.unshift({ _k: Math.random(), kind: ev.kind, payload: ev, ts: Math.floor(Date.now() / 1000) })
     if (items.value.length > 300) items.value.pop()
   })
 })
-onUnmounted(() => { statusRequest++; off?.(); if (poll) clearInterval(poll) })
+onUnmounted(() => { statusRequest++; eventsRequest?.abort(); off?.(); if (poll) clearInterval(poll) })
 </script>
 
 <style scoped>
@@ -235,6 +278,8 @@ onUnmounted(() => { statusRequest++; off?.(); if (poll) clearInterval(poll) })
 .decision-metric:hover { border-color: var(--yt-primary); }
 .decision-policy, .queue-head, .queue-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .decision-policy { margin: 2px 0 12px; }
+.trace-date { display: inline-flex; align-items: center; gap: 6px; color: var(--yt-ink-2); font-size: 13px; }
+.trace-date input { min-height: 28px; padding: 2px 7px; border: 1px solid var(--yt-card-border); border-radius: 6px; background: var(--yt-surface); color: var(--yt-ink-1); font: inherit; }
 .queue-list { display: grid; gap: 12px; }
 .queue-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 12px 0; color: var(--yt-ink-1); }
 .queue-foot { color: var(--yt-ink-3); font-size: 12px; }

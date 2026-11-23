@@ -655,6 +655,30 @@ async fn pages_api_full_pass() {
     let (_, e3) = rig.get("/api/events?before_id=1").await;
     assert_eq!(e3["events"].as_array().unwrap().len(), 0);
 
+    let mut conn = db::connect(&rig.db_path).await.unwrap();
+    conn.execute_batch(
+        r#"INSERT INTO events(id,kind,payload,ts) VALUES
+           (100,'DecisionMade','{"chat_id":"42"}',86399),
+           (101,'DecisionMade','{"chat_id":"42"}',86400),
+           (102,'BubbleSent','{"chat_id":"42"}',86401),
+           (103,'DecisionMade','{"chat_id":"other"}',86402),
+           (104,'DecisionMade','{"chat_id":"42"}',172799),
+           (105,'DecisionMade','{"chat_id":"42"}',172800);"#,
+    )
+    .await
+    .unwrap();
+    drop(conn);
+    let day = "/api/events?kind=DecisionMade&chat_id=42&from_ts=86400&until_ts=172800&limit=1";
+    let (status, page) = rig.get(day).await;
+    assert_eq!(status, 200);
+    assert_eq!(page["events"][0]["id"], 104);
+    assert_eq!(page["has_more"], true);
+    let (_, page) = rig.get(&format!("{day}&before_id=104")).await;
+    assert_eq!(page["events"][0]["id"], 101);
+    assert_eq!(page["has_more"], false);
+    let (status, _) = rig.get("/api/events?from_ts=86400&until_ts=86400").await;
+    assert_eq!(status, 400);
+
     // 记忆与摘要
     let (_, m) = rig
         .get("/api/memories?owner_type=person&owner_id=p_2001")

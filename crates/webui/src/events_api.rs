@@ -15,12 +15,17 @@ pub struct EventsQuery {
     chat_id: Option<String>,
     limit: Option<i64>,
     before_id: Option<i64>,
+    from_ts: Option<i64>,
+    until_ts: Option<i64>,
 }
 
 pub async fn list(
     State(state): State<AppState>,
     Query(q): Query<EventsQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if matches!((q.from_ts, q.until_ts), (Some(start), Some(end)) if start >= end) {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({"error":"日期范围无效"}))));
+    }
     let mut conn = state
         .open_db()
         .await
@@ -46,8 +51,16 @@ pub async fn list(
         binds.push((b).into());
         sql += &format!(" AND id < ?{}", binds.len());
     }
+    if let Some(start) = q.from_ts {
+        binds.push(start.into());
+        sql += &format!(" AND ts >= ?{}", binds.len());
+    }
+    if let Some(end) = q.until_ts {
+        binds.push(end.into());
+        sql += &format!(" AND ts < ?{}", binds.len());
+    }
     sql += &format!(" ORDER BY id DESC LIMIT ?{}", binds.len() + 1);
-    binds.push((limit).into());
+    binds.push((limit + 1).into());
 
     let mut stmt = conn
         .prepare(&sql)
@@ -57,8 +70,10 @@ pub async fn list(
         .query_map(yuantuan_core::db::params_from_iter(binds), row_json)
         .await
         .map_err(|e| err(&format!("查询失败: {e}")))?;
-    let items: Vec<Value> = rows.filter_map(|r| r.ok()).collect();
-    Ok(Json(json!({ "events": items })))
+    let mut items: Vec<Value> = rows.filter_map(|r| r.ok()).collect();
+    let has_more = items.len() > limit as usize;
+    items.truncate(limit as usize);
+    Ok(Json(json!({ "events": items, "has_more": has_more })))
 }
 
 fn row_json(r: &sqlx::sqlite::SqliteRow) -> sqlx::Result<Value> {
