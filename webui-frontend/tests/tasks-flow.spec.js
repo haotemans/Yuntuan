@@ -57,7 +57,7 @@ test('creates a daily tool task from the navigation and manages its result and t
       const body = request.postDataJSON()
       writes.push(body)
       const [local_hour, local_minute] = body.daily_time.split(':').map(Number)
-      tasks.push({ id: 1, title: body.title, tool_name: body.tool_name, local_hour, local_minute,
+      tasks.push({ id: 1, title: body.title, tool_name: body.tool_name, resource_key: body.input, local_hour, local_minute,
         enabled: true, running: false, next_run_at: 1810000000, last_run_at: null, last_status: 'pending' })
     } else if (path === '/api/schedules/1/run') {
       Object.assign(tasks[0], { last_run_at: 1800000000, last_status: 'accessible', last_summary: '找到 2 个文件' })
@@ -83,6 +83,7 @@ test('creates a daily tool task from the navigation and manages its result and t
   await page.getByRole('button', { name: '创建定时任务' }).click()
   const row = page.locator('.schedule-row')
   await expect(row).toContainText('每日找资料')
+  await expect(row).toContainText('工作记录')
   expect(writes).toEqual([{ tool_name: option.tool_name, title: '每日找资料', daily_time: '18:15', input: '工作记录' }])
   await row.getByRole('button', { name: '更改时间' }).click()
   await row.getByLabel('新的每日执行时间').fill('08:30')

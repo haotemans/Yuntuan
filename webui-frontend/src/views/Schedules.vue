@@ -43,6 +43,7 @@
             <div class="schedule-name">
               <strong>{{ task.title }}</strong>
               <span>{{ options.find(option => option.tool_name === task.tool_name)?.label || task.tool_name }}</span>
+              <span v-if="task.resource_key">{{ resourceLabel(task) }}</span>
             </div>
             <n-tag size="small" :type="task.running ? 'info' : task.enabled ? 'success' : 'default'" :bordered="false">
               {{ task.running ? '执行中' : task.enabled ? '已启用' : '已暂停' }}
@@ -111,6 +112,7 @@ const validTime = value => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
 const canCreate = computed(() => !!selected.value && !selected.value.unavailable && validTime(draft.time)
   && (!selected.value.input || !!draft.input.trim()) && !creating.value)
 const taskTime = task => `${String(task.local_hour).padStart(2, '0')}:${String(task.local_minute).padStart(2, '0')}`
+const resourceLabel = task => task.resource_key.startsWith('https://') ? task.resource_key.split('?')[0] : task.resource_key
 const formatTime = timestamp => timestamp ? new Date(timestamp * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '—'
 const resultLabel = status => ({ accessible: '执行成功', check_failed: '执行失败', checking: '等待恢复' })[status] || '等待执行'
 let request
