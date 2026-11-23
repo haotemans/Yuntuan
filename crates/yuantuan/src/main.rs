@@ -206,7 +206,10 @@ async fn main() -> Result<()> {
         info!(image = %cfg.sandbox.image, "Docker 开发沙箱已就绪");
     }
     let skill_registry = yuantuan_core::skills::SkillRegistry::new();
-    let diagnostics = Arc::new(yuantuan_core::tools::diagnostics::Diagnostics::new(db_path.clone()));
+    let diagnostics = Arc::new(
+        yuantuan_core::tools::diagnostics::Diagnostics::new(db_path.clone())
+            .with_sandbox_enabled(cfg.sandbox.enabled),
+    );
     tools_registry.register_arc(diagnostics.clone());
     skill_registry.register_arc(diagnostics);
     let llm_slot: yuantuan_core::bot::SharedLlm = Arc::new(RwLock::new(llm.clone()));

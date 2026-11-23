@@ -8,7 +8,7 @@
 
 ## 实际行为
 
-宿主启动时注册内置 `diagnostics.recent` Tool 及同名自检 Skill，共享现有工具和技能注册表。自检使用的数据源及访问范围见[运行自检](../core/diagnostics.md)。
+宿主启动时注册内置 `diagnostics.recent` Tool 及同名自检 Skill，共享现有工具和技能注册表，并向自检提供本进程加载的 Bash 启用状态。自检使用的数据源及访问范围见[运行自检](../core/diagnostics.md)。
 
 启动装配按配置分别启动 OneBot 和 QQ 官方网关，使用独立协议发送入口，停机时终止官方网关任务。配置与接入边界见 [QQ 接入](../adapter-qq/qq.md)。
 
