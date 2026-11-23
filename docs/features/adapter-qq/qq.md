@@ -16,6 +16,10 @@
 
 好友与入群 `request` 事件校验登录账号、申请人及类型后先去重落库，再发布观察事件；不混入聊天消息、画像或普通对话提示。握手期按事件自身账号暂存，后续审核仍绑定真实登录QQ；申请处理和权限约束见[主理人](../extensions/plugins/moderator.md)。
 
+OneBot 在登录握手后接收 NapCat 的 `notice/notify/poke`。事件账号和被戳对象都须匹配已登录的机器人账号，发起者须是其他用户。群聊使用群号和发起人，私聊使用对端 QQ，并核对可用的 `sender_id`。群聊和私聊回应规则见[会话调度](../core/conversation.md)。QQ 官方机器人公开的事件订阅列表未列出戳一戳。参见[官方事件订阅文档](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html#事件订阅intents)。
+
+戳一戳回归使用模拟 NapCat WebSocket 和发送回执，覆盖群聊、私聊、其他目标、自身发起和重复通知。真实 QQ 客户端收发仍需验收。
+
 ## 边界
 
 - 只声明当前 QQ 接入，桌面、多平台适配器仍属规划；群管理权限检查另见[群管理插件](../extensions/plugins/moderator.md)。

@@ -43,6 +43,8 @@ NapCat WS → adapter-qq::ingest → parse 消息段 → Event::MessageReceived 
 
 7. **ingest 不等待**：publish 后立即返回，不阻塞 WS 读取循环。
 
+OneBot 戳一戳由适配器校验后发布 `QqPoked`，管线按会话限频，再交给回复队列确认收到。该通知通过 EventBus 传递，观测记录留在 `events`，无需创建入站消息或重放历史通知。详见[会话调度](../features/core/conversation.md)。
+
 ## 三、消息处理管线（Prefilter → Decision → 动作）
 
 **链路**：

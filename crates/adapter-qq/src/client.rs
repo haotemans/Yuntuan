@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{oneshot, Mutex as AsyncMutex};
 use tracing::debug;
-use yuantuan_core::event::EventBus;
+use yuantuan_core::event::{Event, EventBus};
 use yuantuan_core::prefilter::SelfMsgIds;
 
 #[path = "delivery.rs"]
@@ -280,7 +280,36 @@ mod forward_tests {
     }
 }
 
-/// 帧分发（传输无关）：action 回执优先路由，meta_event 跳过，message/message_sent 走 ingest
+fn poke_event(v: &Value, self_qq: u64) -> Option<Event> {
+    if self_qq == 0
+        || v["self_id"].as_u64() != Some(self_qq)
+        || v["notice_type"] != "notify"
+        || v["sub_type"] != "poke"
+        || v["target_id"].as_u64() != Some(self_qq)
+    {
+        return None;
+    }
+    let sender_qq = v["user_id"]
+        .as_u64()
+        .filter(|&id| id != 0 && id != self_qq)?;
+    let group_id = match v.get("group_id") {
+        Some(id) => Some(id.as_u64().filter(|&id| id > 0)?),
+        None => None,
+    };
+    // In NapCat private notices, user_id is the chat peer and sender_id is the actor.
+    if group_id.is_none()
+        && v.get("sender_id")
+            .is_some_and(|id| id.as_u64() != Some(sender_qq))
+    {
+        return None;
+    }
+    Some(Event::QqPoked {
+        sender_qq,
+        group_id,
+    })
+}
+
+/// 帧分发（传输无关）：优先处理 action 回执，再按事件类型分发。
 pub(crate) async fn handle_frame(
     v: &Value,
     bus: &EventBus,
@@ -299,11 +328,17 @@ pub(crate) async fn handle_frame(
         Some("request") => {
             let request_bot=if self_qq>0 {self_qq}else{v["self_id"].as_u64().unwrap_or(0)};
             if let Some(request)=yuantuan_core::membership::ingest(db_path,v,request_bot).await? {
-                bus.publish(yuantuan_core::event::Event::MembershipRequestReceived {request_id:request.id,chat_id:request.chat_id().to_owned()});
+                bus.publish(Event::MembershipRequestReceived {request_id:request.id,chat_id:request.chat_id().to_owned()});
             }
             Ok(())
         }
         Some("meta_event") => Ok(()),
+        Some("notice") => {
+            if let Some(event) = poke_event(v, self_qq) {
+                bus.publish(event);
+            }
+            Ok(())
+        }
         Some("message") | Some("message_sent") => {
             crate::ingest::ingest_message(v, bus, db_path, self_qq, self_ids).await
         }

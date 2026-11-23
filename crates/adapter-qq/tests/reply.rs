@@ -364,6 +364,118 @@ fn decision_json(mention: bool) -> String {
     .to_string()
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn poke_replies_in_group_and_private_without_creating_incoming_messages() {
+    let db_path = temp_db().await;
+    let queues = Arc::new(LlmQueues::default());
+    let captures: Captures = Arc::new(Mutex::new(Vec::new()));
+    let group = json!({
+        "post_type": "notice", "notice_type": "notify", "sub_type": "poke",
+        "self_id": SELF_QQ, "target_id": SELF_QQ, "group_id": 555666, "user_id": 2001
+    });
+    let mut poke_other_member = group.clone();
+    poke_other_member["target_id"] = json!(2009);
+    let mut wrong_account = group.clone();
+    wrong_account["self_id"] = json!(99999);
+    let mut unrelated_notice = group.clone();
+    unrelated_notice["sub_type"] = json!("honor");
+    let mut another_sender_in_same_group = group.clone();
+    another_sender_in_same_group["user_id"] = json!(2003);
+    let private = json!({
+        "post_type": "notice", "notice_type": "notify", "sub_type": "poke",
+        "self_id": SELF_QQ, "target_id": SELF_QQ, "user_id": 2002, "sender_id": 2002
+    });
+    let mut outgoing_private = private.clone();
+    outgoing_private["sender_id"] = json!(SELF_QQ);
+    outgoing_private["target_id"] = json!(2002);
+    let mut inconsistent_private = private.clone();
+    inconsistent_private["sender_id"] = json!(2009);
+    let mut self_poke = group.clone();
+    self_poke["user_id"] = json!(SELF_QQ);
+
+    let _rig = build_rig(
+        db_path.clone(),
+        queues.clone(),
+        vec![
+            poke_other_member,
+            wrong_account,
+            unrelated_notice,
+            outgoing_private,
+            inconsistent_private,
+            self_poke,
+            group.clone(),
+            group,
+            another_sender_in_same_group,
+            private,
+        ],
+        captures.clone(),
+        Arc::new(Notify::new()),
+        None,
+        ReplyCfg::default(),
+    )
+    .await;
+
+    let mut conn = db::connect(&db_path).await.unwrap();
+    let deadline = Instant::now() + deadline_secs();
+    loop {
+        let delivered = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM events WHERE kind = 'BubbleSent' AND json_extract(payload, '$.ok') = 1",
+        )
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap();
+        if delivered == 2 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "未收到两次戳一戳回复的回执");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let replies = sqlx::query_as::<_, (String, String, String, String, Option<i64>)>(
+        "SELECT chat_id, chat_type, sender_pid, text, reply_anchor_id FROM messages ORDER BY chat_id",
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .unwrap();
+    assert_eq!(
+        replies,
+        vec![
+            (
+                "555666".to_owned(),
+                "group".to_owned(),
+                "self".to_owned(),
+                "在呢。".to_owned(),
+                None,
+            ),
+            (
+                "dm_2002".to_owned(),
+                "private".to_owned(),
+                "self".to_owned(),
+                "在呢。".to_owned(),
+                None,
+            ),
+        ]
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM events WHERE kind = 'QqPoked'")
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap(),
+        4,
+    );
+    let messages = captures.lock().unwrap();
+    assert_eq!(messages.len(), 2);
+    assert!(messages.iter().any(|(_, value)| {
+        *value == json!([
+            {"type":"at","data":{"qq":"2001"}},
+            {"type":"text","data":{"text":" 在呢。"}}
+        ])
+    }));
+    assert!(messages.iter().any(|(_, value)| {
+        *value == json!([{"type":"text","data":{"text":"在呢。"}}])
+    }));
+    assert!(queues.requests.lock().unwrap().is_empty());
+}
+
 // ---------- 用例 1：三泡回复闭环 ----------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
