@@ -12,6 +12,7 @@ function catalog() {
   ].map(([name, display_name, purpose, commands]) => ({
     name, display_name, description:purpose, version:'0.1.0', enabled:true, loaded:true, updating:false,
     pending_reload:false, pending_restart:false,
+    requires_onebot:['moderator','qzone'].includes(name), requires_group:name === 'moderator',
     presentation:{ purpose, examples: name==='nai-image' ? ['/image -m nai5 -r 2:3 成年女性在图书馆阅读'] : ['请直接描述任务'] },
     skills:[{ name:name==='qzone'?'qzone.publish':['tencent-docs','quark-drive'].includes(name)?name+'.assist':name+'.generate', description:purpose, commands }],
     tools:(name==='tencent-docs'?['catalog','read','call']:name==='quark-drive'?['account','search','inspect_share','share_updates','updated_files','create_share']:name==='qzone'?['publish']:['generate']).map(op=>({name:name+'.'+op,description:purpose})),
@@ -38,7 +39,7 @@ function catalog() {
 }
 
 async function openPlugins(page, { deferred=false,error=false }={}) {
-  const state={plugins:catalog(),reads:0,writes:[],capabilityWrites:[],released:false,watches:[]}
+  const state={plugins:catalog(),reads:0,writes:[],capabilityWrites:[],released:false,watches:[],onebotState:'online',historyQueries:[]}
   state.capabilities=state.plugins.flatMap(p=>[
     ...p.skills.map(s=>({name:s.name,kind:'skill',enabled:true,scopes:['group:42'],calls:3})),
     ...p.tools.map(t=>({name:t.name,kind:'tool',enabled:true,scopes:['group:42'],calls:2,tool_contract:{input_schema:{type:'object',properties:t.name==='qzone.publish'?{content:{type:'string'}}:{prompt:{type:'string'}}}}})),
@@ -46,7 +47,14 @@ async function openPlugins(page, { deferred=false,error=false }={}) {
   await page.addInitScript(() => localStorage.setItem('yt_token','test-only'))
   await page.routeWebSocket('**/ws**',()=>{})
   await page.route('**/api/**',async route=>{
-    const pathname=new URL(route.request().url()).pathname
+    const url = new URL(route.request().url())
+    const pathname = url.pathname
+    if (pathname === '/api/platforms') return route.fulfill({json:{platforms:[{id:'onebot',state:state.onebotState}]}})
+    if (pathname === '/api/plugins/moderator/history') {
+      state.historyQueries.push(Object.fromEntries(url.searchParams))
+      const items = url.searchParams.has('from_ts') ? [] : [{id:'event',kind:'tool',name:'moderator.review',chat_id:'42',chat_type:'group',anchor_id:17,task_id:'task-1',status:'unknown',started_at:1800000000,elapsed_ms:1200}]
+      return route.fulfill({json:{items}})
+    }
     if (pathname.startsWith('/api/plugins/auth/')) {
       state.auth ||= {phase:'idle',message:''}
       if (route.request().method()==='POST') {
@@ -163,7 +171,39 @@ test('deferred configuration save is sent only once and masks saved secrets',asy
   await expect(page.getByRole('button',{name:'保存并应用'})).toBeDisabled()
   state.released=true
   await expect.poll(()=>state.reads,{timeout:8000}).toBeGreaterThan(2)
+  await expect(page.getByText('配置已应用',{exact:true})).toBeVisible()
   expect(state.writes).toHaveLength(1)
+})
+
+test('checks conversation access without executing and shows dated persisted receipts', async ({page}) => {
+  const state = await openPlugins(page)
+  await page.setViewportSize({width:390,height:844})
+  await page.getByRole('button',{name:'查看敬之详情'}).click()
+  await page.getByRole('button',{name:'查看能力与授权'}).click()
+  const id = page.getByLabel('预检会话 ID')
+  const check = page.getByRole('button',{name:'检查会话'})
+  await id.fill('qq-official_group_123_room')
+  await check.click()
+  await expect(page.getByText('该插件需要 OneBot',{exact:true})).toHaveCount(2)
+  await id.fill('99')
+  await check.click()
+  await expect(page.getByText('能力未授权此会话',{exact:true})).toHaveCount(2)
+  await id.fill('42')
+  await check.click()
+  await expect(page.getByText('会话配置允许',{exact:true})).toHaveCount(2)
+  state.onebotState = 'offline'
+  await check.click()
+  await expect(page.getByText('OneBot 未连接',{exact:true})).toHaveCount(2)
+  await page.getByText('运行记录',{exact:true}).click()
+  await expect(page.getByText('结果待核实',{exact:true})).toBeVisible()
+  await expect(page.getByText('来源消息 #17',{exact:true})).toBeVisible()
+  await page.getByLabel('插件调用日期').fill('2026-11-23')
+  await expect(page.getByText('暂无匹配的调用记录')).toBeVisible()
+  expect(state.historyQueries.at(-1)).toHaveProperty('from_ts')
+  expect(state.historyQueries.at(-1)).toHaveProperty('until_ts')
+  expect(await page.locator('.plugin-settings').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+  expect(state.writes).toEqual([])
+  expect(state.capabilityWrites).toEqual([])
 })
 
 test('unsaved drafts survive polling and failed saves display the error',async ({page})=>{
@@ -203,7 +243,7 @@ test('edits only the selected capability scope and keeps the draft on rejection'
   await page.getByText('Skills / Tools',{exact:true}).click()
   const edit=page.getByRole('button',{name:'编辑工具 nai-image.generate 的会话范围'})
   await edit.click()
-  const input=page.getByRole('textbox',{name:'会话 ID'})
+  const input=page.getByRole('textbox',{name:'会话 ID',exact:true})
   await expect(input).toHaveValue('group:42')
   const save=page.getByRole('button',{name:'保存范围'})
   await input.fill('')
