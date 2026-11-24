@@ -112,6 +112,40 @@ test.describe('history date', () => {
   })
 })
 
+test('live and HTTP copies merge by message ID and retain the history cursor', async ({ page }) => {
+  const trace = { requests: [], socket: null }
+  await setup(page, false, trace)
+  const first = { kind: 'MessageReceived', msg_id: 101, chat_id: '42', chat_type: 'group', text: '1', ts: Math.floor(Date.now() / 1000) }
+  const row = { id: 201, kind: first.kind, payload: first, ts: first.ts }
+  let release
+  const gate = new Promise(resolve => { release = resolve })
+  const requests = []
+  await page.route('**/api/events?**', async route => {
+    const params = new URL(route.request().url()).searchParams
+    requests.push(params)
+    if (!params.has('before_id')) await gate
+    return route.fulfill({ json: { events: params.has('before_id')
+      ? [row, { ...row, id: 200, payload: { ...first, msg_id: 100, text: '更早消息' } }]
+      : [row], has_more: !params.has('before_id') } })
+  })
+  await page.goto('/trace')
+  await expect.poll(() => requests.length > 0 && Boolean(trace.socket)).toBe(true)
+  trace.socket.send(JSON.stringify(first))
+  trace.socket.send(JSON.stringify({ ...first, msg_id: 102, text: '加载期间的新消息' }))
+  await expect(page.locator('.tl-text').filter({ hasText: '加载期间的新消息' })).toBeVisible()
+  release()
+  await expect(page.getByRole('button', { name: '刷新', exact: true })).not.toHaveAttribute('disabled', '')
+  await expect(page.locator('.yt-page-sub')).toContainText('2 条记录')
+  await expect(page.locator('.tl-item')).toHaveCount(2)
+  await page.getByRole('button', { name: '加载更早记录' }).click()
+  await expect(page.locator('.tl-item')).toHaveCount(3)
+  expect(requests.at(-1).get('before_id')).toBe('201')
+  trace.socket.send(JSON.stringify(first))
+  trace.socket.send(JSON.stringify({ ...first, msg_id: 103 }))
+  await expect(page.locator('.tl-item')).toHaveCount(4)
+  await expect(page.locator('.tl-text').filter({ hasText: /^1$/ })).toHaveCount(2)
+})
+
 test('parameters display server policy without saving read-only fields', async ({ page }) => {
   const writes = await setup(page)
   await page.goto('/params')

@@ -299,6 +299,7 @@
       "tests": [
         "crates/webui/tests/auth_status.rs",
         "crates/webui/tests/pages_api.rs",
+        "webui-frontend/tests/dashboard-flow.spec.js",
         "webui-frontend/tests/trace-flow.spec.js"
       ],
       "module": "webui"

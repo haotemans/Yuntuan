@@ -2,6 +2,77 @@ import { expect, test } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
 
+function received(msgId, text = '1') {
+  return { kind: 'MessageReceived', msg_id: msgId, chat_id: '42', chat_type: 'group',
+    sender_pid: 'p_2001', text, ts: Math.floor(Date.now() / 1000) }
+}
+function stored(event, id = event.msg_id) {
+  return { id, kind: event.kind, payload: event, ts: event.ts }
+}
+async function eventFixture(page, waitForSnapshot = null) {
+  const first = received(11)
+  const state = { socket: null, inbound: 1, reads: 0, eventsRequested: false }
+  await page.addInitScript(() => localStorage.setItem('yt_token', 'test-only'))
+  await page.routeWebSocket('**/ws**', socket => { state.socket = socket })
+  await page.route('**/api/**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/dashboard') {
+      state.reads++
+      return route.fulfill({ json: { messages_in_today: state.inbound, messages_out_today: 0,
+        decision_calls_today: 0, active_tasks: 0, mood: 'calm' } })
+    }
+    if (url.pathname === '/api/events') {
+      state.eventsRequested = true
+      if (waitForSnapshot) await waitForSnapshot
+      return route.fulfill({ json: { events: [stored(first)] } })
+    }
+    return route.fulfill({ json: {} })
+  })
+  return { state, first }
+}
+
+test('HTTP and live copies appear once while separate identical messages remain visible', async ({ page }) => {
+  const { state, first } = await eventFixture(page)
+  await page.goto('/')
+  const messages = page.locator('.mini-event').filter({ hasText: '收到消息' })
+  await expect(messages).toHaveCount(1)
+  state.socket.send(JSON.stringify(first))
+  state.inbound = 2
+  state.socket.send(JSON.stringify({ ...first, msg_id: 12 }))
+  state.socket.send(JSON.stringify({ kind: 'MoodChanged', text: '实时推送已处理' }))
+  await expect(page.locator('.mini-text').filter({ hasText: '实时推送已处理' })).toBeVisible()
+  await expect(messages).toHaveCount(2)
+  await expect(messages.locator('.mini-text')).toHaveText(['1', '1'])
+  const count = page.locator('.stat-card').filter({ hasText: '今日接收消息' }).locator('.stat-num')
+  await expect(count).toHaveText('2')
+  state.socket.send(JSON.stringify({ ...first, msg_id: 12 }))
+  state.socket.send(JSON.stringify({ kind: 'MoodChanged', text: '重复推送已处理' }))
+  await expect(page.locator('.mini-text').filter({ hasText: '重复推送已处理' })).toBeVisible()
+  await expect(messages).toHaveCount(2)
+  await expect(count).toHaveText('2')
+  await expect(page.locator('.hourbars-svg title').filter({ hasText: '收到 2 / 发送 0' })).toHaveCount(1)
+})
+
+test('live messages survive an in-flight snapshot without duplicate rows or counters', async ({ page }) => {
+  let release
+  const gate = new Promise(resolve => { release = resolve })
+  const { state, first } = await eventFixture(page, gate)
+  await page.goto('/')
+  await expect.poll(() => state.eventsRequested && Boolean(state.socket)).toBe(true)
+  const before = state.reads
+  state.socket.send(JSON.stringify(first))
+  state.inbound = 2
+  state.socket.send(JSON.stringify(received(12, '加载期间的新消息')))
+  // The coalesced counter request confirms both ordered socket frames were handled.
+  await expect.poll(() => state.reads).toBeGreaterThan(before)
+  release()
+  const messages = page.locator('.mini-event').filter({ hasText: '收到消息' })
+  await expect(messages).toHaveCount(2)
+  await expect(messages.locator('.mini-text')).toHaveText(['加载期间的新消息', '1'])
+  await expect(page.locator('.stat-card').filter({ hasText: '今日接收消息' }).locator('.stat-num')).toHaveText('2')
+  await expect(page.locator('.hourbars-svg title').filter({ hasText: '收到 2 / 发送 0' })).toHaveCount(1)
+})
+
 test('today and cumulative model consumption remain distinct on desktop and mobile', async ({ page }) => {
   const artifacts = path.resolve('../data/artifacts/chat-fix-20261016')
   fs.mkdirSync(artifacts, { recursive: true })
