@@ -3,6 +3,24 @@
   "scope": "Current primary Rust modules and Vue views, not a claim of end-to-end acceptance",
   "features": [
     {
+      "id": "bot-management",
+      "title": "机器人自管理与权限分层",
+      "status": "新增管理边界和界面（真实运行验收另计）",
+      "doc": "docs/features/runtime/management.md",
+      "source": [
+        "crates/core/src/management.rs",
+        "crates/webui/src/management_api.rs",
+        "webui-frontend/src/views/Management.vue"
+      ],
+      "tests": [
+        "crates/core/tests/management.rs",
+        "crates/core/tests/plugin_host.rs",
+        "crates/webui/tests/pages_api.rs",
+        "webui-frontend/tests/management-flow.spec.js"
+      ],
+      "module": "runtime"
+    },
+    {
       "id": "runtime-console",
       "title": "运行控制台与日志采集",
       "status": "新增代码入口（真实服务验收待完成）",

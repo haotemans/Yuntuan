@@ -46,7 +46,7 @@ pub async fn get_config(
     Ok(Json(json!({ "config": config, "providers": providers })))
 }
 
-fn read_toml_as_json(path: &Path) -> Option<Value> {
+pub(crate) fn read_toml_as_json(path: &Path) -> Option<Value> {
     let text = std::fs::read_to_string(path).ok()?;
     let v: toml::Value = toml::from_str(&text).ok()?;
     serde_json::to_value(v).ok()
@@ -137,8 +137,8 @@ fn preserve_provider_keys(incoming: &mut Value, original: &Value) {
 
 #[derive(Deserialize)]
 pub struct WriteBody {
-    config: Option<Value>,
-    providers: Option<Value>,
+    pub(crate) config: Option<Value>,
+    pub(crate) providers: Option<Value>,
 }
 
 pub async fn post_config(
@@ -514,19 +514,24 @@ fn err(msg: &str) -> (StatusCode, Json<Value>) {
     )
 }
 
-/// G007：面板「保存并重启」——spawn 新 yuantuan 进程接管（继承环境变量与 cwd），自己 exit(0)。
-/// 时序：先 202 响应 → 500ms 后 spawn 新进程 → 再 200ms 自己 exit；前端在此期间看到短暂连接中断属预期。
-/// 新进程起来后 NapCat 会自动重连，面板刷新即可。
-pub async fn restart(State(_state): State<AppState>) -> (StatusCode, Json<Value>) {
-    // 容器内不自拉 — `spawn+exit(0)` 后容器主进程终止,docker restart policy 会拉起新容器,
-    // 但若用户需要重启,正确做法是宿主机 `docker compose restart`,而非容器内自杀。
-    // 返回 409 + 提示,前端按钮禁用并显示引导文案。
+/// Supervised deployments request graceful application exit; the supervisor restarts it.
+/// Keep the legacy spawn fallback only for standalone non-container deployments.
+pub async fn restart(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
+    if let Some(service)=&state.extras.management {
+        if service.policy()["restart_supported"]==true {
+            return match service.request_restart(&yuantuan_core::management::Caller::Webui).await {
+                Ok(())=>(StatusCode::ACCEPTED,Json(json!({"ok":true,"msg":"云团正在收尾并重启，请稍后刷新；QQ 登录容器保持运行"}))),
+                Err(e)=>(StatusCode::CONFLICT,Json(json!({"error":e.to_string()}))),
+            };
+        }
+    }
+    // An unconfigured container must not assume a restart policy exists.
     if std::path::Path::new("/.dockerenv").exists() {
         return (
             StatusCode::CONFLICT,
             Json(json!({
                 "ok": false,
-                "error": "当前运行在容器内,无内重启语义。请在宿主机执行: cd deploy && docker compose restart"
+                "error": "当前部署未声明自动重启支持，请由部署管理员配置进程守护"
             })),
         );
     }

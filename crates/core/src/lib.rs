@@ -11,6 +11,7 @@ pub mod decision;
 pub mod engagement;
 pub mod event;
 pub mod llm;
+pub mod management;
 pub mod mcp;
 pub mod membership;
 pub mod meme;

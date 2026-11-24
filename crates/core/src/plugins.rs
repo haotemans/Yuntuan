@@ -460,6 +460,7 @@ fn redact_error(message: &str, secrets: &[String]) -> String {
 }
 
 struct Entry {
+    revision: AtomicU64,
     plugin: Arc<dyn Plugin>,
     meta: PluginMeta,
     runtime: RwLock<Runtime>,
@@ -492,6 +493,7 @@ pub struct PluginManager {
 }
 
 enum Change {
+    Reload,
     Settings(PluginSettings),
     Toggle(bool),
     ConfigPatch(serde_json::Map<String, Value>, Option<bool>),
@@ -707,6 +709,7 @@ impl PluginManager {
             manager.entries.insert(
                 meta.id,
                 Entry {
+                    revision: AtomicU64::new(rand::random::<u64>()),
                     plugin,
                     meta,
                     desired: RwLock::new(settings.clone()),
@@ -745,6 +748,7 @@ impl PluginManager {
             }).collect::<Vec<_>>();
             json!({
                 "name":e.meta.id, "display_name":e.meta.name, "version":e.meta.version,
+                "revision":e.revision.load(Ordering::Acquire).to_string(),
                 "description":e.meta.description, "presentation":e.plugin.presentation(),
                 "api_version":e.meta.api_version, "enabled":desired.enabled, "loaded":loaded,
                 "requires_onebot":e.plugin.uses_group_moderation() || e.meta.id == "qzone",
@@ -774,6 +778,7 @@ impl PluginManager {
         self: &Arc<Self>,
         id: &str,
         change: Change,
+        expected: Option<u64>,
     ) -> Result<tokio::task::JoinHandle<Result<()>>> {
         anyhow::ensure!(!self.stopped.load(Ordering::Acquire), "插件宿主已停止");
         let entry = self.entries.get(id).context("插件未编译进当前程序")?;
@@ -793,7 +798,10 @@ impl PluginManager {
             id: id.to_owned(),
         };
         let old = entry.desired.read().unwrap().clone();
+        anyhow::ensure!(expected.is_none_or(|v| v == entry.revision.load(Ordering::Acquire)), "插件状态已变化，请重新查询后再修改");
+        let force_reload = matches!(change, Change::Reload);
         let mut settings = match change {
+            Change::Reload => old.clone(),
             Change::Settings(settings) => settings,
             Change::Toggle(enabled) => PluginSettings {
                 enabled,
@@ -837,6 +845,7 @@ impl PluginManager {
             serde_json::to_vec(&settings)?.len() <= 65_536,
             "插件配置超过 64 KiB"
         );
+        entry.revision.fetch_add(1, Ordering::AcqRel);
         Ok(tokio::spawn(async move {
             let _lifecycle = guard.manager.lifecycle.read().await;
             anyhow::ensure!(
@@ -844,7 +853,7 @@ impl PluginManager {
                 "插件宿主已停止"
             );
             let entry = &guard.manager.entries[guard.id.as_str()];
-            let result = guard.manager.save_locked(entry, settings).await;
+            let result = guard.manager.save_locked(entry, settings, force_reload).await;
             if let Err(error) = &result {
                 *entry.error.write().unwrap() = Some(redact_error(&error.to_string(), &secrets));
             }
@@ -853,7 +862,7 @@ impl PluginManager {
     }
 
     pub async fn save(self: &Arc<Self>, id: &str, settings: PluginSettings) -> Result<()> {
-        self.start_change(id, Change::Settings(settings))?.await?
+        self.start_change(id, Change::Settings(settings), None)?.await?
     }
     /// Apply onboarding results under the existing update guard, retaining secrets,
     /// scopes and limits rather than rebuilding settings from the redacted catalog.
@@ -863,7 +872,7 @@ impl PluginManager {
         patch: serde_json::Map<String, Value>,
         enabled: Option<bool>,
     ) -> Result<()> {
-        self.start_change(id, Change::ConfigPatch(patch, enabled))?
+        self.start_change(id, Change::ConfigPatch(patch, enabled), None)?
             .await?
     }
     /// Return promptly for long drains. The catalog exposes progress and the final error.
@@ -872,12 +881,16 @@ impl PluginManager {
         id: &str,
         settings: PluginSettings,
     ) -> Result<bool> {
-        update_response(self.start_change(id, Change::Settings(settings))?).await
+        update_response(self.start_change(id, Change::Settings(settings), None)?).await
     }
     pub async fn toggle_deferred(self: &Arc<Self>, id: &str, enabled: bool) -> Result<bool> {
-        update_response(self.start_change(id, Change::Toggle(enabled))?).await
+        update_response(self.start_change(id, Change::Toggle(enabled), None)?).await
     }
-    async fn save_locked(&self, entry: &Entry, mut settings: PluginSettings) -> Result<()> {
+    pub async fn managed_change(self: &Arc<Self>, id: &str, revision: u64, patch: serde_json::Map<String,Value>, enabled: Option<bool>, reload: bool) -> Result<bool> {
+        let change = if reload { Change::Reload } else { Change::ConfigPatch(patch,enabled) };
+        update_response(self.start_change(id, change, Some(revision))?).await
+    }
+    async fn save_locked(&self, entry: &Entry, mut settings: PluginSettings, force_reload: bool) -> Result<()> {
         anyhow::ensure!(
             !entry.restart_required.load(Ordering::Acquire),
             "插件未能安全停止，需要重启服务后再加载"
@@ -903,7 +916,7 @@ impl PluginManager {
         atomic_write(&entry.directory.join("settings.json"), &bytes).await?;
         *entry.desired.write().unwrap() = settings.clone();
         let old = entry.runtime.read().unwrap().clone();
-        if old.applied == settings && (old.gate.active.load(Ordering::Acquire) || !settings.enabled)
+        if !force_reload && old.applied == settings && (old.gate.active.load(Ordering::Acquire) || !settings.enabled)
         {
             *entry.error.write().unwrap() = None;
             return Ok(());
@@ -941,7 +954,7 @@ impl PluginManager {
         }
     }
     pub async fn toggle(self: &Arc<Self>, id: &str, enabled: bool) -> Result<()> {
-        self.start_change(id, Change::Toggle(enabled))?.await?
+        self.start_change(id, Change::Toggle(enabled), None)?.await?
     }
     pub async fn subscribe(self: &Arc<Self>, bus: &crate::event::EventBus) {
         let _guard = self.lifecycle.write().await;

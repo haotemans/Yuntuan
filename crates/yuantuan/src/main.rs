@@ -256,6 +256,13 @@ async fn main() -> Result<()> {
     .await?;
     plugins.set_account_owner(cfg.security.super_admin_qq);
     plugins.subscribe(&bus).await;
+    let (management,mut restart_request)=yuantuan_core::management::Management::new(
+        db_path.clone(),plugins.clone(),cfg.security.super_admin_qq,
+        std::env::var("YUANTUAN_RESTART_MODE").as_deref()==Ok("supervised"),
+    ).await?;
+    tools_registry.register(yuantuan_core::management::ManagementTool{service:management.clone(),write:false});
+    tools_registry.register(yuantuan_core::management::ManagementTool{service:management.clone(),write:true});
+    skill_registry.register_arc(Arc::new(yuantuan_core::management::RestartSkill(management.clone())));
     // Shared durable scheduler. Quark share watchers register read-only tools here.
     {
         let scheduler_db = db_path.clone();
@@ -520,6 +527,7 @@ async fn main() -> Result<()> {
         backup_cfg: backup_cfg_slot.clone(),
         sandbox: cfg.sandbox.clone(),
         account_owner: cfg.security.super_admin_qq,
+        management:Some(management),
         bash_probe_lock: Arc::new(tokio::sync::Mutex::new(())),
         tools_registry: tools_registry.clone(),
         skill_registry: skill_registry.clone(),
@@ -539,6 +547,15 @@ async fn main() -> Result<()> {
 
     // 同时接收 Docker SIGTERM 与终端 SIGINT；信号处理在启动回放前已注册。
     tokio::select! {
+        _ = restart_request.changed() => {
+            // Leave time for the accepted API response or command receipt to enter delivery.
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            if let Some(gateway) = official_gateway { gateway.abort(); let _ = gateway.await; }
+            info!("管理员请求应用重启，开始优雅停机");
+            _backup_scheduler.abort();
+            if let Some(handle)=consolidation_handle.lock().unwrap().take(){handle.abort();}
+            finish_shutdown(&db_path,&database,adapter.as_ref(),&reply_engine,&supervisor,&mcp_manager,&plugins).await
+        }
         res = webui_serve => {
             if let Some(gateway) = official_gateway { gateway.abort(); let _ = gateway.await; }
             info!(result = ?res, "WebUI 退出(服务自然结束)");

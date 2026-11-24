@@ -12,6 +12,26 @@ use yuantuan_core::db::SqliteExt;
 use yuantuan_webui::{serve, Extras};
 
 #[tokio::test]
+async fn management_api_authenticates_grants_and_reloads_without_exposing_credentials() {
+    let rig=start().await;
+    assert_eq!(rig.http.get(format!("{}/api/management",rig.base)).send().await.unwrap().status().as_u16(),401);
+    assert_eq!(rig.http.post(format!("{}/api/management/permissions",rig.base)).json(&json!({"grants":[]})).send().await.unwrap().status().as_u16(),401);
+    let (status,body)=rig.get("/api/management").await;assert_eq!(status,200);assert_eq!(body["policy"]["owner_qq"],"2001");
+    let plugin=&body["plugins"][0];let id=plugin["name"].as_str().unwrap();
+    let grants=json!({"grants":[{"qq":"12345","plugins":[id],"configure":true,"toggle":false,"reload":true}]});
+    assert_eq!(rig.post("/api/management/permissions",grants).await.0,200);
+    assert_eq!(rig.get("/api/management").await.1["policy"]["grants"][0]["qq"],"12345");
+    let action=json!({"plugin":id,"operation":"reload","revision":plugin["revision"]});
+    assert_eq!(rig.post("/api/management/plugins",action.clone()).await.0,200);
+    assert_eq!(rig.post("/api/management/plugins",action).await.0,400);
+    assert_eq!(rig.post("/api/management/owner",json!({"qq":"bad-id"})).await.0,400);
+    assert_eq!(rig.post("/api/management/owner",json!({"qq":"98765"})).await.0,200);
+    let body=rig.get("/api/management").await.1;
+    assert_eq!(body["policy"]["owner_qq"],"2001");assert_eq!(body["policy"]["configured_owner_qq"],"98765");
+    assert!(!body.to_string().contains("top-secret-token"));assert!(!body["history"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn agent_schedules_and_bash_state_are_authenticated_and_do_not_claim_model_execution() {
     let rig=start().await;
     for path in ["/api/runtime/agent","/api/agent-schedules","/api/agent-schedules/1/history"] {
@@ -396,6 +416,8 @@ async fn start() -> Rig {
         .unwrap(),
     );
     let tools = extras.tools_registry.clone();
+    let (management,_restart)=yuantuan_core::management::Management::new(db_path.clone(),extras.plugin_manager.as_ref().unwrap().clone(),Some(2001),false).await.unwrap();
+    extras.management=Some(management);
     let self_qq = extras.self_qq.clone();
     let db2 = db_path.clone();
     tokio::spawn(async move {

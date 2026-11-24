@@ -65,3 +65,7 @@ Agent模型绑定追加tool_protocol，可选json（缺省，兼容旧配置）�
 统一配置 API 对 `security.super_admin_qq` 的变更返回 `requires_restart`：服务账号权限在启动时装配给插件，不属于模型 Provider 的热应用范围。原值未变化则不重复提示；回归见 `crates/webui/tests/pages_api.rs` 的 connector_probe_reports_account_owner_changes_as_requiring_restart。此规则不改变角色路由/模型配置已有的热更新。
 
 运行参数页新增 Bash 配置卡片，保存继续合并整份现有配置并提示 sandbox 需重启，不改写 Provider 或模型角色。沙箱状态和预检使用当前进程配置，实际执行规则见[任务工具](../core/tasks.md#管理员定时入口与沙箱状态)。每日 Agent 计划读取现有 agent_exec 热更新槽，缺少模型绑定时界面明确提示、禁止创建；行为见[调度功能](../core/scheduler.md#每日云团-agent-任务v23)。表单与状态回归见[浏览器测试](../../../webui-frontend/tests/agent-schedules.spec.js)。
+
+## 管理入口复用配置保存
+
+机器人管理保存主人 ID 复用配置 API 的解析、校验、密钥保留和需重启响应，不替换整份模板，也不修改 Provider。已有配置重启接口在显式守护模式通过管理服务请求优雅重启；容器不具备该模式时继续拒绝。管理服务不存在时保留原非容器启动兼容路径。具体权限与状态见[机器人管理](../runtime/management.md)。
