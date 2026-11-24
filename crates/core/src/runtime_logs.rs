@@ -82,7 +82,7 @@ impl RuntimeLogs {
     }
 
     pub fn redact(&self, text: &str) -> String {
-        let mut text: String = text.chars().take(8192).collect();
+        let mut text = text.to_owned();
         for secret in self.secrets.read().unwrap().iter() { text = text.replace(secret, "[REDACTED]"); }
         for key in ["api_key", "appsecret", "access_token", "password", "authorization", "cookie", "token", "secret"] {
             let mut cursor = 0;
@@ -116,7 +116,7 @@ impl RuntimeLogs {
                 start = position + "[REDACTED]".len();
             }
         }
-        text
+        text.chars().take(8192).collect()
     }
 
     pub fn record(&self, level: &str, target: &str, message: &str, file: Option<&str>, line: Option<u32>, fields: BTreeMap<String, String>) {
@@ -249,6 +249,8 @@ mod tests {
         let root = std::env::temp_dir().join(format!("yt-logs-{}",rand::random::<u64>()));
         let logs = RuntimeLogs::default();
         logs.register_secrets(&serde_json::json!({"provider":{"api_key_env":"sk-private-key"},"app_secret":"private-secret"}));
+        let boundary=format!("{}private-secret","x".repeat(8188));
+        assert!(!logs.redact(&boundary).contains("priv"));
         logs.record("ERROR","model","HTTP 401 private-secret https://host/private?token=abc Bearer hidden-value",Some("test.rs"),Some(9),
             BTreeMap::from([("error".into(),"{\"token\":\"dynamic-value\"} sk-private-key".into()),("password".into(),"hidden-pass".into())]));
         logs.start_file(&root).unwrap();
