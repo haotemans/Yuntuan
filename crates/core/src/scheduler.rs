@@ -4,6 +4,7 @@ use crate::{
     capabilities, db,
     tools::{Registry, Tool, ToolCtx, ToolEffect},
 };
+pub mod agents;
 use anyhow::{bail, ensure, Context, Result};
 use serde::Serialize;
 use serde_json::{json, Value};

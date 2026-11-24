@@ -324,7 +324,7 @@ async fn durable_receipts_reject_replay_foreign_context_and_duplicate_completion
         .fetch_one(&mut *c)
         .await
         .unwrap();
-    assert_eq!(v, 22);
+    assert_eq!(v, 23);
 }
 
 #[tokio::test]

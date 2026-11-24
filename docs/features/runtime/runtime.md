@@ -69,3 +69,7 @@ V14迁移回归同步最新版本断言，继续验证已有申请、记忆、�
 服务插件默认编入 `plugin-tencent-docs` 和 `plugin-quark-drive`，运行时仍默认关闭；无 Token 或无 CLI/授权时不伪造连接成功。Dockerfile 的 connector-runtime 阶段提供 Node.js 22，CLI 及其 OAuth 配置须由管理员安装到持久 data 路径；仓库镜像不会下载账号凭据或在后台运行官方更新脚本。Docker 构建已补齐全部 workspace manifests、编译所需 SKILL.md 和实际前端构建产物。CI 对 Node 基础运行时做烟测，该烟测不代表完整应用镜像/真实账号联调；应用 Linux 构建和后端测试另行执行。只改仓库不等于更新服务器。
 
 装配在插件加载后、开始接收事件前，将 security.super_admin_qq 写入共享账号身份槽；腾讯文档/夸克的 Connector 和工具可见性均从该槽校验。它是启动配置，变更后需要重启云团；不改变现有 QQ空间适配器的账号检查。
+
+## 定时 Agent 与 Bash 装配
+
+启动额外监督 scheduled_agents，使用当前热更新模型槽、共享 ToolRegistry/EventBus 与原 TaskRunner，契约见[每日 Agent 任务](../core/scheduler.md)。Bash 配置启用但环境预检失败时告警、保持未注册，主应用继续服务。管理接口使用启动时加载的沙箱配置显示状态、执行无命令预检；修复后重启生效。Docker 预检不等同于真实模型任务成功。

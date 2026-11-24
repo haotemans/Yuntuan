@@ -652,11 +652,37 @@ pub async fn create_scoped_task(
     );
     let plan = plan.bounded();
     let task_id = new_task_id();
-    let now = now_secs();
     let mut conn = crate::db::connect(db_path)
         .await
         .context("打开数据库失败")?;
     let mut tx = conn.begin_immediate().await?;
+    insert_scoped_task(
+        &mut tx, &task_id, chat_id, chat_type, created_by_pid, anchor_id, goal, &plan, &context,
+    ).await?;
+    tx.commit().await?;
+    bus.publish(Event::TaskCreated(TaskLifecyclePayload {
+        task_id: task_id.clone(),
+        chat_id: chat_id.into(),
+        goal: goal.into(),
+        final_state: None,
+        error: None,
+    }));
+    Ok(task_id)
+}
+
+/// Also used by the scheduler: task, requirements and trigger receipt commit together.
+pub(crate) async fn insert_scoped_task(
+    tx: &mut sqlx::SqliteConnection,
+    task_id: &str,
+    chat_id: &str,
+    chat_type: &str,
+    created_by_pid: &str,
+    anchor_id: Option<i64>,
+    goal: &str,
+    plan: &TaskPlan,
+    context: &Value,
+) -> Result<()> {
+    let now = now_secs();
     tx.execute(
         "INSERT INTO tasks(task_id, goal, state, budget_max_calls, used_calls, created_by_pid, chat_id, created_at)
          VALUES (?1, ?2, 'running', ?3, 0, ?4, ?5, ?6)",
@@ -665,19 +691,19 @@ pub async fn create_scoped_task(
     tx.execute("INSERT INTO task_runtime(task_id,root_id,chat_type,anchor_id,history,allowed_tools,deadline,max_tokens,updated_at) VALUES(?1,?1,?2,?3,?4,?5,?6,?7,?8)",
         params![task_id,chat_type,anchor_id,json!([{"role":"user","content":json!({"goal":goal,"context":context}).to_string()}]).to_string(),serde_json::to_string(&plan.allowed_tools)?,now+plan.timeout_secs,plan.max_tokens,now]).await?;
     brief::initialize(
-        &mut tx,
-        &task_id,
+        &mut *tx,
+        task_id,
         goal,
         created_by_pid,
         chat_id,
         chat_type,
         anchor_id,
-        &context,
+        context,
     )
     .await?;
     record_event_static(
-        &mut tx,
-        &task_id,
+        &mut *tx,
+        task_id,
         "created",
         json!({
             "goal": goal,
@@ -686,17 +712,7 @@ pub async fn create_scoped_task(
         }),
     )
     .await?;
-    tx.commit().await?;
-    let payload = TaskLifecyclePayload {
-        task_id: task_id.clone(),
-        chat_id: chat_id.to_string(),
-        goal: goal.to_string(),
-        final_state: None,
-        error: None,
-    };
-    bus.publish(Event::TaskCreated(payload));
-    info!(task_id = %task_id, chat_id, goal, "任务已创建");
-    Ok(task_id)
+    Ok(())
 }
 
 async fn record_event_static(
@@ -715,7 +731,7 @@ async fn record_event_static(
     Ok(())
 }
 
-fn new_task_id() -> String {
+pub(crate) fn new_task_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())

@@ -2,7 +2,7 @@
 
 [功能索引](README.md) · [夸克网盘插件](../extensions/plugins/quark-drive.md) · [数据库](storage.md)
 
-**当前状态：代码已新增，真实夸克账号/OAuth 联调与用户实际部署尚未完成。** 源码单元测试和 PR CI 用于验证基础逻辑；部署前不可把「自动检查已启动」告知用户。
+**当前状态：固定工具每日调度已有实现，新增每日 Agent 计划。** 基础逻辑与 mock/浏览器验证不替代真实模型、夸克账号和生产部署验收。
 
 ## 实际行为
 
@@ -56,3 +56,25 @@
 
 
 `scheduler.rs` 内新增真实 SQLite + fake Tool 回归，覆盖重复登记、成功/失败区分、持久停用/范围、未过期与过期租约、重新打开数据库后的恢复及暂停/删除。该回归不访问夸克账号。`check_now` 完成表示检查结果已记入库，检查失败仍以 `check_failed` 呈现，不能等同于可访问。
+
+## 每日云团 Agent 任务（V23）
+
+「云团任务」允许管理员填写自然语言要求、每日北京时间、工具集合（1–16项）、轮数（1–10）与时限（30–900秒）。「固定工具」保留原有只读调度，两者互不覆盖。
+
+计划使用 agent_schedules，触发记录使用 agent_schedule_runs。每30秒扫描，创建现有 tasks/task_runtime、任务说明、触发记录与下次时间在同一 SQLite 写事务提交，事件仅唤醒原 TaskRunner。重启补领一次错过的时间；已有运行、等待补充、等待子任务或暂停的任务阻止同计划重叠。排队计入任务时限，重新扫描不重置预算。
+
+工具仅允许 ReadOnly 与 WorkspaceWrite（含 Bash），需要明确选择且满足 private:scheduled 会话范围。触发和实际调用复核权限，外部写入/效果未知工具不开放无人值守执行。宿主保存当前管理员 p_<super_admin_qq> 为执行人，未配置时为 scheduler；账号插件继续按自己的所有者规则授权。旧计划保留原执行人，修改管理员后需删除重建相关计划。不伪造用户原消息或重放群聊。
+
+最近30次触发可查看日期、排队/执行/等待/完成/失败状态、结果或失败原因，并跳到对应任务的完整回放。模型缺失或工具权限撤销时记录未启动原因，排到下次时刻；修复后可手动触发。未知副作用遵循 Runner 的停止/核实规则，不自动重跑。暂停/删除计划只影响后续触发，当前任务需在任务回放中另行取消；已创建任务和记录保留。
+
+本版结果保存在后台，**不自动推送 QQ，不新增单次、每周或 Cron**。进入队列与完成分别展示。mock/浏览器测试不替代真实模型、账号与生产验收。
+
+管理员接口：
+
+- GET/POST /api/agent-schedules：列表/创建，字段 title、goal、daily_time、allowed_tools、max_calls、timeout_secs。
+- POST /api/agent-schedules/{id}、/{id}/time、/{id}/run：启停、改时刻、手动触发；触发返回 task_id，不等待执行完成。
+- GET /api/agent-schedules/{id}/history、DELETE /api/agent-schedules/{id}：触发历史/删除计划。
+- GET /api/runtime/agent：模型绑定、Bash 注册及定时权限、候选工具。已配置/已注册不证明实时调用成功。
+- POST /api/runtime/bash/check：串行 Docker daemon/镜像预检，不执行命令、不安装依赖、不改配置；详情写入脱敏运行日志。
+
+实现：[Agent 调度](../../../crates/core/src/scheduler/agents.rs)、[管理接口](../../../crates/webui/src/agent_api.rs)、[界面](../../../webui-frontend/src/components/AgentSchedules.vue)、[V23](../../../crates/core/src/db/scheduled_agents_v23.sql)。验证：[事务与权限回归](../../../crates/core/src/scheduler/agents.rs)、[mock 模型 Runner 链路](../../../crates/core/tests/agent_loop.rs)、[浏览器回归](../../../webui-frontend/tests/agent-schedules.spec.js)。

@@ -12,6 +12,20 @@ use yuantuan_core::db::SqliteExt;
 use yuantuan_webui::{serve, Extras};
 
 #[tokio::test]
+async fn agent_schedules_and_bash_state_are_authenticated_and_do_not_claim_model_execution() {
+    let rig=start().await;
+    for path in ["/api/runtime/agent","/api/agent-schedules","/api/agent-schedules/1/history"] {
+        assert_eq!(rig.http.get(format!("{}{path}",rig.base)).send().await.unwrap().status().as_u16(),401);
+    }
+    assert_eq!(rig.http.post(format!("{}/api/runtime/bash/check",rig.base)).send().await.unwrap().status().as_u16(),401);
+    let (status,body)=rig.get("/api/runtime/agent").await;
+    assert_eq!(status,200); assert_eq!(body["model_configured"],false); assert_eq!(body["bash"]["state"],"disabled");
+    let body=json!({"title":"daily","goal":"inspect","daily_time":"09:00","allowed_tools":["sandbox_exec"],"max_calls":5,"timeout_secs":60});
+    assert_eq!(rig.post("/api/agent-schedules",body).await.0,400);
+    assert!(rig.get("/api/agent-schedules").await.1["tasks"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn task_runtime_exposes_versioned_requirements_and_preserves_legacy_tasks() {
     let rig = start().await;
     let mut c = db::connect(&rig.db_path).await.unwrap();

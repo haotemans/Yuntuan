@@ -417,6 +417,9 @@ struct ApiTool {
 }
 #[async_trait]
 impl Tool for ApiTool {
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy { effect: ToolEffect::ReadOnly, ..Default::default() }
+    }
     fn name(&self) -> &'static str {
         match self.op {
             Operation::Search => "anysearch.search",

@@ -51,7 +51,7 @@ async fn v15_upgrade_preserves_messages_and_creates_idempotent_working_storage()
         .fetch_one(&mut *c)
         .await
         .unwrap();
-    assert_eq!(version, 22);
+    assert_eq!(version, 23);
     let text: String = sqlx::query_scalar("SELECT text FROM messages WHERE msg_id=?1")
         .bind(msg.msg_id)
         .fetch_one(&mut *c)

@@ -72,3 +72,7 @@ V19追加`portrait_coverage`与`portrait_runs`，SQL见[`portrait_v19.sql`](../.
 
 
 V20 新增 SQLite 表 \`scheduled_tools\` 与待执行索引，记录工具、参数、每日本地时刻、下一次执行、租约和最近结果。迁移仅追加表与索引，保留既有任务、消息和插件配置。SQL见[\`scheduler_v20.sql\`](../../../crates/core/src/db/scheduler_v20.sql)，读写和恢复边界见[调度功能](scheduler.md)；最新数据库版本为20。
+
+## V23 每日 Agent 计划
+
+[迁移 SQL](../../../crates/core/src/db/scheduled_agents_v23.sql) 追加计划与运行关联表，当前数据库版本23。原 scheduled_tools、任务、人物/消息/记忆及插件配置不改写。删除计划仅使历史的 schedule_id 置空，任务和工具回执保留。创建任务与触发收据/下一次时间使用同一写事务，失败整体回滚。规则见[定时任务](scheduler.md)。
