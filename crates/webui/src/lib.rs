@@ -18,6 +18,7 @@ mod plugins_api;
 mod relations;
 mod runtime_api;
 mod agent_api;
+mod management_api;
 mod schedule_api;
 mod state;
 mod static_files;
@@ -68,6 +69,10 @@ pub async fn serve_on(
         .route("/api/logs", get(logs_api::logs))
         .route("/api/runtime/status", get(logs_api::status))
         .route("/api/runtime/agent", get(agent_api::status))
+        .route("/api/management", get(management_api::status))
+        .route("/api/management/permissions", post(management_api::permissions))
+        .route("/api/management/owner", post(management_api::owner))
+        .route("/api/management/plugins", post(management_api::apply))
         .route("/api/runtime/bash/check", post(agent_api::check_bash))
         .route("/api/agent-schedules", get(agent_api::list).post(agent_api::create))
         .route("/api/agent-schedules/{id}", post(agent_api::toggle).delete(agent_api::remove))

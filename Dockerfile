@@ -74,6 +74,7 @@ RUN mkdir -p /app/data && chown -R yuantuan:yuantuan /app
 USER yuantuan
 
 FROM connector-runtime AS runtime
+ENV YUANTUAN_RESTART_MODE=supervised
 COPY --from=builder /app/target/release/yuantuan /usr/local/bin/yuantuan
 
 EXPOSE 8085 6199

@@ -73,3 +73,7 @@ V14迁移回归同步最新版本断言，继续验证已有申请、记忆、�
 ## 定时 Agent 与 Bash 装配
 
 启动额外监督 scheduled_agents，使用当前热更新模型槽、共享 ToolRegistry/EventBus 与原 TaskRunner，契约见[每日 Agent 任务](../core/scheduler.md)。Bash 配置启用但环境预检失败时告警、保持未注册，主应用继续服务。管理接口使用启动时加载的沙箱配置显示状态、执行无命令预检；修复后重启生效。Docker 预检不等同于真实模型任务成功。
+
+## 统一管理与守护重启
+
+装配主人和持久运维授权、管理工具与显式重启技能；运行时注入管理服务给 WebUI，重启请求通过内部 watch 信号进入优雅停机链路，由明确配置的进程守护恢复。不再要求容器部署的用户手动 SSH 重启，不操作 NapCat。运行时镜像声明 supervised 模式，需配合 Compose restart policy；完整授权/状态契约见[机器人管理](management.md)。

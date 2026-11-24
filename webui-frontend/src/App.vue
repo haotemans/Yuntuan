@@ -118,6 +118,7 @@ const groups = [
   ['接入与扩展', [
     ['platform', '平台接入', 'platform'],
     ['plugins', '插件管理', 'plugins'],
+    ['management', '机器人管理', 'tune'],
     ['mcp', 'MCP 服务', 'mcp'],
     ['backup', '数据备份', 'backup'],
   ]],
