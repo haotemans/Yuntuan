@@ -266,7 +266,7 @@ onUnmounted(() => { stopped = true; clearInterval(timer); controller?.abort() })
   min-width: 0;
   color-scheme: light;
 }
-:global(html.dark) .log-date input {
+html.dark .log-date input {
   color-scheme: dark;
 }
 .log-workspace {

@@ -80,6 +80,7 @@ test('log panels follow the application theme and keep messages readable', async
   expect(light.list).toBe(light.detail)
   expect(light.list).toBe(light.toolbar)
   expect(light.list).toBe('rgb(255, 255, 255)')
+  await expect(page.getByLabel('日志日期')).toHaveCSS('color-scheme', 'light')
   expect(await page.locator('.log-content').first().evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(13)
   await page.getByRole('button', { name: '切换主题' }).click()
   await expect(page.locator('html')).toHaveClass('dark')
@@ -87,6 +88,7 @@ test('log panels follow the application theme and keep messages readable', async
   expect(dark.list).not.toBe(light.list)
   expect(dark.list).toBe(dark.detail)
   expect(dark.list).toBe(dark.toolbar)
+  await expect(page.getByLabel('日志日期')).toHaveCSS('color-scheme', 'dark')
   await expect(page.getByLabel('日志详情')).toContainText('rate limit exceeded')
 })
 
