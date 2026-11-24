@@ -102,6 +102,7 @@ const groups = [
     ['trace', '决策追踪', 'trace'],
     ['logs', '运行控制台', 'terminal'],
     ['tasks', '任务回放', 'tasks'],
+    ['schedules', '定时任务', 'schedule'],
   ]],
   ['数据与认知', [
     ['memories', '记忆库', 'memories'],

@@ -1012,7 +1012,7 @@ async fn connector_probe_uses_authenticated_readonly_registry_and_persistent_swi
             }
         }
         async fn call(&self, ctx: &ToolCtx, _: Value) -> anyhow::Result<ToolOutput> {
-            assert_eq!(ctx.chat_id, "plugin-check");
+            assert!(matches!(ctx.chat_id.as_str(), "plugin-check" | "scheduled"));
             Ok(ToolOutput {
                 summary: "实际 fixture 工具目录".into(),
                 data: json!({}),
@@ -1053,6 +1053,27 @@ async fn connector_probe_uses_authenticated_readonly_registry_and_persistent_swi
         .await;
     assert_eq!(status, 200);
     assert_eq!(data["summary"], "实际 fixture 工具目录");
+    let no_session = rig.http.get(format!("{}/api/schedules", rig.base)).send().await.unwrap();
+    assert_eq!(no_session.status().as_u16(), 401);
+    let body = json!({"tool_name":"tencent-docs.catalog","daily_time":"08:35","title":"每日文档检查"});
+    let (status, registered) = rig.post("/api/schedules", body.clone()).await;
+    assert_eq!(status, 200);
+    let id = registered["id"].as_i64().unwrap();
+    assert_eq!(rig.post("/api/schedules", body).await.0, 400);
+    let base = format!("/api/schedules/{id}");
+    assert_eq!(rig.post(&format!("{base}/time"), json!({"daily_time":"24:00"})).await.0, 400);
+    assert_eq!(rig.post(&format!("{base}/time"), json!({"daily_time":"08:45"})).await.0, 200);
+    assert_eq!(rig.post(&format!("{base}/run"), json!({})).await.0, 200);
+    let (_, schedules) = rig.get("/api/schedules").await;
+    assert_eq!(schedules["tasks"][0]["local_minute"], 45);
+    assert_eq!(schedules["tasks"][0]["last_summary"], "实际 fixture 工具目录");
+    let (_, watches) = rig.get("/api/plugins/quark/watches").await;
+    assert!(watches["watches"].as_array().unwrap().is_empty());
+    assert_eq!(rig.post(&format!("/api/plugins/quark/watches/{id}/check"), json!({})).await.0, 400);
+    assert_eq!(rig.post(&base, json!({"enabled":false})).await.0, 200);
+    assert_eq!(rig.post(&format!("{base}/run"), json!({})).await.0, 400);
+    let removed = rig.http.delete(format!("{}{base}", rig.base)).bearer_auth(&rig.token).send().await.unwrap();
+    assert_eq!(removed.status().as_u16(), 200);
     let tool = rig.tools.get("tencent-docs.catalog").unwrap();
     yuantuan_core::capabilities::register(
         &rig.db_path,

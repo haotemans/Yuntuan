@@ -56,6 +56,10 @@ pub async fn serve_on(
 
     // /api/* 中除 login 外一律过 token 校验
     let protected = Router::new()
+        .route("/api/schedules", get(schedule_api::tasks).post(schedule_api::add_task))
+        .route("/api/schedules/{id}", post(schedule_api::toggle_task).delete(schedule_api::remove_task))
+        .route("/api/schedules/{id}/time", post(schedule_api::set_time))
+        .route("/api/schedules/{id}/run", post(schedule_api::run_now))
         .route("/api/overview", get(overview::overview))
         .route("/api/platforms", get(overview::platforms))
         .route("/api/dashboard", get(dashboard::dashboard))
