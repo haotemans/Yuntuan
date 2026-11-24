@@ -11,6 +11,7 @@
 import { computed } from 'vue'
 
 const ICONS = {
+  terminal: ['M3 4h18v16H3z', 'M7 9l3 3-3 3', 'M13 15h4'],
   dashboard: ['M3 3h8v9H3z', 'M13 3h8v5h-8z', 'M13 10h8v11h-8z', 'M3 14h8v7H3z'],
   trace: ['M3 12h4l3-7 4 14 3-7h4'],
   tasks: ['M9 6h11', 'M9 12h11', 'M9 18h11', 'M4 6h.01', 'M4 12h.01', 'M4 18h.01'],

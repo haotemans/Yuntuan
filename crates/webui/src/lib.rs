@@ -7,6 +7,7 @@ mod config_api;
 mod connector_auth;
 mod dashboard;
 mod events_api;
+mod logs_api;
 mod llm_test;
 mod mcp_api;
 mod memes;
@@ -44,6 +45,8 @@ pub async fn serve(db_path: PathBuf, host: &str, port: u16, extras: Extras) -> R
         .route("/api/platforms", get(overview::platforms))
         .route("/api/dashboard", get(dashboard::dashboard))
         .route("/api/events", get(events_api::list))
+        .route("/api/logs", get(logs_api::logs))
+        .route("/api/runtime/status", get(logs_api::status))
         .route("/api/decisions/status", get(events_api::decision_status))
         .route("/api/memes", get(memes::list))
         .route("/api/memes/batch", post(memes::batch))

@@ -836,7 +836,7 @@ async fn execute_outcome(
                         );
                         return;
                     }
-                    warn!(chat_id = %m.chat_id, error = %format!("{e:#}"), "bot_chat 回复准备失败");
+                    warn!(chat_id = %m.chat_id, source_msg_id=m.msg_id, error = %format!("{e:#}"), "bot_chat 回复准备失败");
                     deps.bus.publish(Event::RuntimeFailure {
                         chat_id: m.chat_id.clone(),
                         chat_type: m.chat_type.clone(),

@@ -151,6 +151,8 @@ pub async fn post_config(
             Json(json!({ "error": "config/providers 至少给一个" })),
         ));
     }
+    if let Some(config) = &body.config { state.extras.runtime_logs.register_secrets(config); }
+    if let Some(providers) = &body.providers { state.extras.runtime_logs.register_secrets(providers); }
     let mut applied: Vec<String> = Vec::new();
     let mut requires_restart: Vec<String> = Vec::new();
 

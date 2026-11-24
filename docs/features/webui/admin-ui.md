@@ -8,6 +8,8 @@
 
 ## 实际行为
 
+侧栏新增 `/logs` [运行控制台](../runtime/console.md)，运行日志与进程接口沿用管理员 Bearer 鉴权。配置提交时同步登记用于日志脱敏的新凭据。
+
 - Rust Axum 后端提供受保护的 `/api/*`、`/ws` 和嵌入式静态前端；登录与状态接口例外处理。
 - Vue 管理页面提供总览、决策追踪、任务、配置等入口；WebSocket 推送观测事件，用于 UI 展示。
 - 插件能力的会话范围与启停通过管理员会话保护的 `PATCH /api/capabilities` 更新，字段及权限规则见[扩展宿主](../extensions/host.md)。

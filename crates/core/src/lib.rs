@@ -22,6 +22,7 @@ pub mod personality;
 pub mod platform;
 pub mod prefilter;
 pub mod reply_engine;
+pub mod runtime_logs;
 pub mod scheduler;
 pub mod skills;
 pub mod state;

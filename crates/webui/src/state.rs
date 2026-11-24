@@ -11,6 +11,8 @@ pub const SESSION_TTL: Duration = Duration::from_secs(24 * 3600);
 /// 装配层注入（main 组装；测试自行构造）
 #[derive(Clone)]
 pub struct Extras {
+    pub runtime_logs: yuantuan_core::runtime_logs::RuntimeLogs,
+    pub supervisor: yuantuan_core::supervisor::Supervisor,
     /// Event Bus（/ws 全量推送）
     pub bus: yuantuan_core::event::EventBus,
     /// LLM 共享槽（config 写回后整体换槽 → 组件级热应用）
@@ -55,6 +57,8 @@ impl Extras {
     /// 测试装配：全部槽取默认值，归纳句柄空，self_qq 为 0
     pub fn for_test(config_path: PathBuf, providers_path: PathBuf) -> Self {
         Self {
+            runtime_logs: Default::default(),
+            supervisor: Default::default(),
             bus: yuantuan_core::event::EventBus::new(64),
             llm_slot: Arc::new(RwLock::new(None)),
             prefilter_slot: Arc::new(RwLock::new(yuantuan_core::prefilter::Config::default())),

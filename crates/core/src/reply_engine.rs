@@ -1491,7 +1491,7 @@ async fn process_bubbles_with_meme(
                 }
             }
             Err(e) => {
-                warn!(chat_id = %job.chat_id, bubble = i, error = %e, "泡发送失败，跳过该泡");
+                warn!(chat_id = %job.chat_id, source_msg_id=job.anchor_msg_id, bubble = i, error = %e, "泡发送失败，跳过该泡");
                 eng.bus.publish(Event::BubbleSent(BubbleSentPayload {
                     chat_id: job.chat_id.clone(),
                     bubble_index: i,

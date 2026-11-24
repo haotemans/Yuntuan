@@ -110,6 +110,9 @@ pub async fn save_config(
     State(state): State<AppState>,
     Json(body): Json<ConfigBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if let Ok(settings) = serde_json::to_value(&body.settings) {
+        state.extras.runtime_logs.register_secrets(&settings);
+    }
     let manager = state
         .extras
         .plugin_manager

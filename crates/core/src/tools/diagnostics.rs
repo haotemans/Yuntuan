@@ -17,15 +17,21 @@ pub const NAME: &str = "diagnostics.recent";
 pub struct Diagnostics {
     db_path: PathBuf,
     sandbox_enabled: Option<bool>,
+    runtime_logs: Option<crate::runtime_logs::RuntimeLogs>,
 }
 
 impl Diagnostics {
     pub fn new(db_path: PathBuf) -> Self {
-        Self { db_path, sandbox_enabled: None }
+        Self { db_path, sandbox_enabled: None, runtime_logs: None }
     }
 
     pub fn with_sandbox_enabled(mut self, enabled: bool) -> Self {
         self.sandbox_enabled = Some(enabled);
+        self
+    }
+
+    pub fn with_runtime_logs(mut self, logs: crate::runtime_logs::RuntimeLogs) -> Self {
+        self.runtime_logs = Some(logs);
         self
     }
 }
@@ -189,6 +195,24 @@ impl Tool for Diagnostics {
         .fetch_all(&mut *db)
         .await?;
         let has_more = rows.len() > query.limit as usize;
+        let mut runtime_entries = Vec::new();
+        if let Some(logs) = &self.runtime_logs {
+            for entry in logs.entries().into_iter().rev() {
+                if entry.ts / 1000 < (now - query.minutes * 60).max(0) as u64
+                    || !matches!(entry.level.as_str(), "WARN" | "ERROR")
+                    || entry.fields.get("chat_id") != Some(&ctx.chat_id) { continue; }
+                let source = ["source_msg_id", "anchor_msg_id", "msg_id"].iter()
+                    .find_map(|key|entry.fields.get(*key)?.parse::<i64>().ok());
+                let Some(source) = source.filter(|id|query.message_id.is_none_or(|requested|requested==*id)) else { continue };
+                let own: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM messages WHERE msg_id=?1 AND chat_id=?2 AND chat_type=?3 AND sender_pid=?4)")
+                    .bind(source).bind(&ctx.chat_id).bind(&ctx.chat_type).bind(&ctx.sender_pid).fetch_one(&mut *db).await?;
+                if own {
+                    runtime_entries.push(json!({"id":entry.id,"ts":entry.ts,"level":entry.level,
+                        "message_id":source,"target":entry.target,"message":entry.message,"fields":entry.fields}));
+                }
+                if runtime_entries.len()>=query.limit as usize { break; }
+            }
+        }
         let mut entries = Vec::new();
         let mut lines = vec![format!("最近{}分钟，当前会话中你的请求诊断", query.minutes)];
         if let Some(flow) = &flow {
@@ -241,6 +265,9 @@ impl Tool for Diagnostics {
         if has_more {
             lines.push("还有更早的记录，可缩短时间范围或指定消息编号。".into());
         }
+        for entry in &runtime_entries {
+            lines.push(format!("运行日志 · 消息{} · {}", entry["message_id"], entry["message"].as_str().unwrap_or_default()));
+        }
         let (bash_status, bash_description) = match self.sandbox_enabled {
             Some(true) => ("enabled_at_startup", "Bash 已启用，启动时沙箱检查通过，可由 Agent 任务调用"),
             Some(false) => ("disabled", "Bash 未启用，当前进程未注册 sandbox_exec"),
@@ -251,7 +278,7 @@ impl Tool for Diagnostics {
         let rendered = lines.join("\n");
         Ok(ToolOutput {
             summary: format!("读取到{}条诊断记录", entries.len()), artifacts: vec![],
-            data: json!({"entries":entries,"flow":flow,"bash":{"status":bash_status,"description":bash_description},
+            data: json!({"entries":entries,"runtime_entries":runtime_entries,"flow":flow,"bash":{"status":bash_status,"description":bash_description},
                 "has_more":has_more,"from_ts":now-query.minutes*60,
                 "until_ts":now,"scope":"current_actor_in_current_conversation","rendered":rendered}),
         })
@@ -471,7 +498,13 @@ mod tests {
         ).await.unwrap();
         let ctx = ToolCtx { task_id: None, chat_id: "42".into(), chat_type: "group".into(),
             sender_pid: "p_1".into(), locale: None };
-        let tool = Diagnostics::new(path.clone()).with_sandbox_enabled(false);
+        let logs=crate::runtime_logs::RuntimeLogs::default();
+        for (source,chat) in [(1,"42"),(2,"42"),(1,"43")] {
+            logs.record("ERROR","test","请求失败",None,None,std::collections::BTreeMap::from([
+                ("chat_id".into(),chat.into()),("source_msg_id".into(),source.to_string()),
+            ]));
+        }
+        let tool = Diagnostics::new(path.clone()).with_sandbox_enabled(false).with_runtime_logs(logs);
         let output = tool.call(&ctx, json!({})).await.unwrap();
         let entries = output.data["entries"].as_array().unwrap();
         assert_eq!(entries.len(), 6);
@@ -481,6 +514,8 @@ mod tests {
         assert!(entries.iter().any(|item| item["stage"] == "delivery" && item["code"] == "timeout"));
         assert!(entries.iter().any(|item| item["code"] == "command_failed"));
         assert_eq!(output.data["bash"]["status"], "disabled");
+        assert_eq!(output.data["runtime_entries"].as_array().unwrap().len(),1);
+        assert_eq!(output.data["runtime_entries"][0]["message_id"],1);
         let text = serde_json::to_string(&output).unwrap();
         for private in ["secret", "private error", "signed.test", "private goal", "private-tool", "old error", "private-command", "private-output"] {
             assert!(!text.contains(private), "leaked {private}");
