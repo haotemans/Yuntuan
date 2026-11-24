@@ -30,11 +30,13 @@ OneBot 在登录握手后接收 NapCat 的 `notice/notify/poke`。事件账号�
 
 在 [QQ 开放平台](https://q.qq.com/)创建机器人，并开通单聊及群 @ 事件。将 AppID、AppSecret 填入「平台接入 → QQ 官方机器人」，启用后保存并重启云团。开放平台要求 IP 白名单时，填入运行云团的服务器公网出口 IP。未发布的机器人需使用配置的沙箱成员和群聊。
 
-配置存于主配置文件的 `[qq_official]`，默认关闭。管理面板只显示密钥是否已保存，留空保留原值。云团获取访问令牌并主动连接安全 WebSocket，收到 READY 或 RESUMED 后显示已连接。断线时退避重连，使用尚可恢复的网关会话续接。协议见 [腾讯官方 Node SDK 指南](https://github.com/tencent-connect/qqbot-nodejs/blob/main/USAGE.md)。
+配置存于主配置文件的 `[qq_official]`，默认关闭。管理面板只显示密钥是否已保存，留空保留原值。云团从 `api.bot.qq.com` 获取令牌和网关地址，主动连接安全 WebSocket，支持新旧官方网关域名。收到 READY 或 RESUMED 后显示已连接；断线时退避并尝试续接。协议见 [腾讯 WebSocket 文档](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/event-emit/websocket.html)。
 
-当前接收 `C2C_MESSAGE_CREATE` 和 `GROUP_AT_MESSAGE_CREATE`，带受支持图源的图片可交给现有视觉链路。回复通过官方 API 被动发送文本。引用、主动推送、频道和出站富媒体留待扩展。账号、人物与会话使用平台和 AppID 命名空间，原始消息 ID 独立保存。平台重复派发按账号与消息 ID 去重。回复只允许使用同会话的真实锚点，群内 5 分钟、私聊 60 分钟，每个锚点最多 5 次，序号先持久化，回执不明时不盲重发。平台与有效期规则见 [腾讯发送消息文档](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)。
+接收 `C2C_MESSAGE_CREATE`、`GROUP_AT_MESSAGE_CREATE`，以及群侧授权后的 `GROUP_MESSAGE_CREATE`。全量事件由官方 `mentions.is_you` 标记判定是否 @ 当前机器人，普通消息按现有群聊策略参与决策和记忆。可识别的图片交给现有视觉链路。回复通过官方 API 被动发送文本，两种场景均在 60 分钟内，默认群聊每条最多 5 次、单聊最多 4 次，暂按标准群额度执行。回复使用原通道、原会话的锚点。不同事件类型重复派发按账号和原始消息 ID 去重，发送序号先持久化，回执不明时保持待确认。引用、主动推送、频道、出站富媒体与群管理留待扩展。详见 [全量群消息](https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_message_create.html) 和 [发送规则](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/overview.html)。
 
-验证覆盖本地模拟网关、真实 SQLite 与模拟回复 HTTP 接口，以及面板两套配置的独立提交。真实账号权限、网络和 QQ 客户端收发仍需在目标环境验收。
+两条通道使用同一个记忆库。管理员可在「平台接入 → QQ 官方机器人 → 跨通道记忆关联」每行填写 `OpenID = OneBot QQ 号`，保存后重启。配置文件等价字段为 `[qq_official.memory_links]`，QQ 号需用字符串。管理员可从记忆人物列表 API `/api/memories/people` 的 `id` 或 `aliases` 中读取 `qq-official_user_<AppID>_<OpenID>` 对应的 OpenID。确认属于同一人的身份合并展示为一张卡，原人物、会话、回执和权限保留各自的标识。人物记忆的读取规则详见[记忆库](../core/memory.md)。
+
+验证覆盖模拟官方网关及重复事件、SQLite 与模拟回复接口、跨通道历史记忆的范围限制，以及面板两套配置的独立提交。真实账号权限、网络和 QQ 客户端收发仍需在目标环境验收。
 
 ## 对应实现（本页负责的主源码）
 
@@ -56,6 +58,7 @@ OneBot 在登录握手后接收 NapCat 的 `notice/notify/poke`。事件账号�
 - [`crates/adapter-qq/tests/reply.rs`](../../../crates/adapter-qq/tests/reply.rs)
 - [`crates/adapter-qq/tests/delayed_delivery.rs`](../../../crates/adapter-qq/tests/delayed_delivery.rs)
 - [`crates/adapter-qq/src/official/tests.rs`](../../../crates/adapter-qq/src/official/tests.rs)
+- [`crates/webui/tests/config_hot.rs`](../../../crates/webui/tests/config_hot.rs)
 - [`webui-frontend/tests/platforms-flow.spec.js`](../../../webui-frontend/tests/platforms-flow.spec.js)
 
 维护规则：修改上列源码的功能行为时，同一 PR 更新本页；新增、删除或迁移模块时同步更新 `catalog.json`。测试入口只代表可追踪的验证位置，不代表本次执行通过。

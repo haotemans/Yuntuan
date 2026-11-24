@@ -1,5 +1,8 @@
 use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+use crate::db::SqliteExt;
 
 pub const ONEBOT_ID: &str = "onebot";
 pub const QQ_OFFICIAL_ID: &str = "qq_official";
@@ -9,12 +12,26 @@ pub fn chat_platform(id: &str) -> Option<&'static str> {
     id.starts_with(QQ_OFFICIAL_PREFIX).then_some(QQ_OFFICIAL_ID)
 }
 
+pub fn valid_openid(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+}
+
+pub fn official_person_id(app_id: &str, openid: &str) -> String {
+    format!("{QQ_OFFICIAL_PREFIX}user_{app_id}_{openid}")
+}
+
 #[derive(Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OfficialQqConfig {
     pub enabled: bool,
     pub app_id: String,
     pub app_secret: String,
+    /// Explicit operator-confirmed OpenID to OneBot QQ number mapping for memory reads only.
+    pub memory_links: BTreeMap<String, String>,
 }
 
 impl std::fmt::Debug for OfficialQqConfig {
@@ -41,6 +58,37 @@ impl OfficialQqConfig {
                 && self.app_secret != "***",
             "请填写有效的 QQ 官方机器人 AppSecret"
         );
+        ensure!(
+            self.memory_links.len() <= 256
+                && (self.memory_links.is_empty() || !self.app_id.is_empty())
+                && self.memory_links.iter().all(|(openid, qq)| {
+                    valid_openid(openid)
+                        && qq.parse::<u64>().is_ok_and(|n| n > 0 && n.to_string() == *qq)
+                }),
+            "QQ 记忆关联需要 AppID，最多 256 项，格式为 OpenID 对应 QQ 号字符串"
+        );
+        Ok(())
+    }
+
+    pub async fn sync_memory_links(&self, conn: &mut sqlx::SqliteConnection) -> Result<()> {
+        let mut tx = conn.begin_immediate().await?;
+        let removed = sqlx::query("DELETE FROM qq_memory_links")
+            .execute(&mut *tx)
+            .await?;
+        if self.validate().is_ok() {
+            for (openid, qq) in &self.memory_links {
+                sqlx::query("INSERT INTO qq_memory_links(official_pid,onebot_pid) VALUES(?,?)")
+                    .bind(official_person_id(&self.app_id, openid))
+                    .bind(format!("p_{qq}"))
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        if removed.rows_affected() > 0 || !self.memory_links.is_empty() {
+            sqlx::query("UPDATE memory_material_epoch SET epoch=epoch+1 WHERE id=1")
+                .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 }

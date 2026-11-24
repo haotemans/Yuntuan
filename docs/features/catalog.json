@@ -43,6 +43,7 @@
         "crates/adapter-qq/tests/reply.rs",
         "crates/adapter-qq/tests/delayed_delivery.rs",
         "crates/adapter-qq/src/official/tests.rs",
+        "crates/webui/tests/config_hot.rs",
         "webui-frontend/tests/platforms-flow.spec.js"
       ],
       "module": "adapter-qq"

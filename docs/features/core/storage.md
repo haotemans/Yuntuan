@@ -31,6 +31,7 @@ V11仅追加增量游标/批次、事实、会话日记、画像版本和相关�
 - [`crates/core/src/db.rs`](../../../crates/core/src/db.rs)
 - [`crates/core/src/db/access.rs`](../../../crates/core/src/db/access.rs)
 - [`crates/core/src/db/platform_v21.sql`](../../../crates/core/src/db/platform_v21.sql)
+- [`crates/core/src/db/qq_memory_v22.sql`](../../../crates/core/src/db/qq_memory_v22.sql)
 - [`crates/core/src/event.rs`](../../../crates/core/src/event.rs)
 
 ## 验证入口
@@ -40,6 +41,8 @@ V11仅追加增量游标/批次、事实、会话日记、画像版本和相关�
 维护规则：修改上列源码的功能行为时，同一 PR 更新本页；新增、删除或迁移模块时同步更新 `catalog.json`。测试入口只代表可追踪的验证位置，不代表本次执行通过。
 
 V21 增加 `platform_messages`，按平台、账号与外部消息 ID 唯一关联消息表内的锚点。回复序号随锚点持久化；现有 OneBot 消息继续使用旧字段。平台收发规则见 [QQ 接入](../adapter-qq/qq.md)。
+
+V22 追加 `qq_memory_links`、只读 `qq_memory_aliases` 及 `qq_memory_directory` 视图。应用启动时从明确配置的 OpenID、QQ 号原子更新关联，并使记忆缓存失效。目录只归并读取时的卡片键，原消息、归纳证据、人物和通道回执原样保留。
 
 V11迁移可幂等重放，已有处理游标和画像版本不被重置或重复插入；数据库版本断言与当前V11保持一致。
 

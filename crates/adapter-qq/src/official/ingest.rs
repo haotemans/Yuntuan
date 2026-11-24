@@ -4,16 +4,8 @@ use serde_json::{json, Value};
 use yuantuan_core::{
     db::{self, SqliteExt},
     event::{Event, MessageReceivedPayload},
-    platform::{QQ_OFFICIAL_ID, QQ_OFFICIAL_PREFIX},
+    platform::{official_person_id, valid_openid, QQ_OFFICIAL_ID, QQ_OFFICIAL_PREFIX},
 };
-
-pub(super) fn valid_openid(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 128
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-}
 
 fn image_url(attachment: &Value) -> Option<String> {
     let kind = attachment["content_type"].as_str()?;
@@ -36,17 +28,21 @@ fn image_url(attachment: &Value) -> Option<String> {
         && parsed.port_or_known_default() == Some(443)
         && parsed
             .host_str()
-            .is_some_and(|host| host.ends_with(".qq.com") || host.ends_with(".qpic.cn")))
+            .is_some_and(|host| {
+                host == "multimedia.nt.qq.com.cn"
+                    || host.ends_with(".qq.com")
+                    || host.ends_with(".qpic.cn")
+            }))
     .then_some(url)
 }
 
-fn group_content(text: &str) -> &str {
+fn group_content<'a>(text: &'a str, is_self: impl FnOnce(&str) -> bool) -> &'a str {
     let text = text.trim();
     if let Some((mention, rest)) = text
         .strip_prefix("<@")
         .and_then(|text| text.split_once('>'))
     {
-        if valid_openid(mention.trim_start_matches('!')) {
+        if is_self(mention.trim_start_matches('!')) {
             return rest.trim_start();
         }
     }
@@ -55,7 +51,7 @@ fn group_content(text: &str) -> &str {
 
 pub(super) async fn accept(adapter: &OfficialQq, event: &str, data: &Value) -> Result<()> {
     let (kind, sender, recipient) = match event {
-        "GROUP_AT_MESSAGE_CREATE" => (
+        "GROUP_AT_MESSAGE_CREATE" | "GROUP_MESSAGE_CREATE" => (
             "group",
             data.pointer("/author/member_openid")
                 .and_then(Value::as_str),
@@ -92,10 +88,41 @@ pub(super) async fn accept(adapter: &OfficialQq, event: &str, data: &Value) -> R
             image_urls.push(url);
         }
     }
+    let account = &adapter.0.cfg.app_id;
+    let named_mentions = data["mentions"].as_array().into_iter().flatten().take(80);
+    let is_self = |m: &Value| m["is_you"].as_bool() == Some(true) && m["scope"] != "all";
+    let at_event = event == "GROUP_AT_MESSAGE_CREATE";
+    let at_me = at_event || (kind == "group" && named_mentions.clone().any(is_self));
+    let mut mentions = Vec::new();
+    if at_me {
+        mentions.push("self".to_owned());
+    }
+    if kind == "group" {
+        for mention in named_mentions.filter(|mention| !is_self(mention)) {
+            let id = if mention["scope"] == "all" {
+                Some("all".to_owned())
+            } else {
+                mention["member_openid"]
+                    .as_str()
+                    .filter(|id| valid_openid(id))
+                    .map(|id| official_person_id(account, id))
+            };
+            if let Some(id) = id.filter(|id| !mentions.contains(id)) {
+                mentions.push(id);
+            }
+        }
+    }
     let text = data["content"].as_str().unwrap_or_default();
-    let at_me = kind == "group";
     let text: String = if at_me {
-        group_content(text)
+        group_content(text, |id| {
+            if let Some(mentions) = data["mentions"].as_array().filter(|m| !m.is_empty()) {
+                mentions.iter().take(80).any(|mention| {
+                    is_self(mention) && mention["member_openid"].as_str() == Some(id)
+                })
+            } else {
+                at_event && valid_openid(id) && id != "all"
+            }
+        })
     } else {
         text.trim()
     }
@@ -105,13 +132,13 @@ pub(super) async fn accept(adapter: &OfficialQq, event: &str, data: &Value) -> R
     if text.is_empty() && image_urls.is_empty() && !at_me {
         return Ok(());
     }
-    let account = &adapter.0.cfg.app_id;
     let chat_id = format!("{QQ_OFFICIAL_PREFIX}{kind}_{account}_{recipient}");
-    let person = format!("{QQ_OFFICIAL_PREFIX}user_{account}_{sender}");
-    let name: String = data
-        .pointer("/author/username")
-        .and_then(Value::as_str)
-        .filter(|name| !name.trim().is_empty())
+    let person = official_person_id(account, sender);
+    let author = &data["author"];
+    let name: String = ["member_nickname", "username"]
+        .into_iter()
+        .filter_map(|key| author[key].as_str())
+        .find(|name| !name.trim().is_empty())
         .unwrap_or("QQ 用户")
         .chars()
         .take(80)
@@ -161,7 +188,7 @@ pub(super) async fn accept(adapter: &OfficialQq, event: &str, data: &Value) -> R
     .bind(&person)
     .bind(&name)
     .bind(&text)
-    .bind(if at_me { json!(["self"]).to_string() } else { "[]".into() })
+    .bind(json!(mentions).to_string())
     .bind(at_me)
     .bind(has_image)
     .bind(ts)
