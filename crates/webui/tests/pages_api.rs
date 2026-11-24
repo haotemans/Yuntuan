@@ -45,7 +45,7 @@ async fn task_runtime_exposes_versioned_requirements_and_preserves_legacy_tasks(
     )
     .await
     .unwrap();
-    c.execute("INSERT INTO task_invocations(id,task_id,revision,tool_name,args,state,started_at) VALUES('i_protocol',?1,2,'probe','{}','started',100)",yuantuan_core::db::params![id]).await.unwrap();
+    c.execute("INSERT INTO task_invocations(id,task_id,revision,tool_name,args,state,started_at) VALUES('i_protocol',?1,2,'moderator.probe','{}','started',100)",yuantuan_core::db::params![id]).await.unwrap();
     c.execute(r#"INSERT INTO tool_invocation_records(invocation_id,task_id,revision,call_id,protocol,definition_json,status,error_json,elapsed_ms) VALUES('i_protocol',?1,2,'original_42','native','{}','unknown','{"kind":"timeout","message":"needs verification"}',120000)"#,yuantuan_core::db::params![id]).await.unwrap();
     let (status, body) = rig.get(&format!("/api/tasks/{id}/runtime")).await;
     assert_eq!(status, 200);
@@ -58,6 +58,25 @@ async fn task_runtime_exposes_versioned_requirements_and_preserves_legacy_tasks(
     assert_eq!(body["brief"]["request"]["msg_id"], anchor);
     assert_eq!(body["brief"]["changes"][0]["text"], "增加来源列");
     assert_eq!(body["brief_versions"][0]["event_kind"], "amend");
+    c.execute_batch("INSERT INTO capability_invocations(name,kind,chat_id,chat_type,actor,anchor_id,state,started_at,finished_at,summary)
+        VALUES('moderator.review','skill','555666','group','p_2001',NULL,'succeeded',90,91,'private-fixture-content'),
+        ('moderator-extra.review','skill','555666','group','p_2001',NULL,'succeeded',94,95,NULL);").await.unwrap();
+    let (status, history) = rig.get("/api/plugins/moderator/history?from_ts=90&until_ts=101").await;
+    assert_eq!(status, 200);
+    let items = history["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["status"], "unknown");
+    assert_eq!(items[0]["anchor_id"], anchor);
+    assert_eq!(items[0]["elapsed_ms"], 120000);
+    assert_eq!(items[1]["kind"], "skill");
+    assert_eq!(items[1]["elapsed_ms"], 1000);
+    assert!(!history.to_string().contains("private-fixture-content"));
+    let (_, earlier) = rig.get("/api/plugins/moderator/history?from_ts=90&until_ts=100").await;
+    assert_eq!(earlier["items"].as_array().unwrap().len(), 1);
+    let (status, _) = rig.get("/api/plugins/moderator/history?from_ts=100&until_ts=90").await;
+    assert_eq!(status, 400);
+    let private_history = rig.http.get(format!("{}/api/plugins/moderator/history", rig.base)).send().await.unwrap();
+    assert_eq!(private_history.status().as_u16(), 401);
     let response = rig
         .http
         .get(format!("{}/api/tasks/{id}/runtime", rig.base))

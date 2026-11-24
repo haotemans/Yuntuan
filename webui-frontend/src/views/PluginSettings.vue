@@ -2,22 +2,20 @@
   <div class="yt-page plugin-settings">
     <div class="topbar">
       <n-button text @click="router.push('/plugins')" aria-label="返回插件列表">〈 返回插件</n-button>
-      <span class="eyebrow">插件配置</span>
     </div>
     <n-alert v-if="loadError" type="error" :bordered="false">{{ loadError }}
       <n-button text @click="load">重试</n-button>
     </n-alert>
     <n-skeleton v-if="loading" height="360px" />
     <template v-else-if="detail">
-      <header class="plugin-heading">
+      <header class="yt-page-head plugin-heading">
         <div>
-          <p class="eyebrow">PLUGIN · {{ detail.name }}</p>
-          <h1>{{ detail.display_name || detail.name }}</h1>
+          <h1 class="yt-page-title">{{ detail.display_name || detail.name }}</h1>
           <p>{{ detail.presentation?.purpose || detail.description }}</p>
         </div>
         <div class="heading-right">
-          <span class="connection-state">{{ detail.error ? '加载异常' : detail.loaded && detail.enabled ? '插件已加载' : '插件未运行' }}</span>
-          <n-switch :value="detail.enabled" :loading="busy" :disabled="busy || authBusy || detail.updating || detail.pending_restart" aria-label="启用插件"
+          <n-tag size="small" :type="stateTag" :bordered="false">{{ detailStatus.label }}</n-tag>
+          <n-switch :value="detail.enabled" :loading="busy || detail.updating" :disabled="busy || authBusy || formDirty || detail.updating || detail.pending_restart" aria-label="启用插件"
             @update:value="toggle" />
         </div>
       </header>
@@ -29,29 +27,34 @@
         <n-tab-pane name="overview" tab="概览">
           <div class="section-grid">
             <section class="panel">
-              <h2>用途</h2>
-              <p>{{ detail.description }}</p>
-              <div class="small-label">命令入口</div>
+              <h2>命令入口</h2>
               <div class="examples"><code v-for="command in commands" :key="command">{{ command }}</code><span v-if="!commands.length">启用插件后显示可用命令</span></div>
-              <div class="small-label">用法示例</div>
-              <div class="examples"><span v-for="example in detail.presentation?.examples || []" :key="example">{{ example }}</span></div>
+              <template v-if="detail.presentation?.examples?.length">
+                <div class="small-label">用法示例</div>
+                <div class="examples"><span v-for="example in detail.presentation.examples" :key="example">{{ example }}</span></div>
+              </template>
             </section>
             <section class="panel">
-              <h2>连接与授权</h2>
-              <p v-if="detail.name === 'tencent-docs'">在「连接配置」打开官方授权页，回填个人 Token，由云团检查并保存连接。</p>
-              <p v-else-if="detail.name === 'quark-drive'">在「连接配置」发起账号授权，云团会准备运行组件和路径；登录后回填授权结果即可。</p>
-              <p v-else-if="detail.name === 'qzone'">使用 NapCat 当前登录的 QQ 账号，无需另填 Cookie。仅云团超级管理员可发布；默认可见范围和每日额度可在连接配置中调整。</p>
-              <p v-else>使用云团现有插件配置、权限和调用状态管理。</p>
-              <a v-if="officialUrl" :href="officialUrl" target="_blank" rel="noopener noreferrer" class="official-link">查看官方授权及安装说明 ↗</a>
-              <n-button v-if="isConnector" @click="activeTab='config'">前往连接账号</n-button>
+              <h2>{{ isConnector ? '连接与授权' : '使用设置' }}</h2>
+              <p v-if="connectorGuide">{{ connectorGuide.help }}</p>
+              <p v-else-if="detail.requires_onebot">通过 OneBot 执行，实际调用受当前 QQ 账号和所在会话的权限约束。</p>
+              <div class="overview-actions">
+                <n-button size="small" secondary @click="activeTab='config'">{{ isConnector ? '前往连接账号' : '前往配置' }}</n-button>
+                <n-button size="small" secondary @click="activeTab='skills'">查看能力与授权</n-button>
+                <a v-if="connectorGuide?.url" :href="connectorGuide.url" target="_blank" rel="noopener noreferrer" class="official-link">查看官方授权及安装说明 ↗</a>
+              </div>
             </section>
           </div>
         </n-tab-pane>
         <n-tab-pane name="config" tab="连接配置">
-          <ConnectorAuth v-if="isConnector" :key="detail.name" :name="detail.name" :disabled="formDirty || busy || detail.updating || detail.pending_restart" @connected="load" @busy="authBusy=$event" />
-          <n-button v-if="isConnector" text @click="showAdvanced=!showAdvanced">{{ showAdvanced ? '收起高级配置' : '高级配置与调用限制' }}</n-button>
+          <ConnectorAuth v-if="isConnector" :key="detail.name" :name="detail.name" :disabled="formDirty || busy || detail.updating || detail.pending_restart" @connected="load(true)" @busy="authBusy=$event" />
+          <div v-if="isConnector" class="yt-toolbar connector-actions">
+            <n-button size="small" secondary :loading="checkingConnection" :disabled="!canCheckConnection" @click="checkConnection">检查连接</n-button>
+            <n-button size="small" text @click="showAdvanced=!showAdvanced">{{ showAdvanced ? '收起高级配置' : '高级配置与调用限制' }}</n-button>
+          </div>
+          <n-alert v-if="connectionResult" :type="connectionFailed ? 'error' : 'success'" :bordered="false" class="connection-result">{{ connectionResult }}</n-alert>
           <section v-show="!isConnector || showAdvanced" class="panel">
-            <div class="config-heading"><div><h2>插件设置</h2><p>密钥不会通过读取接口返回，留空表示保留原值。</p></div><span v-if="formDirty" class="unsaved">未保存</span></div>
+            <div class="config-heading"><h2>插件设置</h2><span v-if="formDirty" class="unsaved">未保存</span></div>
             <n-form label-placement="top" :show-feedback="false" :disabled="busy || authBusy || detail.pending_restart" class="settings-form">
               <n-form-item v-for="field in detail.config_fields || []" :key="field.key" :label="field.label">
                 <n-select v-if="field.kind === 'choice'" v-model:value="configDraft[field.key]" :options="field.options || []" />
@@ -78,15 +81,14 @@
               </n-collapse>
             </n-form>
             <div class="settings-actions">
-              <span aria-live="polite">{{ saved }}</span>
-              <n-button v-if="['tencent-docs','quark-drive'].includes(detail.name)" :loading="checkingConnection" :disabled="busy || checkingConnection || formDirty || !detail.loaded || !detail.enabled || detail.updating" @click="checkConnection">检查连接</n-button>
+              <span aria-live="polite">{{ saveFeedback }}</span>
               <n-button :disabled="busy || authBusy || detail.updating || !formDirty" @click="resetDraft(detail)">撤销修改</n-button>
-              <n-button type="primary" :loading="busy" :disabled="busy || authBusy || detail.updating || !formDirty" @click="saveConfig">保存并应用</n-button>
+              <n-button type="primary" :loading="busy" :disabled="busy || authBusy || detail.updating || detail.pending_restart || !formDirty" @click="saveConfig">保存并应用</n-button>
             </div>
-            <n-alert v-if="connectionResult" :type="connectionFailed ? 'error' : 'success'" :bordered="false" class="connection-result">{{ connectionResult }}</n-alert>
           </section>
         </n-tab-pane>
         <n-tab-pane name="skills" tab="Skills / Tools">
+          <PluginPreflight :key="detail.name" :plugin="detail" :capabilities="capabilities" />
           <section class="panel">
             <h2>已注册能力</h2><p>管理技能与工具的启用状态和适用范围。</p>
             <div v-for="skill in detail.skills || []" :key="skill.name" class="capability">
@@ -145,7 +147,7 @@
         <n-tab-pane name="runtime" tab="运行记录">
           <section class="panel">
             <h2>调用状态</h2>
-            <p>复用云团现有调用统计。以下数据在服务重启后重新计数。</p>
+            <p>本次服务启动后的调用统计。</p>
             <dl class="stats">
               <div><dt>执行中</dt><dd>{{ detail.invocations?.active || 0 }}</dd></div>
               <div><dt>成功</dt><dd>{{ detail.invocations?.succeeded || 0 }}</dd></div>
@@ -153,8 +155,8 @@
               <div><dt>最近耗时</dt><dd>{{ pluginDuration(detail.invocations?.last_duration_ms) }}</dd></div>
             </dl>
             <n-alert v-if="detail.invocations?.last_error" type="warning" :bordered="false">{{ detail.invocations.last_error }}</n-alert>
-            <p v-else>尚无可显示的最新错误。</p>
           </section>
+          <PluginHistory :key="detail.name" :name="detail.name" />
         </n-tab-pane>
       </n-tabs>
       <n-modal :show="!!scopeEditor" preset="card" title="编辑会话范围" class="capability-scope-dialog"
@@ -190,9 +192,11 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
-import { pluginDuration } from '../plugin-ui'
+import { pluginDuration, pluginStatus } from '../plugin-ui'
 import EmptyState from '../components/EmptyState.vue'
 import ConnectorAuth from '../components/ConnectorAuth.vue'
+import PluginHistory from '../components/PluginHistory.vue'
+import PluginPreflight from '../components/PluginPreflight.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -209,9 +213,24 @@ const connectionResult = ref('')
 const connectionFailed = ref(false)
 const authBusy = ref(false)
 const showAdvanced = ref(false)
-const isConnector = computed(() => ['quark-drive','tencent-docs'].includes(detail.value?.name))
+const connectorGuides = {
+  'tencent-docs': {
+    help: '打开官方授权页取得个人 Token，回填后由云团验证并保存连接。',
+    url: 'https://docs.qq.com/open/auth/mcp.html',
+  },
+  'quark-drive': {
+    help: '发起账号授权，在官方页面登录后回填授权结果。',
+    url: 'https://github.com/quark-clouddrive/quarkclouddrive_offical',
+  },
+  qzone: { help: '使用 NapCat 当前登录的 QQ 账号，无需另填 Cookie。发布由超级管理员授权。' },
+}
+const connectorGuide = computed(() => connectorGuides[detail.value?.name])
+const isConnector = computed(() => !!connectorGuide.value?.url)
+const canCheckConnection = computed(() => !!detail.value?.enabled && detail.value.loaded &&
+  !detail.value.error && !detail.value.updating && !detail.value.pending_restart && !detail.value.pending_reload &&
+  !busy.value && !authBusy.value && !checkingConnection.value && !formDirty.value)
 async function checkConnection() {
-  if (checkingConnection.value || !detail.value || formDirty.value) return
+  if (!canCheckConnection.value) return
   const name = detail.value.name
   checkingConnection.value = true
   connectionResult.value = ''
@@ -233,10 +252,17 @@ const watchUrl = ref('')
 const watchBusy = ref(false)
 const watchBusyId = ref(null)
 const watchError = ref('')
-const initialTab = typeof route.query.tab === 'string' ? route.query.tab : ''
-const activeTab = ref(['overview','config','skills','runtime','links'].includes(initialTab) ? initialTab : 'overview')
+const activeTab = computed({
+  get() {
+    const tab = typeof route.query.tab === 'string' ? route.query.tab : ''
+    if (tab === 'links' && route.params.name === 'quark-drive') return tab
+    return ['overview','config','skills','runtime'].includes(tab) ? tab : 'overview'
+  },
+  set(tab) { void router.replace({ query: { ...route.query, tab } }) },
+})
 const detail = computed(() => plugins.value.find(p => p.name === route.params.name))
-const officialUrl = computed(() => ({'tencent-docs':'https://docs.qq.com/open/auth/mcp.html','quark-drive':'https://github.com/quark-clouddrive/quarkclouddrive_offical'}[detail.value?.name] || ''))
+const detailStatus = computed(() => pluginStatus(detail.value || {}, busy.value))
+const stateTag = computed(() => ({ success:'success', error:'error', warning:'warning', working:'info' })[detailStatus.value.tone] || 'default')
 const watchLabels = { pending:'待首次检查', checking:'检查中', accessible:'链接可访问', check_failed:'检查失败（需核实）' }
 const watchStatus = status => watchLabels[status] || '状态未知'
 const fmtTime = stamp => stamp ? new Date(stamp * 1000).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai',hour12:false}) : '尚未安排'
@@ -299,6 +325,13 @@ const scopeText = ref('')
 const baseline = ref('')
 const signature = () => JSON.stringify([configDraft.value,clearSecrets.value,limits.value,scopeMode.value,scopeText.value])
 const formDirty = computed(() => !!baseline.value && signature() !== baseline.value)
+const saveFeedback = computed(() => {
+  if (!saved.value || formDirty.value || !detail.value) return ''
+  if (busy.value || detail.value.updating) return '已提交配置，正在后台应用'
+  if (loadError.value) return '配置已提交，等待重新读取状态'
+  if (detail.value.error || detail.value.pending_reload || detail.value.pending_restart) return '请查看插件当前状态'
+  return '配置已应用'
+})
 const timeoutSeconds = computed({get:()=>limits.value.timeout_ms/1000,set:value=>{limits.value.timeout_ms=value==null?0:Math.round(value*1000)}})
 const outputKiB = computed({get:()=>limits.value.max_output_bytes/1024,set:value=>{limits.value.max_output_bytes=value==null?0:Math.round(value*1024)}})
 function capability(name,kind) { return capabilities.value.find(c => c.name===name && c.kind===kind) }
@@ -364,27 +397,34 @@ function resetDraft(plugin) {
 let disposed=false
 let timer
 let fetching=false
-async function load() {
-  if (disposed || fetching) return
+let loadRevision = 0
+async function load(force = false) {
+  if (disposed || (fetching && force !== true)) return
+  const revision = ++loadRevision
   fetching=true
   const loadedCapabilityRevision = capabilityRevision
   try {
     const [pluginsResponse, capResponse] = await Promise.all([api.get('/plugins/list'),api.get('/capabilities')])
-    if (disposed) return
+    if (disposed || revision !== loadRevision) return
     plugins.value=pluginsResponse.data.plugins || []
     if (loadedCapabilityRevision === capabilityRevision) capabilities.value=capResponse.data.capabilities || []
     if (detail.value && (!baseline.value || !formDirty.value)) resetDraft(detail.value)
     loadError.value=''
     if (activeTab.value === 'links' && !watchBusy.value) await loadWatches()
   } catch(e) {
-    if (!disposed) loadError.value=e.response?.data?.error || '无法获取插件详情'
-  } finally { loading.value=false; fetching=false }
+    if (!disposed && revision === loadRevision) loadError.value=e.response?.data?.error || '无法获取插件详情'
+  } finally {
+    if (revision === loadRevision) { loading.value=false; fetching=false }
+  }
 }
-watch(() => route.params.name, () => {baseline.value='';connectionResult.value='';showAdvanced.value=false;authBusy.value=false;scopeEditor.value=null;void load()})
-watch(activeTab, tab => { router.replace({query:{...route.query,tab}}); if (tab === 'links') void loadWatches() })
+watch(() => route.params.name, () => {
+  baseline.value='';saved.value='';actionError.value='';connectionResult.value='';showAdvanced.value=false;authBusy.value=false;scopeEditor.value=null
+  void load(true)
+})
+watch(activeTab, tab => { if (tab === 'links') void loadWatches() })
 async function saveConfig() {
   const plugin=detail.value
-  if (!plugin || busy.value || authBusy.value || plugin.updating) return
+  if (!plugin || busy.value || authBusy.value || plugin.updating || plugin.pending_restart || !formDirty.value) return
   busy.value=true
   actionError.value=''
   saved.value=''
@@ -399,21 +439,25 @@ async function saveConfig() {
       } else settings.config[field.key]=value
     }
     settings.allowed_chats=scopeMode.value==='all'?null:[...new Set(scopeText.value.split(/[\s,，]+/).filter(Boolean))]
-    const response=await api.post('/plugins/config',{name:plugin.name,settings})
-    saved.value=response.data.applying?'已提交配置，正在后台应用':'配置已应用'
+    await api.post('/plugins/config',{name:plugin.name,settings})
+    if (disposed || route.params.name !== plugin.name) return
+    saved.value='submitted'
+    connectionResult.value=''
     baseline.value=signature()
-    await load()
-  } catch(e) {actionError.value=e.response?.data?.error || '保存配置失败'}
+    await load(true)
+  } catch(e) {
+    if (route.params.name === plugin.name) actionError.value=e.response?.data?.error || '保存配置失败'
+  }
   finally {busy.value=false}
 }
 async function toggle(enabled) {
-  if (!detail.value || busy.value || authBusy.value || detail.value.updating) return
+  if (!detail.value || busy.value || authBusy.value || formDirty.value || detail.value.updating || detail.value.pending_restart) return
   busy.value=true
   actionError.value=''
   try {
     const response=await api.post('/plugins/toggle',{name:detail.value.name,enabled})
     message.info(response.data.applying?'插件状态正在应用':'插件状态已更新')
-    await load()
+    await load(true)
   } catch(e) {actionError.value=e.response?.data?.error || '更改启停状态失败'}
   finally {busy.value=false}
 }
@@ -428,29 +472,27 @@ onUnmounted(() => {disposed=true;clearTimeout(timer)})
 <style scoped>
 .connection-result {white-space:pre-wrap;overflow-wrap:anywhere}
 .plugin-settings {max-width:1180px;margin:0 auto;padding-bottom:58px}
-.topbar {display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}
-.eyebrow {font-size:11px;letter-spacing:.13em;color:var(--yt-ink-3)}
-.plugin-heading {display:flex;align-items:center;justify-content:space-between;gap:28px;margin-bottom:30px}
-.plugin-heading h1 {font:600 34px/1.3 'STSong','SimSun',serif;margin:8px 0;color:var(--yt-ink-1)}
+.topbar {display:flex;align-items:center}
+.plugin-heading h1 {margin:0 0 6px}
 .plugin-heading p {color:var(--yt-ink-3);font-size:13px;margin:0}
 .heading-right {display:flex;align-items:center;gap:14px}
-.connection-state {color:var(--yt-ink-2);font-size:12px;white-space:nowrap}
-.section-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
-.panel {background:var(--yt-surface);border:1px solid var(--yt-card-border);border-radius:16px;padding:24px;min-width:0;margin:18px 0}
+.section-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:16px}
+.panel {background:var(--yt-surface);border:1px solid var(--yt-card-border);border-radius:12px;box-shadow:var(--yt-card-shadow);padding:18px;min-width:0;margin:12px 0}
 .panel h2 {font-size:16px;color:var(--yt-ink-1);margin:0 0 12px}
 .panel p {font-size:13px;line-height:1.8;color:var(--yt-ink-2)}
 .small-label {font-size:12px;color:var(--yt-ink-3);margin:22px 0 8px}
 .examples {display:flex;flex-wrap:wrap;gap:8px}
 .examples code,.examples span {padding:7px 10px;border-radius:8px;background:var(--yt-hover-bg);font-size:12px;overflow-wrap:anywhere}
-.official-link {display:inline-flex;color:var(--yt-primary);margin:12px 0;font-size:13px}
-.connection-tip {margin-top:20px;font-size:12px!important;color:var(--yt-ink-3)!important}
+.overview-actions {display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.official-link {color:var(--yt-primary);font-size:13px}
+.connector-actions {margin:12px 0}
 .settings-form {max-width:750px;margin-top:22px}
 .field-input {width:100%}
 .field-help {display:flex;gap:16px;align-items:center;font-size:11px;color:var(--yt-ink-3);margin-top:6px}
 .config-heading {display:flex;justify-content:space-between;align-items:start}
 .config-heading p {margin:0}
 .unsaved {font-size:12px;color:var(--yt-warning)}
-.settings-actions {display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:30px}
+.settings-actions {display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:10px;margin-top:20px}
 .settings-actions span {color:var(--yt-ink-3);font-size:12px;margin-right:auto}
 .capability {display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 0;border-bottom:1px solid var(--yt-card-border)}
 .capability > div:first-child {min-width:0}

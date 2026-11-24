@@ -126,6 +126,7 @@ pub async fn serve_on(
         .route("/api/backup/restore", post(backup_api::restore))
         .route("/api/backup/file/{name}", get(backup_api::file))
         .route("/api/plugins/list", get(plugins_api::list))
+        .route("/api/plugins/{name}/history", get(plugins_api::history))
         .route("/api/plugins/toggle", post(plugins_api::toggle))
         .route("/api/plugins/config", post(plugins_api::save_config))
         .route(

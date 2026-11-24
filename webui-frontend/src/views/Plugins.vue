@@ -1,13 +1,10 @@
 <template>
   <div class="yt-page plugins-page">
-    <header class="plugins-header">
-      <div>
-        <h1>插件</h1>
-        <p>管理插件、技能和工具。</p>
-      </div>
-      <div class="plugins-summary" aria-live="polite">{{ readyCount }} 个已加载 · {{ plugins.length }} 个已安装</div>
+    <header class="yt-page-head">
+      <h1 class="yt-page-title">插件</h1>
+      <div v-if="!loading && !loadError" class="yt-page-sub" aria-live="polite">{{ readyCount }} 个已加载 · {{ plugins.length }} 个内置插件</div>
     </header>
-    <div class="plugins-toolbar">
+    <div class="yt-toolbar plugins-toolbar">
       <div class="plugin-filters" role="group" aria-label="筛选插件">
         <button v-for="item in filters" :key="item.value" :class="{ selected: filter === item.value }"
           :aria-pressed="filter === item.value" @click="filter = item.value">{{ item.label }} <span>{{ item.count }}</span></button>
@@ -36,6 +33,7 @@ import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import PluginCard from '../components/PluginCard.vue'
 import EmptyState from '../components/EmptyState.vue'
+import { pluginStatus } from '../plugin-ui'
 
 const router = useRouter()
 const messages = useMessage()
@@ -47,14 +45,15 @@ const filter = ref('all')
 const query = ref('')
 const pending = ref({})
 const readyCount = computed(() => plugins.value.filter(p => p.enabled && p.loaded).length)
+const needsAttention = plugin => ['restart', 'attention', 'unavailable'].includes(pluginStatus(plugin).key)
 const filters = computed(() => [
   { value:'all', label:'全部', count:plugins.value.length },
   { value:'enabled', label:'已启用', count:plugins.value.filter(p => p.enabled).length },
-  { value:'attention', label:'待处理', count:plugins.value.filter(p => p.error || p.pending_reload || p.pending_restart).length },
+  { value:'attention', label:'待处理', count:plugins.value.filter(needsAttention).length },
 ])
 const filtered = computed(() => plugins.value.filter(p => {
   if (filter.value === 'enabled' && !p.enabled) return false
-  if (filter.value === 'attention' && !p.error && !p.pending_reload && !p.pending_restart) return false
+  if (filter.value === 'attention' && !needsAttention(p)) return false
   return [p.name, p.display_name, p.description, p.presentation?.purpose].join(' ').toLowerCase().includes(query.value.toLowerCase().trim())
 }))
 let disposed = false
@@ -103,23 +102,19 @@ onUnmounted(() => { disposed = true; clearTimeout(timer) })
 </script>
 
 <style scoped>
-.plugins-page { max-width:1280px; margin:0 auto; padding-bottom:44px; }
-.plugins-header { display:flex; justify-content:space-between; align-items:end; gap:24px; margin-bottom:32px; }
-.plugins-header h1 { font:600 32px/1.35 'STSong','SimSun',serif; color:var(--yt-ink-1); margin:0 0 8px; }
-.plugins-header p { font-size:13px; color:var(--yt-ink-3); margin:0; }
-.plugins-summary { font-size:12px; color:var(--yt-ink-2); white-space:nowrap; }
-.plugins-toolbar { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:24px; }
-.plugin-filters { display:flex; gap:8px; }
+.plugins-page { max-width:1280px; padding-bottom:32px; }
+.yt-page-title { margin: 0; }
+.plugins-toolbar { justify-content:space-between; }
+.plugin-filters { display:flex; flex-wrap:wrap; gap:8px; }
 .plugin-filters button { color:var(--yt-ink-2); background:var(--yt-surface); border:1px solid var(--yt-card-border); padding:8px 13px; border-radius:9px; font:inherit; cursor:pointer; font-size:12px; }
 .plugin-filters button.selected { color:var(--yt-primary); border-color:var(--yt-primary); }
 .plugin-filters span { opacity:.6; margin-left:6px; }
 .plugin-search { max-width:260px; }
 .plugins-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; }
 .plugins-empty { padding:40px 0; }
-.footnote { color:var(--yt-ink-3); margin-top:24px; font-size:12px; }
 @media(max-width:1100px) { .plugins-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:720px) {
-  .plugins-header, .plugins-toolbar {flex-direction:column; align-items:stretch;}
+  .plugins-toolbar {align-items:stretch;}
   .plugin-search {max-width:none;}
   .plugins-grid {grid-template-columns:1fr;}
 }
