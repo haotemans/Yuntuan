@@ -11,8 +11,10 @@
 import { computed } from 'vue'
 
 const ICONS = {
+  terminal: ['M3 4h18v16H3z', 'M7 9l3 3-3 3', 'M13 15h4'],
   dashboard: ['M3 3h8v9H3z', 'M13 3h8v5h-8z', 'M13 10h8v11h-8z', 'M3 14h8v7H3z'],
   trace: ['M3 12h4l3-7 4 14 3-7h4'],
+  schedule: ['M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0', 'M12 6v6l4 2'],
   tasks: ['M9 6h11', 'M9 12h11', 'M9 18h11', 'M4 6h.01', 'M4 12h.01', 'M4 18h.01'],
   memories: ['M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z', 'M8 7h8', 'M8 11h8', 'M8 15h5'],
   relations: ['M6 6a3 3 0 1 0 .01 0', 'M18 6a3 3 0 1 0 .01 0', 'M12 18a3 3 0 1 0 .01 0', 'M8.7 7.5l6.6 0', 'M7.5 8.6l3.3 6.8', 'M16.5 8.6l-3.3 6.8'],

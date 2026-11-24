@@ -158,8 +158,33 @@ pub async fn current(
         }
         return Ok(items);
     }
-    let rows=sqlx::query("WITH visible AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY item_key,source_chat_type,source_chat_id ORDER BY source_end_id DESC,id DESC) AS rn FROM memory_items WHERE owner_type=?1 AND owner_id=?2 AND source_end_id<=?3 AND ((source_chat_id=?4 AND source_chat_type=?5) OR (owner_type='person' AND source_chat_type='group' AND kind IN ('portrait','inference','fact')))) SELECT * FROM visible WHERE rn=1 AND status!='corrected' AND NOT EXISTS(SELECT 1 FROM json_each(visible.evidence) e LEFT JOIN messages m ON m.msg_id=json_extract(e.value,'$.msg_id') WHERE m.msg_id IS NULL OR m.sender_pid='self' OR (visible.owner_type='person' AND m.sender_pid!=visible.owner_id) OR m.chat_id!=visible.source_chat_id OR m.chat_type!=visible.source_chat_type OR instr(COALESCE(m.text,''),json_extract(e.value,'$.quote'))=0) ORDER BY source_end_id DESC LIMIT 24")
-        .bind(owner_type).bind(owner).bind(cutoff).bind(chat).bind(chat_type).fetch_all(&mut *conn).await?;
+    let rows = sqlx::query(
+        "WITH visible AS (
+            SELECT *, ROW_NUMBER() OVER(
+                PARTITION BY owner_id,item_key,source_chat_type,source_chat_id
+                ORDER BY source_end_id DESC,id DESC) AS rn
+            FROM memory_items WHERE owner_type=?1 AND source_end_id<=?3
+              AND owner_id IN (SELECT ?2 UNION ALL SELECT alias FROM qq_memory_aliases WHERE ?1='person' AND person_id=?2)
+              AND (
+                (owner_id=?2 AND source_chat_id=?4 AND source_chat_type=?5)
+                OR (?1='person' AND source_chat_type='group' AND kind IN ('portrait','inference','fact'))
+            )
+        ) SELECT * FROM visible WHERE rn=1 AND status!='corrected' AND NOT EXISTS(
+            SELECT 1 FROM json_each(visible.evidence) e
+            LEFT JOIN messages m ON m.msg_id=json_extract(e.value,'$.msg_id')
+            WHERE m.msg_id IS NULL OR m.sender_pid='self'
+                OR (visible.owner_type='person' AND m.sender_pid!=visible.owner_id)
+                OR m.chat_id!=visible.source_chat_id OR m.chat_type!=visible.source_chat_type
+                OR instr(COALESCE(m.text,''),json_extract(e.value,'$.quote'))=0
+        ) ORDER BY source_end_id DESC,id DESC LIMIT 24",
+    )
+    .bind(owner_type)
+    .bind(owner)
+    .bind(cutoff)
+    .bind(chat)
+    .bind(chat_type)
+    .fetch_all(&mut *conn)
+    .await?;
     let items:Vec<Value>=rows.iter().map(|r| Ok(json!({"id":r.try_get::<i64,_>("id")?,"key":r.try_get::<String,_>("item_key")?,
         "kind":r.try_get::<String,_>("kind")?,"content":r.try_get::<String,_>("content")?,
         "status":r.try_get::<String,_>("status")?,"valid_until":r.try_get::<Option<i64>,_>("valid_until")?,
@@ -190,14 +215,37 @@ pub async fn scoped_profile(
             .map(serde_json::from_value)
             .collect::<std::result::Result<Vec<_>, _>>()?);
     }
-    let mut result = Vec::new();
-    for fact in super::profile(conn, person, cutoff).await? {
-        let visible: bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM messages WHERE msg_id=?1 AND (chat_type='group' OR (chat_type=?2 AND chat_id=?3)))")
-            .bind(fact.source_msg_id).bind(chat_type).bind(chat).fetch_one(&mut *conn).await?;
-        if visible {
-            result.push(fact);
-        }
-    }
+    let result = sqlx::query(
+        "WITH ranked AS (
+            SELECT p.*, m.chat_type, m.chat_id, ROW_NUMBER() OVER(
+                PARTITION BY p.person_id,p.field ORDER BY p.source_msg_id DESC,p.id DESC) AS identity_rank
+            FROM person_profile_versions p JOIN messages m ON m.msg_id=p.source_msg_id
+            WHERE m.sender_pid=p.person_id AND instr(m.text,p.evidence_quote)>0 AND p.source_msg_id<=?2
+              AND p.person_id IN (SELECT ?1 UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1)
+              AND (p.person_id=?1 OR m.chat_type='group')
+        ), visible AS (
+            SELECT *, ROW_NUMBER() OVER(PARTITION BY field ORDER BY source_msg_id DESC,id DESC) AS rn
+            FROM ranked WHERE identity_rank=1 AND (chat_type='group' OR (chat_id=?3 AND chat_type=?4))
+        ) SELECT field,content,source_msg_id,evidence_quote,source_ts FROM visible WHERE rn=1 ORDER BY field LIMIT ?5",
+    )
+    .bind(person)
+    .bind(cutoff)
+    .bind(chat)
+    .bind(chat_type)
+    .bind(super::PROFILE_FIELDS as i64)
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(|row| {
+        Ok(super::ProfileFact {
+            field: row.try_get("field")?,
+            content: row.try_get("content")?,
+            source_msg_id: row.try_get("source_msg_id")?,
+            evidence_quote: row.try_get("evidence_quote")?,
+            updated_at: row.try_get("source_ts")?,
+        })
+    })
+    .collect::<sqlx::Result<Vec<_>>>()?;
     super::material_cache::put(
         key,
         &result

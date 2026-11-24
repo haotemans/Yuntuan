@@ -39,6 +39,16 @@ struct Inner {
     /// 全局重启计数(观测)
     total_restarts: AtomicU64,
     handles: std::sync::Mutex<Vec<(&'static str, tokio::task::AbortHandle)>>,
+    components: std::sync::Mutex<std::collections::BTreeMap<&'static str, ComponentStatus>>,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct ComponentStatus {
+    pub name: &'static str,
+    pub state: &'static str,
+    pub restarts: u32,
+    pub changed_at: i64,
+    pub reason: Option<&'static str>,
 }
 
 impl Supervisor {
@@ -50,17 +60,41 @@ impl Supervisor {
         self.inner.total_restarts.load(Ordering::Relaxed)
     }
 
+    pub fn snapshot(&self) -> Vec<ComponentStatus> {
+        let handles=self.inner.handles.lock().unwrap();
+        self.inner.components.lock().unwrap().values().cloned().map(|mut status| {
+            if !matches!(status.state,"stopped"|"failed") && handles.iter().any(|(name,handle)|*name==status.name && handle.is_finished()) {
+                status.state="stopped";
+            }
+            status
+        }).collect()
+    }
+
+    fn update(&self, name: &'static str, state: &'static str, restarts: u32, reason: Option<&'static str>) {
+        self.inner.components.lock().unwrap().insert(name, ComponentStatus {
+            name, state, restarts, changed_at: crate::window::now(), reason,
+        });
+    }
+
     pub fn stop(&self, name: &str) {
         for (component, handle) in self.inner.handles.lock().unwrap().iter() {
             if *component == name {
                 handle.abort();
+                if let Some(status) = self.inner.components.lock().unwrap().get_mut(component) {
+                    status.state = "stopped";
+                    status.changed_at = crate::window::now();
+                }
             }
         }
     }
 
     pub fn stop_all(&self) {
-        for (_, handle) in self.inner.handles.lock().unwrap().drain(..) {
+        for (name, handle) in self.inner.handles.lock().unwrap().drain(..) {
             handle.abort();
+            if let Some(status) = self.inner.components.lock().unwrap().get_mut(name) {
+                status.state = "stopped";
+                status.changed_at = crate::window::now();
+            }
         }
     }
 
@@ -71,12 +105,14 @@ impl Supervisor {
         F: FnMut() -> JoinHandle<()> + Send + 'static,
     {
         let sup = self.clone();
+        self.update(name, "starting", 0, None);
         let handle = tokio::spawn(async move {
             let mut restarts: u32 = 0;
             let mut backoff = Duration::from_millis(BACKOFF_BASE_MS);
             loop {
                 let handle = factory();
                 let _cancel_child = AbortOnDrop(handle.abort_handle());
+                sup.update(name, "running", restarts, None);
                 info!(component = name, restarts, "supervisor 启动组件");
                 match handle.await {
                     Ok(()) => {
@@ -88,6 +124,7 @@ impl Supervisor {
                         if e.is_panic() {
                             error!(component = name, restarts, error = %e, "组件 panic,退避后拉起");
                         } else if e.is_cancelled() {
+                            sup.update(name, "stopped", restarts, Some("cancelled"));
                             info!(component = name, "组件被取消,不再拉起");
                             return;
                         } else {
@@ -98,12 +135,14 @@ impl Supervisor {
                 restarts += 1;
                 sup.inner.total_restarts.fetch_add(1, Ordering::Relaxed);
                 if restarts > MAX_RESTARTS {
+                    sup.update(name, "failed", restarts, Some("restart_limit"));
                     error!(
                         component = name,
                         restarts, "组件超过最大重启次数,放弃拉起(需人工介入)"
                     );
                     return;
                 }
+                sup.update(name, "backoff", restarts, Some("component_exited"));
                 tokio::time::sleep(backoff).await;
                 backoff = (backoff * 2).min(Duration::from_millis(BACKOFF_CAP_MS));
             }
@@ -153,6 +192,8 @@ mod tests {
         let n = counter.load(Ordering::Relaxed);
         assert!(n >= 2, "supervisor 应至少拉起两次,实际 {}", n);
         assert!(sup.total_restarts() >= 1);
+        assert_eq!(sup.snapshot()[0].name,"panic_test");
+        assert!(sup.snapshot()[0].restarts>=1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

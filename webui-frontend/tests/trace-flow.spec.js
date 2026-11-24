@@ -7,9 +7,9 @@ const uncertain = { ...pending, msg_id: 22, sender_name: '猫猫', text: '上一
 const stopped = { ...pending, state: 'failed', text: '已停止的旧消息', retry_at: 0, attempts: 11, error: '已达到自动判断失败上限' }
 const events = [{ id: 3, kind: 'DecisionMade', ts: 1800000000, payload: { trigger: 'periodic', anchor_msg_id: 18, chat_id: '42', chat_type: 'group', sender_pid: 'p_2001', sender_name: '小冰猪', batch_message_ids: [16, 17, 18], action: 'reply', reason: '接上公开话题', reply_mode: 'social', policy: { suggested_action: 'reply', activity: { level: 'lively', human_messages_2min: 12, active_speakers_2min: 3 }, cooldown_secs: 45, meme_plan: { category: '比心', scope: 'self', requested: false }, notes: [] }, fallback: false } }, { id: 2, kind: 'DecisionMade', ts: 1800000000, payload: { trigger: 'immediate', anchor_msg_id: 15, chat_id: '42', chat_type: 'private', sender_name: '猫猫', action: 'ignore', reason: '模型暂时不可用', fallback: true } }]
 
-async function setup(page, fail = false) {
+async function setup(page, fail = false, trace = null) {
   await page.addInitScript(() => localStorage.setItem('yt_token', 'test-only'))
-  await page.routeWebSocket('**/ws**', () => {})
+  await page.routeWebSocket('**/ws**', socket => { if (trace) trace.socket = socket })
   const writes = []
   await page.route('**/api/**', async route => {
     const req = route.request(), url = new URL(req.url())
@@ -19,7 +19,16 @@ async function setup(page, fail = false) {
       const state = url.searchParams.get('state')
       return route.fulfill({ json: { policy, counts, messages: state === 'failed' ? [stopped] : state === 'uncertain' ? [uncertain] : state === 'pending' ? [pending] : [pending, uncertain] } })
     }
-    if (url.pathname === '/api/events') return route.fulfill({ json: { events } })
+    if (url.pathname === '/api/events') {
+      if (trace) trace.requests.push(url.searchParams)
+      if (trace && url.searchParams.has('from_ts')) {
+        const more = !url.searchParams.has('before_id')
+        const historical = { ...events[0], id: more ? 12 : 11, ts: 1772982000,
+          payload: { ...events[0].payload, reason: more ? '当天较晚的判断' : '当天较早的判断' } }
+        return route.fulfill({ json: { events: [historical], has_more: more } })
+      }
+      return route.fulfill({ json: { events, has_more: false } })
+    }
     if (url.pathname === '/api/config') return route.fulfill({ json: req.method() === 'POST' ? { applied: ['reply'] } : { config: {} } })
     return route.fulfill({ json: {} })
   })
@@ -69,6 +78,38 @@ test('status error does not invent an empty healthy queue', async ({ page }) => 
   await page.goto('/trace')
   await expect(page.getByText('暂时无法读取队列', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '待判断 —' })).toBeVisible()
+})
+
+test.describe('history date', () => {
+  test.use({ timezoneId: 'America/New_York' })
+
+  test('jumps to a local calendar day, keeps its cursor in range, and restores live view', async ({ page }) => {
+    const trace = { requests: [], socket: null }
+    await setup(page, false, trace)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/trace')
+    await expect(page.locator('.tl-item').first()).toContainText('接上公开话题')
+    const date = page.getByLabel('决策日期')
+    await date.fill('2026-03-08')
+    await expect(page.locator('.tl-item').first()).toContainText('当天较晚的判断')
+    const from = Date.parse('2026-03-08T00:00:00-05:00') / 1000
+    const until = Date.parse('2026-03-09T00:00:00-04:00') / 1000
+    expect(Object.fromEntries(trace.requests.at(-1))).toEqual({ limit: '50', from_ts: String(from), until_ts: String(until) })
+    trace.socket.send(JSON.stringify({ kind: 'DecisionMade', action: 'reply', reason: '当天以外的实时记录' }))
+    await page.getByRole('button', { name: '加载更早记录' }).click()
+    await expect(page.locator('.tl-item')).toHaveCount(2)
+    await expect(page.locator('.tl-item').last()).toContainText('当天较早的判断')
+    expect(trace.requests.at(-1).get('before_id')).toBe('12')
+    expect(trace.requests.at(-1).get('from_ts')).toBe(String(from))
+    expect(trace.requests.at(-1).get('until_ts')).toBe(String(until))
+    await expect(page.getByRole('button', { name: '加载更早记录' })).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.getByRole('button', { name: '清除日期' }).click()
+    await expect(page.locator('.tl-item').first()).toContainText('接上公开话题')
+    expect(trace.requests.at(-1).has('from_ts')).toBe(false)
+    trace.socket.send(JSON.stringify({ kind: 'DecisionMade', action: 'reply', reason: '恢复后的实时记录' }))
+    await expect(page.locator('.tl-item').first()).toContainText('恢复后的实时记录')
+  })
 })
 
 test('parameters display server policy without saving read-only fields', async ({ page }) => {

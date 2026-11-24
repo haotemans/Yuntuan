@@ -41,6 +41,11 @@
               :input-props="{'aria-label':platform.secretLabel,autocomplete:'new-password'}"
               :placeholder="forms[platform.id].hasSecret ? '已设置，留空保留原值' : '尚未设置'" />
           </n-form-item>
+          <n-form-item v-if="platform.memoryLinks" label="跨通道记忆关联">
+            <n-input v-model:value="forms[platform.id].memoryLinks" type="textarea"
+              :rows="3" :input-props="{ 'aria-label': '跨通道记忆关联' }"
+              placeholder="每行填写已核实的 OpenID = OneBot QQ 号" />
+          </n-form-item>
         </n-form>
         <a v-if="platform.help" :href="platform.help.url" target="_blank" rel="noopener noreferrer">{{ platform.help.label }} ↗</a>
         <div class="form-actions">
@@ -66,10 +71,11 @@ const platforms = [
     endpoint:{label:'反向 WebSocket', format:address => `ws://${address}/ws`},
   },
   {
-    id:'qq_official', title:'QQ 官方机器人', description:'通过 QQ 开放平台接收私聊和群内 @，支持文本回复。',
+    id:'qq_official', title:'QQ 官方机器人', description:'接收单聊和群消息，支持文字回复。群全量消息由 QQ 群授权。',
     configKey:'qq_official', addressKey:'app_id', secretKey:'app_secret',
     defaultEnabled:false, defaultAddress:'',
     addressLabel:'AppID', addressPlaceholder:'开放平台的机器人 AppID', secretLabel:'AppSecret',
+    memoryLinks:true,
     help:{url:'https://q.qq.com/',label:'QQ 开放平台'},
   },
 ]
@@ -78,7 +84,7 @@ const labels = {online:'已连接', offline:'未连接', disabled:'未启用', c
 const statuses = ref([])
 const status = id => statuses.value.find(item => item.id === id)
 const forms = ref(Object.fromEntries(platforms.map(platform => [platform.id,{
-  enabled:platform.defaultEnabled,address:platform.defaultAddress,secret:'',hasSecret:false,
+  enabled:platform.defaultEnabled,address:platform.defaultAddress,secret:'',hasSecret:false,memoryLinks:'',
 }])))
 const feedback = ref({})
 const savedAddresses = ref(Object.fromEntries(platforms.map(platform => [platform.id,platform.defaultAddress])))
@@ -109,6 +115,7 @@ function readSection(config, id) {
     address: section[platform.addressKey] ?? platform.defaultAddress,
     secret: '',
     hasSecret: !!section[platform.secretKey],
+    memoryLinks: Object.entries(section.memory_links || {}).map(([openid, qq]) => `${openid} = ${qq}`).join('\n'),
   }
   savedAddresses.value[id] = forms.value[id].address
 }
@@ -130,6 +137,20 @@ async function load() {
   }
 }
 
+function parseMemoryLinks(input) {
+  const links = new Map()
+  for (const rawLine of input.split('\n')) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const match = /^([\w-]{1,128})\s*=\s*([1-9]\d{0,19})$/.exec(line)
+    if (!match) throw new Error('每行填写一组 OpenID = OneBot QQ 号')
+    const [, openid, qq] = match
+    if (links.has(openid)) throw new Error('同一个 OpenID 只能关联一次')
+    links.set(openid, qq)
+  }
+  return Object.fromEntries(links)
+}
+
 async function save(id, restart) {
   if (busy.value || !configReady.value) return
   saving.value = id
@@ -137,17 +158,19 @@ async function save(id, restart) {
   const {configKey:key,addressKey,secretKey} = byId[id]
   const form = forms.value[id]
   try {
+    const links = byId[id].memoryLinks ? parseMemoryLinks(form.memoryLinks) : null
     const response = await api.get('/config')
     const config = response.data.config || {}
     const section = {...config[key], enabled:form.enabled, [addressKey]:form.address.trim()}
     if (form.secret) section[secretKey] = form.secret.trim()
+    if (links && (Object.keys(links).length || section.memory_links)) section.memory_links = links
     const {data} = await api.post('/config', {config:{...config,[key]:section}})
     if (form.secret) section[secretKey] = '***'
     readSection({[key]:section}, id)
     const needsRestart = (data.requires_restart || []).some(item => item.includes(key))
     feedback.value[id] = {ok:true,message:needsRestart ? '已保存，重启云团后生效。' : '配置已保存。'}
   } catch (e) {
-    feedback.value[id] = {ok:false,message:e.response?.data?.error || '保存失败'}
+    feedback.value[id] = {ok:false,message:e.response?.data?.error || e.message || '保存失败'}
     return
   } finally { saving.value = '' }
   if (!restart) return

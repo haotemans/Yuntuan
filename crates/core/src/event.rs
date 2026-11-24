@@ -99,9 +99,20 @@ pub struct TaskLifecyclePayload {
 #[serde(tag = "kind")]
 pub enum Event {
     MembershipRequestReceived { request_id: i64, chat_id: String },
+    QqPoked {
+        sender_qq: u64,
+        group_id: Option<u64>,
+    },
     MessageReceived(MessageReceivedPayload),
     MessageSent,
     BubbleSent(BubbleSentPayload),
+    RuntimeFailure {
+        chat_id: String,
+        chat_type: String,
+        source_msg_id: i64,
+        stage: &'static str,
+        code: &'static str,
+    },
     ReplyInterrupted,
     DecisionMade(DecisionMadePayload),
     TaskCreated(TaskLifecyclePayload),
@@ -121,9 +132,11 @@ impl Event {
     pub fn kind(&self) -> &'static str {
         match self {
             Event::MembershipRequestReceived { .. } => "MembershipRequestReceived",
+            Event::QqPoked { .. } => "QqPoked",
             Event::MessageReceived(_) => "MessageReceived",
             Event::MessageSent => "MessageSent",
             Event::BubbleSent(_) => "BubbleSent",
+            Event::RuntimeFailure { .. } => "RuntimeFailure",
             Event::ReplyInterrupted => "ReplyInterrupted",
             Event::DecisionMade(_) => "DecisionMade",
             Event::TaskCreated(_) => "TaskCreated",

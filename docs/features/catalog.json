@@ -3,6 +3,24 @@
   "scope": "Current primary Rust modules and Vue views, not a claim of end-to-end acceptance",
   "features": [
     {
+      "id": "runtime-console",
+      "title": "运行控制台与日志采集",
+      "status": "新增代码入口（真实服务验收待完成）",
+      "doc": "docs/features/runtime/console.md",
+      "source": ["crates/core/src/runtime_logs.rs", "crates/yuantuan/src/logging.rs", "crates/webui/src/logs_api.rs", "webui-frontend/src/views/Logs.vue"],
+      "tests": ["crates/core/src/runtime_logs.rs", "crates/yuantuan/src/logging.rs", "crates/webui/src/logs_api.rs", "webui-frontend/tests/logs-flow.spec.js"],
+      "module": "runtime"
+    },
+    {
+      "id": "diagnostics",
+      "title": "云团运行自检",
+      "status": "新增代码入口（真实 QQ 验收待完成）",
+      "doc": "docs/features/core/diagnostics.md",
+      "source": ["crates/core/src/tools/diagnostics.rs"],
+      "tests": ["crates/core/src/tools/diagnostics.rs", "crates/core/src/bot/dispatch_tests.rs"],
+      "module": "core"
+    },
+    {
       "id": "qq",
       "title": "QQ 接入与消息采集",
       "status": "已接入（需真实 QQ 验收）",
@@ -25,6 +43,7 @@
         "crates/adapter-qq/tests/reply.rs",
         "crates/adapter-qq/tests/delayed_delivery.rs",
         "crates/adapter-qq/src/official/tests.rs",
+        "crates/webui/tests/config_hot.rs",
         "webui-frontend/tests/platforms-flow.spec.js"
       ],
       "module": "adapter-qq"
@@ -42,6 +61,7 @@
       ],
       "tests": [
         "crates/adapter-qq/tests/pipeline.rs",
+        "crates/adapter-qq/tests/reply.rs",
         "crates/core/tests/bot_context.rs",
         "crates/core/src/bot/dispatch_tests.rs",
         "crates/core/src/window/tests.rs"
@@ -485,12 +505,15 @@
       "doc": "docs/features/core/scheduler.md",
       "source": [
         "crates/core/src/scheduler.rs",
-        "crates/webui/src/schedule_api.rs"
+        "crates/webui/src/schedule_api.rs",
+        "webui-frontend/src/views/Schedules.vue"
       ],
       "tests": [
         "crates/core/tests/sqlx_storage.rs",
         "webui-frontend/tests/plugins-flow.spec.js",
-        "crates/core/src/scheduler.rs"
+        "crates/core/src/scheduler.rs",
+        "crates/webui/tests/pages_api.rs",
+        "webui-frontend/tests/tasks-flow.spec.js"
       ],
       "module": "core"
     }

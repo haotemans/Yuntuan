@@ -1491,7 +1491,7 @@ async fn process_bubbles_with_meme(
                 }
             }
             Err(e) => {
-                warn!(chat_id = %job.chat_id, bubble = i, error = %e, "泡发送失败，跳过该泡");
+                warn!(chat_id = %job.chat_id, source_msg_id=job.anchor_msg_id, bubble = i, error = %e, "泡发送失败，跳过该泡");
                 eng.bus.publish(Event::BubbleSent(BubbleSentPayload {
                     chat_id: job.chat_id.clone(),
                     bubble_index: i,
@@ -1541,7 +1541,7 @@ async fn send_bubble_meme(
 
 /// 单泡发送失败 → 退避重试一次（稳定六条③）；echo 10s 超时在适配层
 async fn send_with_retry(eng: &ReplyEngine, job: &ReplyJob, req: &SendRequest) -> Result<Value> {
-    match (eng.send)(req.clone()).await {
+    let result = match (eng.send)(req.clone()).await {
         Ok(v) => Ok(v),
         Err(error) if req.platform_reply.is_some() => Err(error),
         Err(e1) if e1.downcast_ref::<DeliveryUnconfirmed>().is_some() => Err(e1),
@@ -1552,7 +1552,21 @@ async fn send_with_retry(eng: &ReplyEngine, job: &ReplyJob, req: &SendRequest) -
                 .await
                 .map_err(|e2| anyhow!("首试 {e1}；重试 {e2}"))
         }
+    };
+    if let Err(error) = &result {
+        eng.bus.publish(Event::RuntimeFailure {
+            chat_id: job.chat_id.clone(),
+            chat_type: match job.chat_type { ChatType::Group => "group", ChatType::Private => "private" }.into(),
+            source_msg_id: job.anchor_msg_id,
+            stage: "delivery",
+            code: if error.downcast_ref::<DeliveryUnconfirmed>().is_some() {
+                "unknown"
+            } else {
+                crate::tools::diagnostics::error_code(&format!("{error:#}"))
+            },
+        });
     }
+    result
 }
 
 async fn insert_self_message_ex(

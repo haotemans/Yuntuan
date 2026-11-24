@@ -11,6 +11,8 @@ pub struct ReplyFreshness {
     pub cutoff: i64,
     pub expires_at: i64,
     pub social: bool,
+    #[serde(default)]
+    once_per_anchor: bool,
 }
 
 #[cfg(test)]
@@ -31,6 +33,7 @@ mod tests {
             cutoff: 1,
             expires_at: crate::window::now() + 60,
             social: true,
+            once_per_anchor: false,
         }
     }
     fn job(freshness: Option<ReplyFreshness>) -> ReplyJob {
@@ -166,6 +169,16 @@ impl ReplyFreshness {
             cutoff: snapshot.cutoff,
             expires_at: msg.ts.saturating_add(if social { 60 } else { 180 }),
             social,
+            once_per_anchor: false,
+        }
+    }
+
+    pub(crate) fn before_first_answer(msg: &MessageReceivedPayload) -> Self {
+        Self {
+            cutoff: msg.msg_id,
+            expires_at: msg.ts.saturating_add(180),
+            social: false,
+            once_per_anchor: true,
         }
     }
 
@@ -178,6 +191,18 @@ impl ReplyFreshness {
     ) -> Result<Option<&'static str>> {
         if crate::window::now() > self.expires_at {
             return Ok(Some("回复已超过时效，原始消息仍保留"));
+        }
+        if self.once_per_anchor {
+            let mut c = crate::db::connect(path).await?;
+            let answered: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM messages WHERE chat_type=?1 AND chat_id=?2 AND msg_id>?3 AND sender_pid='self' AND reply_anchor_id=?3)",
+            )
+            .bind(kind)
+            .bind(chat)
+            .bind(anchor)
+            .fetch_one(&mut *c)
+            .await?;
+            return Ok(answered.then_some("该条消息已有发送回执，跳过重复回复"));
         }
         if !self.social {
             return Ok(None);

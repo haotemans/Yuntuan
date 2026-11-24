@@ -52,6 +52,9 @@ jobs:
       - name: Decision scheduling browser tests
         working-directory: webui-frontend
         run: npm run test:trace
+      - name: Runtime console browser tests
+        working-directory: webui-frontend
+        run: npx playwright test logs-flow.spec.js
       - name: Plugin tool controls browser tests
         working-directory: webui-frontend
         run: npm run test:plugins

@@ -7,6 +7,7 @@ mod config_api;
 mod connector_auth;
 mod dashboard;
 mod events_api;
+mod logs_api;
 mod llm_test;
 mod mcp_api;
 mod memes;
@@ -36,14 +37,35 @@ pub use state::{AppState, Extras};
 
 /// 组装路由并启动 HTTP 服务（阻塞至进程结束）
 pub async fn serve(db_path: PathBuf, host: &str, port: u16, extras: Extras) -> Result<()> {
+    let addr: SocketAddr = format!("{host}:{port}")
+        .parse()
+        .with_context(|| format!("非法监听地址: {host}:{port}"))?;
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .with_context(|| format!("WebUI 监听失败: {addr}"))?;
+    serve_on(listener, db_path, extras).await
+}
+
+/// 使用已有的 TCP 监听器启动同一套 WebUI 路由。
+pub async fn serve_on(
+    listener: tokio::net::TcpListener,
+    db_path: PathBuf,
+    extras: Extras,
+) -> Result<()> {
     let state = AppState::new(db_path, extras);
 
     // /api/* 中除 login 外一律过 token 校验
     let protected = Router::new()
+        .route("/api/schedules", get(schedule_api::tasks).post(schedule_api::add_task))
+        .route("/api/schedules/{id}", post(schedule_api::toggle_task).delete(schedule_api::remove_task))
+        .route("/api/schedules/{id}/time", post(schedule_api::set_time))
+        .route("/api/schedules/{id}/run", post(schedule_api::run_now))
         .route("/api/overview", get(overview::overview))
         .route("/api/platforms", get(overview::platforms))
         .route("/api/dashboard", get(dashboard::dashboard))
         .route("/api/events", get(events_api::list))
+        .route("/api/logs", get(logs_api::logs))
+        .route("/api/runtime/status", get(logs_api::status))
         .route("/api/decisions/status", get(events_api::decision_status))
         .route("/api/memes", get(memes::list))
         .route("/api/memes/batch", post(memes::batch))
@@ -108,6 +130,7 @@ pub async fn serve(db_path: PathBuf, host: &str, port: u16, extras: Extras) -> R
         .route("/api/backup/restore", post(backup_api::restore))
         .route("/api/backup/file/{name}", get(backup_api::file))
         .route("/api/plugins/list", get(plugins_api::list))
+        .route("/api/plugins/{name}/history", get(plugins_api::history))
         .route("/api/plugins/toggle", post(plugins_api::toggle))
         .route("/api/plugins/config", post(plugins_api::save_config))
         .route(
@@ -154,12 +177,7 @@ pub async fn serve(db_path: PathBuf, host: &str, port: u16, extras: Extras) -> R
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    let addr: SocketAddr = format!("{host}:{port}")
-        .parse()
-        .with_context(|| format!("非法监听地址: {host}:{port}"))?;
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .with_context(|| format!("WebUI 监听失败: {addr}"))?;
+    let addr = listener.local_addr().context("读取 WebUI 监听地址失败")?;
     tracing::info!(%addr, "WebUI 开始监听");
     axum::serve(listener, app)
         .await

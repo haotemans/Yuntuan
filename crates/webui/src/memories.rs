@@ -50,7 +50,7 @@ impl MemQuery {
             || [&self.owner_id, &self.person_id, &self.chat_id]
                 .into_iter()
                 .flatten()
-                .any(|s| s.len() > 160)
+                .any(|s| s.len() > 192)
         {
             return Err(error(StatusCode::BAD_REQUEST, "查询参数无效"));
         }
@@ -71,10 +71,18 @@ fn cte(summary: bool) -> String {
     };
     format!("WITH records AS ({records}), enriched AS (
         SELECT r.*,COALESCE(NULLIF(p.display_name,''),CASE WHEN r.owner_type='self' THEN '云团' END) AS owner_name,
+        COALESCE(d.directory_id,r.owner_id) AS directory_id,
         (SELECT platform_uid FROM identities WHERE person_id=p.person_id AND platform='qq' ORDER BY id DESC LIMIT 1) AS qq,
         COALESCE(r.stored_chat_type,(SELECT chat_type FROM messages WHERE msg_id=r.source_msg_id AND chat_id=r.chat_id)) AS chat_type,
         (SELECT card FROM member_profiles WHERE person_id=r.owner_id AND chat_id=r.chat_id) AS card
-        FROM records r LEFT JOIN persons p ON p.person_id=CASE WHEN r.owner_type='self' THEN 'self' ELSE r.owner_id END)")
+        FROM records r LEFT JOIN qq_memory_directory d ON d.person_id=r.owner_id AND r.owner_type='person'
+        LEFT JOIN persons p ON p.person_id=CASE WHEN r.owner_type='self' THEN 'self' ELSE COALESCE(d.directory_id,r.owner_id) END)")
+}
+
+fn person_members(builder: &mut QueryBuilder<'static, Sqlite>, person: &str) {
+    builder.push("(SELECT ").push_bind(person.to_owned())
+        .push(" UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=")
+        .push_bind(person.to_owned()).push(")");
 }
 
 fn filtered(summary: bool, q: &MemQuery, count: bool) -> QueryBuilder<'static, Sqlite> {
@@ -96,9 +104,9 @@ fn filtered(summary: bool, q: &MemQuery, count: bool) -> QueryBuilder<'static, S
         }
     }
     if let Some(id) = &q.person_id {
-        b.push(" AND ((owner_type='person' AND owner_id=")
-            .push_bind(id.clone())
-            .push(") OR (owner_type='self' AND ")
+        b.push(" AND ((owner_type='person' AND owner_id IN ");
+        person_members(&mut b, id);
+        b.push(") OR (owner_type='self' AND ")
             .push_bind(id.clone())
             .push("='self'))");
     }
@@ -109,7 +117,8 @@ fn filtered(summary: bool, q: &MemQuery, count: bool) -> QueryBuilder<'static, S
         .filter(|s| !s.is_empty())
     {
         b.push(" AND (instr(lower(content),").push_bind(term.clone()).push(")>0 OR instr(lower(COALESCE(owner_name,'')),")
-            .push_bind(term.clone()).push(")>0 OR instr(owner_id,").push_bind(term.clone()).push(")>0 OR instr(COALESCE(qq,''),")
+            .push_bind(term.clone()).push(")>0 OR EXISTS(SELECT 1 FROM persons original WHERE original.person_id=e.owner_id AND instr(lower(COALESCE(original.display_name,'')),")
+            .push_bind(term.clone()).push(")>0) OR instr(lower(owner_id),").push_bind(term.clone()).push(")>0 OR instr(COALESCE(qq,''),")
             .push_bind(term.clone()).push(")>0 OR EXISTS(SELECT 1 FROM member_profiles mp WHERE mp.person_id=e.owner_id AND instr(lower(COALESCE(mp.card,'')),")
             .push_bind(term).push(")>0))");
     }
@@ -174,10 +183,11 @@ async fn list(state: AppState, q: MemQuery, summary: bool) -> ApiResult {
     let rows = b.build().fetch_all(&mut *tx).await.map_err(db_error)?;
     let items=rows.iter().map(|r| -> sqlx::Result<Value> {
         let owner_id:String=r.try_get("owner_id")?;
+        let directory_id:String=r.try_get("directory_id")?;
         let owner_type:String=r.try_get("owner_type")?;
         let content:String=r.try_get("content")?;
         let mut item=json!({"id":r.try_get::<i64,_>("id")?,"owner_type":owner_type,"owner_id":owner_id,
-            "owner":identity(&owner_id,r.try_get("owner_name")?,r.try_get("qq")?,&owner_type),
+            "owner":identity(&directory_id,r.try_get("owner_name")?,r.try_get("qq")?,&owner_type),
             "content":content,"source":r.try_get::<String,_>("source")?,"created_at":r.try_get::<i64,_>("created_at")?,
             "updated_at":r.try_get::<i64,_>("updated_at")?,"conversation":conversation(r.try_get("chat_id")?,r.try_get("chat_type")?),
             "source_msg_id":r.try_get::<Option<i64>,_>("source_msg_id")?,"source_end_msg_id":r.try_get::<Option<i64>,_>("source_end_msg_id")?,
@@ -200,14 +210,10 @@ pub async fn summaries(State(state): State<AppState>, Query(q): Query<MemQuery>)
 }
 
 fn people_filtered(q: &MemQuery, count: bool) -> QueryBuilder<'static, Sqlite> {
-    let projection = if count {
-        "COUNT(*)"
-    } else {
-        "p.person_id,p.display_name,p.last_seen,
-        (SELECT platform_uid FROM identities WHERE person_id=p.person_id AND platform='qq' ORDER BY id DESC LIMIT 1) AS qq"
-    };
-    let mut b =
-        QueryBuilder::<Sqlite>::new(format!("SELECT {projection} FROM persons p WHERE 1=1"));
+    let mut b = QueryBuilder::<Sqlite>::new(
+        "WITH matched AS (SELECT d.directory_id,MAX(p.last_seen) AS last_seen FROM persons p
+         JOIN qq_memory_directory d ON d.person_id=p.person_id WHERE 1=1",
+    );
     if let Some(chat) = &q.chat_id {
         b.push(
             " AND EXISTS(SELECT 1 FROM messages m WHERE m.sender_pid=p.person_id AND m.chat_id=",
@@ -224,13 +230,26 @@ fn people_filtered(q: &MemQuery, count: bool) -> QueryBuilder<'static, Sqlite> {
         .map(|s| s.trim().to_lowercase())
         .filter(|s| !s.is_empty())
     {
-        b.push(" AND (instr(lower(COALESCE(p.display_name,'')),").push_bind(term.clone()).push(")>0 OR instr(p.person_id,").push_bind(term.clone())
-            .push(")>0 OR EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.person_id AND instr(i.platform_uid,").push_bind(term.clone()).push(")>0)")
+        b.push(" AND (instr(lower(COALESCE(p.display_name,'')),").push_bind(term.clone()).push(")>0 OR instr(lower(p.person_id),").push_bind(term.clone())
+            .push(")>0 OR EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.person_id AND instr(lower(i.platform_uid),").push_bind(term.clone()).push(")>0)")
             .push(" OR EXISTS(SELECT 1 FROM member_profiles mp WHERE mp.person_id=p.person_id AND instr(lower(COALESCE(mp.card,'')),").push_bind(term.clone()).push(")>0)")
             .push(" OR EXISTS(SELECT 1 FROM long_memories lm WHERE lm.owner_type='person' AND lm.owner_id=p.person_id AND instr(lower(COALESCE(lm.content,'')),").push_bind(term.clone()).push(")>0)")
             .push(" OR EXISTS(SELECT 1 FROM summaries s WHERE s.owner_type='person' AND s.owner_id=p.person_id AND instr(lower(COALESCE(s.summary,'')),").push_bind(term.clone()).push(")>0)")
             .push(" OR EXISTS(SELECT 1 FROM person_profile_facts pf WHERE pf.person_id=p.person_id AND instr(lower(pf.content),").push_bind(term.clone()).push(")>0)")
             .push(" OR EXISTS(SELECT 1 FROM memory_items mi WHERE mi.owner_type='person' AND mi.owner_id=p.person_id AND instr(lower(mi.content),").push_bind(term).push(")>0))");
+    }
+    b.push(" GROUP BY d.directory_id) ");
+    if count {
+        b.push("SELECT COUNT(*) FROM matched");
+    } else {
+        b.push("SELECT p.person_id,COALESCE(NULLIF(trim(p.display_name),''),(
+            SELECT peer.display_name FROM qq_memory_directory d JOIN persons peer ON peer.person_id=d.person_id
+            WHERE d.directory_id=p.person_id AND trim(peer.display_name)<>''
+            ORDER BY peer.last_seen DESC,peer.person_id LIMIT 1)) AS display_name,matched.last_seen,
+            (SELECT platform_uid FROM identities WHERE person_id=p.person_id AND platform='qq' ORDER BY id DESC LIMIT 1) AS qq,
+            (SELECT json_group_array(person_id) FROM qq_memory_directory
+             WHERE directory_id=p.person_id AND person_id<>p.person_id) AS aliases
+            FROM matched JOIN persons p ON p.person_id=matched.directory_id");
     }
     b
 }
@@ -249,7 +268,7 @@ pub async fn people(State(state): State<AppState>, Query(q): Query<MemQuery>) ->
     let size = q.page_size.unwrap_or(24);
     let page = q.page.unwrap_or(1).min((total - 1).max(0) / size + 1);
     let mut b = people_filtered(&q, false);
-    b.push(" ORDER BY p.last_seen DESC,p.person_id LIMIT ")
+    b.push(" ORDER BY matched.last_seen DESC,p.person_id LIMIT ")
         .push_bind(size)
         .push(" OFFSET ")
         .push_bind((page - 1) * size);
@@ -259,17 +278,23 @@ pub async fn people(State(state): State<AppState>, Query(q): Query<MemQuery>) ->
         .map(|r| r.try_get::<String, _>("person_id"))
         .collect::<sqlx::Result<Vec<_>>>()
         .map_err(db_error)?;
-    let mut portraits = yuantuan_core::memory::profiles(&mut tx, &ids, i64::MAX)
+    let mut portraits = yuantuan_core::memory::directory_profiles(&mut tx, &ids, i64::MAX)
         .await
         .map_err(db_error)?;
-    let previews=sqlx::query("WITH latest AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY owner_id,item_key,source_chat_type,source_chat_id ORDER BY source_end_id DESC,id DESC) AS rn FROM memory_items WHERE owner_type='person' AND owner_id IN (SELECT value FROM json_each(?1))), ranked AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY owner_id ORDER BY CASE WHEN item_key='summary' THEN 0 ELSE 1 END,source_end_id DESC,id DESC) AS person_rank FROM latest WHERE rn=1 AND status IN ('current','uncertain') AND (valid_until IS NULL OR valid_until>unixepoch())) SELECT owner_id,substr(content,1,300) AS content,recorded_at FROM ranked WHERE person_rank=1")
+    let previews=sqlx::query("WITH latest AS (SELECT i.*,d.directory_id,
+        ROW_NUMBER() OVER(PARTITION BY i.owner_id,item_key,source_chat_type,source_chat_id ORDER BY source_end_id DESC,id DESC) AS rn
+        FROM memory_items i JOIN qq_memory_directory d ON d.person_id=i.owner_id
+        WHERE owner_type='person' AND d.directory_id IN (SELECT value FROM json_each(?1))),
+        ranked AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY directory_id ORDER BY CASE WHEN item_key='summary' THEN 0 ELSE 1 END,source_end_id DESC,id DESC) AS person_rank
+        FROM latest WHERE rn=1 AND status IN ('current','uncertain') AND (valid_until IS NULL OR valid_until>unixepoch()))
+        SELECT directory_id,substr(content,1,300) AS content,recorded_at FROM ranked WHERE person_rank=1")
         .bind(serde_json::to_string(&ids).map_err(db_error)?).fetch_all(&mut *tx).await.map_err(db_error)?;
     let mut preview_by_person = std::collections::BTreeMap::new();
     for row in previews {
         let content: String = row.try_get("content").map_err(db_error)?;
         if !yuantuan_core::consolidation::is_sensitive(&content) {
             preview_by_person.insert(
-                row.try_get::<String, _>("owner_id").map_err(db_error)?,
+                row.try_get::<String, _>("directory_id").map_err(db_error)?,
                 (
                     content,
                     row.try_get::<i64, _>("recorded_at").map_err(db_error)?,
@@ -283,6 +308,8 @@ pub async fn people(State(state): State<AppState>, Query(q): Query<MemQuery>) ->
         .map(|r| -> sqlx::Result<Value> {
             let id: String = r.try_get("person_id")?;
             let mut person = identity(&id, r.try_get("display_name")?, r.try_get("qq")?, "person");
+            let aliases: String = r.try_get("aliases")?;
+            person["aliases"] = serde_json::from_str(&aliases).map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
             let facts = portraits.remove(&id).unwrap_or_default();
             let preview = preview_by_person.remove(&id);
             person["portrait_preview"] = json!(preview.as_ref().map(|(text, _)| text));
@@ -307,7 +334,8 @@ pub async fn conversations(State(state): State<AppState>, Query(q): Query<MemQue
     let mut conn = state.open_db().await.map_err(db_error)?;
     let mut b=QueryBuilder::<Sqlite>::new("SELECT chat_id,chat_type,MAX(ts) AS last_seen FROM messages WHERE chat_type IN ('group','private')");
     if let Some(person) = q.person_id {
-        b.push(" AND sender_pid=").push_bind(person);
+        b.push(" AND sender_pid IN ");
+        person_members(&mut b, &person);
     }
     b.push(" GROUP BY chat_id,chat_type ORDER BY last_seen DESC,chat_id LIMIT 200");
     let rows = b.build().fetch_all(&mut *conn).await.map_err(db_error)?;
@@ -402,10 +430,23 @@ pub async fn refresh_profile(
     .fetch_one(&mut *conn)
     .await
     .map_err(|_| db_error("人物读取失败"))?;
-    drop(conn);
     if !exists {
         return Err((StatusCode::NOT_FOUND, Json(json!({"error":"人物不存在"}))));
     }
+    let subject: String = sqlx::query_scalar(
+        "SELECT COALESCE((SELECT m.sender_pid FROM messages m
+          LEFT JOIN memory_progress p ON p.owner_id=m.sender_pid AND p.stage='portrait' AND p.chat_type=''
+          LEFT JOIN portrait_coverage c ON c.person_id=m.sender_pid AND c.msg_id=m.msg_id
+          WHERE m.sender_pid IN (SELECT ?1 UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1)
+            AND m.chat_type IN ('group','private') AND m.sender_bot=0 AND length(trim(COALESCE(m.text,'')))>=4
+            AND m.msg_id>COALESCE(p.cursor,0) AND c.msg_id IS NULL
+          ORDER BY m.msg_id DESC LIMIT 1),?1)",
+    )
+    .bind(&id)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(|_| db_error("人物读取失败"))?;
+    drop(conn);
     let gateway = state
         .extras
         .llm_slot
@@ -419,7 +460,7 @@ pub async fn refresh_profile(
                 Json(json!({"error":"未配置 Decision 模型"})),
             )
         })?;
-    let result = yuantuan_core::memory::refresh::person(&state.db_path, &gateway, &id, true)
+    let result = yuantuan_core::memory::refresh::person(&state.db_path, &gateway, &subject, true)
         .await
         .map_err(|e| {
             tracing::warn!(error=%e,"人物画像整理失败");

@@ -45,7 +45,7 @@ async fn task_runtime_exposes_versioned_requirements_and_preserves_legacy_tasks(
     )
     .await
     .unwrap();
-    c.execute("INSERT INTO task_invocations(id,task_id,revision,tool_name,args,state,started_at) VALUES('i_protocol',?1,2,'probe','{}','started',100)",yuantuan_core::db::params![id]).await.unwrap();
+    c.execute("INSERT INTO task_invocations(id,task_id,revision,tool_name,args,state,started_at) VALUES('i_protocol',?1,2,'moderator.probe','{}','started',100)",yuantuan_core::db::params![id]).await.unwrap();
     c.execute(r#"INSERT INTO tool_invocation_records(invocation_id,task_id,revision,call_id,protocol,definition_json,status,error_json,elapsed_ms) VALUES('i_protocol',?1,2,'original_42','native','{}','unknown','{"kind":"timeout","message":"needs verification"}',120000)"#,yuantuan_core::db::params![id]).await.unwrap();
     let (status, body) = rig.get(&format!("/api/tasks/{id}/runtime")).await;
     assert_eq!(status, 200);
@@ -58,6 +58,25 @@ async fn task_runtime_exposes_versioned_requirements_and_preserves_legacy_tasks(
     assert_eq!(body["brief"]["request"]["msg_id"], anchor);
     assert_eq!(body["brief"]["changes"][0]["text"], "增加来源列");
     assert_eq!(body["brief_versions"][0]["event_kind"], "amend");
+    c.execute_batch("INSERT INTO capability_invocations(name,kind,chat_id,chat_type,actor,anchor_id,state,started_at,finished_at,summary)
+        VALUES('moderator.review','skill','555666','group','p_2001',NULL,'succeeded',90,91,'private-fixture-content'),
+        ('moderator-extra.review','skill','555666','group','p_2001',NULL,'succeeded',94,95,NULL);").await.unwrap();
+    let (status, history) = rig.get("/api/plugins/moderator/history?from_ts=90&until_ts=101").await;
+    assert_eq!(status, 200);
+    let items = history["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["status"], "unknown");
+    assert_eq!(items[0]["anchor_id"], anchor);
+    assert_eq!(items[0]["elapsed_ms"], 120000);
+    assert_eq!(items[1]["kind"], "skill");
+    assert_eq!(items[1]["elapsed_ms"], 1000);
+    assert!(!history.to_string().contains("private-fixture-content"));
+    let (_, earlier) = rig.get("/api/plugins/moderator/history?from_ts=90&until_ts=100").await;
+    assert_eq!(earlier["items"].as_array().unwrap().len(), 1);
+    let (status, _) = rig.get("/api/plugins/moderator/history?from_ts=100&until_ts=90").await;
+    assert_eq!(status, 400);
+    let private_history = rig.http.get(format!("{}/api/plugins/moderator/history", rig.base)).send().await.unwrap();
+    assert_eq!(private_history.status().as_u16(), 401);
     let response = rig
         .http
         .get(format!("{}/api/tasks/{id}/runtime", rig.base))
@@ -655,6 +674,30 @@ async fn pages_api_full_pass() {
     let (_, e3) = rig.get("/api/events?before_id=1").await;
     assert_eq!(e3["events"].as_array().unwrap().len(), 0);
 
+    let mut conn = db::connect(&rig.db_path).await.unwrap();
+    conn.execute_batch(
+        r#"INSERT INTO events(id,kind,payload,ts) VALUES
+           (100,'DecisionMade','{"chat_id":"42"}',86399),
+           (101,'DecisionMade','{"chat_id":"42"}',86400),
+           (102,'BubbleSent','{"chat_id":"42"}',86401),
+           (103,'DecisionMade','{"chat_id":"other"}',86402),
+           (104,'DecisionMade','{"chat_id":"42"}',172799),
+           (105,'DecisionMade','{"chat_id":"42"}',172800);"#,
+    )
+    .await
+    .unwrap();
+    drop(conn);
+    let day = "/api/events?kind=DecisionMade&chat_id=42&from_ts=86400&until_ts=172800&limit=1";
+    let (status, page) = rig.get(day).await;
+    assert_eq!(status, 200);
+    assert_eq!(page["events"][0]["id"], 104);
+    assert_eq!(page["has_more"], true);
+    let (_, page) = rig.get(&format!("{day}&before_id=104")).await;
+    assert_eq!(page["events"][0]["id"], 101);
+    assert_eq!(page["has_more"], false);
+    let (status, _) = rig.get("/api/events?from_ts=86400&until_ts=86400").await;
+    assert_eq!(status, 400);
+
     // 记忆与摘要
     let (_, m) = rig
         .get("/api/memories?owner_type=person&owner_id=p_2001")
@@ -969,7 +1012,7 @@ async fn connector_probe_uses_authenticated_readonly_registry_and_persistent_swi
             }
         }
         async fn call(&self, ctx: &ToolCtx, _: Value) -> anyhow::Result<ToolOutput> {
-            assert_eq!(ctx.chat_id, "plugin-check");
+            assert!(matches!(ctx.chat_id.as_str(), "plugin-check" | "scheduled"));
             Ok(ToolOutput {
                 summary: "实际 fixture 工具目录".into(),
                 data: json!({}),
@@ -1010,6 +1053,27 @@ async fn connector_probe_uses_authenticated_readonly_registry_and_persistent_swi
         .await;
     assert_eq!(status, 200);
     assert_eq!(data["summary"], "实际 fixture 工具目录");
+    let no_session = rig.http.get(format!("{}/api/schedules", rig.base)).send().await.unwrap();
+    assert_eq!(no_session.status().as_u16(), 401);
+    let body = json!({"tool_name":"tencent-docs.catalog","daily_time":"08:35","title":"每日文档检查"});
+    let (status, registered) = rig.post("/api/schedules", body.clone()).await;
+    assert_eq!(status, 200);
+    let id = registered["id"].as_i64().unwrap();
+    assert_eq!(rig.post("/api/schedules", body).await.0, 400);
+    let base = format!("/api/schedules/{id}");
+    assert_eq!(rig.post(&format!("{base}/time"), json!({"daily_time":"24:00"})).await.0, 400);
+    assert_eq!(rig.post(&format!("{base}/time"), json!({"daily_time":"08:45"})).await.0, 200);
+    assert_eq!(rig.post(&format!("{base}/run"), json!({})).await.0, 200);
+    let (_, schedules) = rig.get("/api/schedules").await;
+    assert_eq!(schedules["tasks"][0]["local_minute"], 45);
+    assert_eq!(schedules["tasks"][0]["last_summary"], "实际 fixture 工具目录");
+    let (_, watches) = rig.get("/api/plugins/quark/watches").await;
+    assert!(watches["watches"].as_array().unwrap().is_empty());
+    assert_eq!(rig.post(&format!("/api/plugins/quark/watches/{id}/check"), json!({})).await.0, 400);
+    assert_eq!(rig.post(&base, json!({"enabled":false})).await.0, 200);
+    assert_eq!(rig.post(&format!("{base}/run"), json!({})).await.0, 400);
+    let removed = rig.http.delete(format!("{}{base}", rig.base)).bearer_auth(&rig.token).send().await.unwrap();
+    assert_eq!(removed.status().as_u16(), 200);
     let tool = rig.tools.get("tencent-docs.catalog").unwrap();
     yuantuan_core::capabilities::register(
         &rig.db_path,

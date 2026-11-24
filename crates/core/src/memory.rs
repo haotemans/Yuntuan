@@ -116,23 +116,47 @@ pub async fn profiles(
     people: &[String],
     cutoff: i64,
 ) -> Result<BTreeMap<String, Vec<ProfileFact>>> {
+    profiles_for(conn, people, cutoff, false).await
+}
+
+/// The authenticated memory directory combines profiles without changing source identities.
+pub async fn directory_profiles(
+    conn: &mut sqlx::SqliteConnection,
+    people: &[String],
+    cutoff: i64,
+) -> Result<BTreeMap<String, Vec<ProfileFact>>> {
+    profiles_for(conn, people, cutoff, true).await
+}
+
+async fn profiles_for(
+    conn: &mut sqlx::SqliteConnection,
+    people: &[String],
+    cutoff: i64,
+    directory: bool,
+) -> Result<BTreeMap<String, Vec<ProfileFact>>> {
     ensure!(people.len() <= 96, "每次最多读取96个人物画像");
     let mut result: BTreeMap<String, Vec<ProfileFact>> = BTreeMap::new();
     if people.is_empty() {
         return Ok(result);
     }
-    let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
-        "WITH history AS (SELECT p.*,ROW_NUMBER() OVER(PARTITION BY p.person_id,p.field ORDER BY p.source_msg_id DESC,p.id DESC) AS rank
-         FROM person_profile_versions p JOIN messages m ON m.msg_id=p.source_msg_id
-         WHERE m.sender_pid=p.person_id AND instr(m.text,p.evidence_quote)>0 AND p.source_msg_id<=",
-    );
-    query.push_bind(cutoff).push(" AND p.person_id IN (");
+    let (directory_id, directory_join) = if directory {
+        ("d.directory_id", "JOIN qq_memory_directory d ON d.person_id=p.person_id")
+    } else {
+        ("p.person_id", "")
+    };
+    let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(format!(
+        "WITH history AS (SELECT p.*, {directory_id} AS subject,
+         ROW_NUMBER() OVER(PARTITION BY {directory_id},p.field ORDER BY p.source_msg_id DESC,p.id DESC) AS rank
+         FROM person_profile_versions p JOIN messages m ON m.msg_id=p.source_msg_id {directory_join}
+         WHERE m.sender_pid=p.person_id AND instr(m.text,p.evidence_quote)>0 AND p.source_msg_id<="
+    ));
+    query.push_bind(cutoff).push(format!(" AND {directory_id} IN ("));
     let mut ids = query.separated(",");
     for id in people {
         ids.push_bind(id);
     }
     ids.push_unseparated(")");
-    query.push(") SELECT person_id,field,content,source_msg_id,evidence_quote,source_ts AS updated_at FROM history WHERE rank=1 ORDER BY person_id,field");
+    query.push(") SELECT subject AS person_id,field,content,source_msg_id,evidence_quote,source_ts AS updated_at FROM history WHERE rank=1 ORDER BY subject,field");
     for row in query.build().fetch_all(&mut *conn).await? {
         let facts = result.entry(row.try_get("person_id")?).or_default();
         if facts.len() < PROFILE_FIELDS {
@@ -241,9 +265,19 @@ pub async fn recall_scoped(
         "SELECT id,owner_type,owner_id,substr(content,1,800),source,updated_at,
                 source_chat_id,source_msg_id,source_end_msg_id,length(content)>800,
                 (SELECT evidence_quote FROM memory_facts f WHERE f.owner_type=long_memories.owner_type AND f.owner_id=long_memories.owner_id AND f.content=long_memories.content AND f.source_msg_id=long_memories.source_msg_id LIMIT 1)
-         FROM long_memories WHERE ((owner_type='person' AND owner_id=?1) OR (owner_type='chat' AND owner_id=?2))
-         AND (owner_type<>'chat' OR ?4='' OR NOT EXISTS(SELECT 1 FROM messages s WHERE s.msg_id=long_memories.source_msg_id AND s.chat_id=COALESCE(long_memories.source_chat_id,long_memories.owner_id) AND s.chat_type<>?4))
-         AND (?4='' OR EXISTS(SELECT 1 FROM messages src WHERE src.msg_id=long_memories.source_msg_id AND src.chat_id=?2 AND src.chat_type=?4))
+         FROM long_memories WHERE (
+            (((owner_type='person' AND owner_id=?1) OR (owner_type='chat' AND owner_id=?2))
+             AND (owner_type<>'chat' OR ?4='' OR NOT EXISTS(SELECT 1 FROM messages s WHERE s.msg_id=long_memories.source_msg_id AND s.chat_id=COALESCE(long_memories.source_chat_id,long_memories.owner_id) AND s.chat_type<>?4))
+             AND (?4='' OR EXISTS(SELECT 1 FROM messages src WHERE src.msg_id=long_memories.source_msg_id AND src.chat_id=?2 AND src.chat_type=?4)))
+            OR (owner_type='person' AND source_end_msg_id IS NULL
+                AND owner_id IN (SELECT alias FROM qq_memory_aliases WHERE person_id=?1)
+                AND EXISTS(SELECT 1 FROM memory_facts f JOIN messages m ON m.msg_id=f.source_msg_id
+                    WHERE f.owner_type='person' AND f.owner_id=long_memories.owner_id
+                      AND f.content=long_memories.content AND f.source_msg_id=long_memories.source_msg_id
+                      AND f.source_chat_id=long_memories.source_chat_id AND f.source_chat_type='group'
+                      AND m.sender_pid=f.owner_id AND m.chat_id=f.source_chat_id AND m.chat_type='group'
+                      AND instr(m.text,f.evidence_quote)>0))
+         )
          AND (source_msg_id IS NULL OR source_msg_id<=?3) AND (source_end_msg_id IS NULL OR source_end_msg_id<=?3)
          AND ({conditions}) ORDER BY updated_at DESC,id DESC LIMIT 128"
     );

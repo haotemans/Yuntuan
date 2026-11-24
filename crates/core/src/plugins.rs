@@ -747,6 +747,8 @@ impl PluginManager {
                 "name":e.meta.id, "display_name":e.meta.name, "version":e.meta.version,
                 "description":e.meta.description, "presentation":e.plugin.presentation(),
                 "api_version":e.meta.api_version, "enabled":desired.enabled, "loaded":loaded,
+                "requires_onebot":e.plugin.uses_group_moderation() || e.meta.id == "qzone",
+                "requires_group":e.plugin.uses_group_moderation(),
                 "updating":e.updating.load(Ordering::Acquire),
                 "pending_restart":e.restart_required.load(Ordering::Acquire),
                 "pending_reload":*desired != runtime.applied || (desired.enabled && !loaded),

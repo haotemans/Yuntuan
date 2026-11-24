@@ -16,20 +16,21 @@ pub async fn person_detail(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let mut conn = state.open_db().await.map_err(|e| err(&e.to_string()))?;
-    let exists: bool = conn
+    let directory_id: Option<String> = conn
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM persons WHERE person_id=?1)",
+            "SELECT (SELECT directory_id FROM qq_memory_directory WHERE person_id=?1)",
             yuantuan_core::db::params![id],
             |r| r.try_get(0),
         )
         .await
         .map_err(|e| err(&e.to_string()))?;
-    if !exists {
+    let Some(directory_id) = directory_id else {
         return Err((StatusCode::NOT_FOUND, Json(json!({"error":"人物不存在"}))));
-    }
-    let profile = yuantuan_core::memory::profile(&mut conn, &id, i64::MAX)
+    };
+    let profile = yuantuan_core::memory::directory_profiles(&mut conn, std::slice::from_ref(&directory_id), i64::MAX)
         .await
-        .map_err(|e| err(&e.to_string()))?;
+        .map_err(|e| err(&e.to_string()))?
+        .remove(&directory_id).unwrap_or_default();
     let visuals = conn.prepare("SELECT m.msg_id,m.chat_id,m.ts,i.status,i.observation,i.image_index FROM message_images i JOIN messages m ON m.msg_id=i.msg_id WHERE m.sender_pid=?1 ORDER BY m.msg_id DESC,i.image_index LIMIT 6").await.map_err(|e|err(&e.to_string()))?
         .query_map(yuantuan_core::db::params![id],|r|{
             let raw: Option<String> = r.try_get(4)?;
@@ -39,7 +40,9 @@ pub async fn person_detail(
     let events = conn.prepare("SELECT from_pid,to_pid,kind,evidence,created_at FROM relationship_events WHERE from_pid=?1 OR to_pid=?1 ORDER BY id DESC LIMIT 10").await.map_err(|e|err(&e.to_string()))?
         .query_map(yuantuan_core::db::params![id],|r|Ok(json!({"from":r.try_get::<String,_>(0)?,"to":r.try_get::<String,_>(1)?,"kind":r.try_get::<String,_>(2)?,"evidence":r.try_get::<Option<String>,_>(3)?,"ts":r.try_get::<i64,_>(4)?}))).await.map_err(|e|err(&e.to_string()))?
         .collect::<sqlx::Result<Vec<_>>>().map_err(|e|err(&e.to_string()))?;
-    let portrait=sqlx::query("WITH latest AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY item_key ORDER BY source_end_id DESC,id DESC) AS rn FROM memory_items WHERE owner_type='person' AND owner_id=?) SELECT * FROM latest WHERE rn=1 AND status!='corrected' ORDER BY CASE WHEN item_key='summary' THEN 0 ELSE 1 END,source_end_id DESC LIMIT 24")
+    let portrait=sqlx::query("WITH latest AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY item_key ORDER BY source_end_id DESC,id DESC) AS rn FROM memory_items WHERE owner_type='person'
+        AND owner_id IN (SELECT ?1 UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1))
+        SELECT * FROM latest WHERE rn=1 AND status!='corrected' ORDER BY CASE WHEN item_key='summary' THEN 0 ELSE 1 END,source_end_id DESC LIMIT 24")
         .bind(&id).fetch_all(&mut *conn).await.map_err(|e|err(&e.to_string()))?;
     let portrait:Vec<Value>=portrait.iter().filter_map(|r|{let content:String=r.try_get("content").ok()?;if yuantuan_core::consolidation::is_sensitive(&content){return None}Some(json!({"id":r.try_get::<i64,_>("id").ok()?,"key":r.try_get::<String,_>("item_key").ok()?,"content":content,"kind":r.try_get::<String,_>("kind").ok()?,"status":r.try_get::<String,_>("status").ok()?,"source_chat_type":r.try_get::<String,_>("source_chat_type").ok()?,"source_chat_id":r.try_get::<String,_>("source_chat_id").ok()?,"evidence":serde_json::from_str::<Value>(&r.try_get::<String,_>("evidence").ok()?).ok()?}))}).collect();
     Ok(Json(

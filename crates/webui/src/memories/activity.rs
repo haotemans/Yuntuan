@@ -1,5 +1,5 @@
 //! Real message history and portrait processing state, independent of nightly summaries.
-use super::{conversation, db_error, error, ApiResult, MemQuery};
+use super::{conversation, db_error, error, person_members, ApiResult, MemQuery};
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -89,7 +89,8 @@ pub async fn status(
           (SELECT value FROM state_kv WHERE key='profile_refresh:v1:'||?1) AS refresh,
           COALESCE((SELECT cursor FROM memory_progress WHERE stage='portrait' AND owner_id=?1 AND chat_type=''),0) AS cursor,
           COALESCE((SELECT baseline FROM memory_progress WHERE stage='portrait' AND owner_id=?1 AND chat_type=''),0) AS baseline
-        FROM day LEFT JOIN messages m ON m.sender_pid=?1 AND m.chat_type IN ('group','private')")
+        FROM day LEFT JOIN messages m ON m.chat_type IN ('group','private')
+         AND m.sender_pid IN (SELECT ?1 UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1)")
         .bind(&id).bind(q.offset()).fetch_one(&mut *conn).await.map_err(db_error)?;
     let raw: Option<String> = row.try_get("refresh").map_err(db_error)?;
     let refresh = raw
@@ -97,16 +98,19 @@ pub async fn status(
         .unwrap_or(json!({}));
     let cursor: i64 = row.try_get("cursor").map_err(db_error)?;
     let baseline: i64 = row.try_get("baseline").map_err(db_error)?;
-    let coverage=sqlx::query("SELECT COUNT(*) AS total, COUNT(CASE WHEN m.msg_id<=?3 THEN 1 END) AS legacy,
-      COUNT(CASE WHEN m.msg_id>?2 AND c.msg_id IS NULL THEN 1 END) AS pending,
-      COUNT(CASE WHEN m.msg_id>?2 AND c.msg_id IS NULL AND m.ts>=unixepoch()-2592000 THEN 1 END) AS recent_pending,
-      MIN(CASE WHEN m.msg_id>?2 AND c.msg_id IS NULL THEN m.ts END) AS oldest_pending_at
+    let coverage=sqlx::query("SELECT COUNT(*) AS total, COUNT(CASE WHEN m.msg_id<=COALESCE(p.baseline,0) THEN 1 END) AS legacy,
+      COUNT(CASE WHEN m.msg_id>COALESCE(p.cursor,0) AND c.msg_id IS NULL THEN 1 END) AS pending,
+      COUNT(CASE WHEN m.msg_id>COALESCE(p.cursor,0) AND c.msg_id IS NULL AND m.ts>=unixepoch()-2592000 THEN 1 END) AS recent_pending,
+      MIN(CASE WHEN m.msg_id>COALESCE(p.cursor,0) AND c.msg_id IS NULL THEN m.ts END) AS oldest_pending_at
       FROM messages m LEFT JOIN portrait_coverage c ON c.person_id=m.sender_pid AND c.msg_id=m.msg_id
-      WHERE m.sender_pid=?1 AND m.chat_type IN ('group','private') AND length(trim(COALESCE(m.text,'')))>=4")
-      .bind(&id).bind(cursor).bind(baseline).fetch_one(&mut *conn).await.map_err(db_error)?;
+      LEFT JOIN memory_progress p ON p.owner_id=m.sender_pid AND p.stage='portrait' AND p.chat_type=''
+      WHERE m.sender_pid IN (SELECT ?1 UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1)
+        AND m.chat_type IN ('group','private') AND length(trim(COALESCE(m.text,'')))>=4")
+      .bind(&id).fetch_one(&mut *conn).await.map_err(db_error)?;
     let pending: i64 = coverage.try_get("pending").map_err(db_error)?;
     let eligible: i64 = coverage.try_get("total").map_err(db_error)?;
-    let last=sqlx::query("SELECT r.*,b.from_id,b.end_id,b.started_at,b.finished_at,b.lease_until FROM portrait_runs r JOIN memory_batches b ON b.id=r.batch_id WHERE b.owner_id=?1 ORDER BY b.id DESC LIMIT 1")
+    let last=sqlx::query("SELECT r.*,b.from_id,b.end_id,b.started_at,b.finished_at,b.lease_until FROM portrait_runs r JOIN memory_batches b ON b.id=r.batch_id
+      WHERE b.owner_id IN (SELECT ?1 UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1) ORDER BY b.id DESC LIMIT 1")
       .bind(&id).fetch_optional(&mut *conn).await.map_err(db_error)?;
     let last_run=last.map(|r|->sqlx::Result<Value>{
         let status:String=r.try_get("status")?;
@@ -137,12 +141,12 @@ fn filtered(
     count: bool,
 ) -> QueryBuilder<'static, Sqlite> {
     let mut b = QueryBuilder::new(if count {
-        "SELECT COUNT(*) FROM messages m WHERE m.sender_pid="
+        "SELECT COUNT(*) FROM messages m WHERE m.sender_pid IN "
     } else {
-        "SELECT m.msg_id,m.text,m.ts,m.has_image,m.chat_id,m.chat_type FROM messages m WHERE m.sender_pid="
+        "SELECT m.msg_id,m.text,m.ts,m.has_image,m.chat_id,m.chat_type FROM messages m WHERE m.sender_pid IN "
     });
-    b.push_bind(id.to_owned())
-        .push(" AND m.chat_type IN ('group','private')");
+    person_members(&mut b, id);
+    b.push(" AND m.chat_type IN ('group','private')");
     if let Some(start) = start {
         b.push(" AND m.ts>=")
             .push_bind(start)
@@ -225,16 +229,19 @@ pub async fn profile_history(
         .await
         .map_err(db_error)?;
     let total: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM person_profile_versions WHERE person_id=?1")
+        sqlx::query_scalar("SELECT COUNT(*) FROM person_profile_versions
+            WHERE person_id IN (SELECT ?1 UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1)")
             .bind(&id)
             .fetch_one(&mut *tx)
             .await
             .map_err(db_error)?;
     let size = q.page_size.unwrap_or(24);
     let page = q.page.unwrap_or(1).min((total - 1).max(0) / size + 1);
-    let rows=sqlx::query("SELECT v.*,EXISTS(SELECT 1 FROM person_profile_facts p WHERE p.person_id=v.person_id AND p.field=v.field AND p.source_msg_id=v.source_msg_id AND p.content=v.content AND p.evidence_quote=v.evidence_quote) AS current,
+    let rows=sqlx::query("WITH linked AS (SELECT ?1 AS person_id UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1)
+       SELECT v.*,EXISTS(SELECT 1 FROM person_profile_facts p WHERE p.person_id=v.person_id AND p.field=v.field AND p.source_msg_id=v.source_msg_id AND p.content=v.content AND p.evidence_quote=v.evidence_quote
+         AND NOT EXISTS(SELECT 1 FROM person_profile_facts newer WHERE newer.person_id IN linked AND newer.field=p.field AND newer.source_msg_id>p.source_msg_id)) AS current,
        EXISTS(SELECT 1 FROM messages m WHERE m.msg_id=v.source_msg_id AND m.sender_pid=v.person_id AND m.chat_id=v.source_chat_id AND m.chat_type=v.source_chat_type AND instr(m.text,v.evidence_quote)>0) AS source_valid
-       FROM person_profile_versions v WHERE v.person_id=?1 ORDER BY v.source_msg_id DESC,v.id DESC LIMIT ?2 OFFSET ?3")
+       FROM person_profile_versions v WHERE v.person_id IN linked ORDER BY v.source_msg_id DESC,v.id DESC LIMIT ?2 OFFSET ?3")
        .bind(&id).bind(size).bind((page-1)*size).fetch_all(&mut *tx).await.map_err(db_error)?;
     let versions=rows.iter().map(|r|->sqlx::Result<Value>{
         let content:String=r.try_get("content")?;let quote:String=r.try_get("evidence_quote")?;

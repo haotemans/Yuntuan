@@ -8,9 +8,14 @@
 
 ## 实际行为
 
+侧栏新增 `/logs` [运行控制台](../runtime/console.md)，运行日志与进程接口沿用管理员 Bearer 鉴权。配置提交时同步登记用于日志脱敏的新凭据。
+
 - Rust Axum 后端提供受保护的 `/api/*`、`/ws` 和嵌入式静态前端；登录与状态接口例外处理。
 - Vue 管理页面提供总览、决策追踪、任务、配置等入口；WebSocket 推送观测事件，用于 UI 展示。
+- WebUI 的 HTTP 路由可使用已绑定的 TCP 监听器启动，记忆库接口回归直接复用该入口以避免并行测试抢占临时端口。
+- 工作台有独立「定时任务」页，使用受管理员会话保护的 `/api/schedules`。规则见 [定时任务](../core/scheduler.md)。
 - 插件能力的会话范围与启停通过管理员会话保护的 `PATCH /api/capabilities` 更新，字段及权限规则见[扩展宿主](../extensions/host.md)。
+- 插件调用历史接口 `GET /api/plugins/{name}/history` 也由管理员会话保护，返回持久化调用的来源与状态元数据。查询范围与记录覆盖见[扩展宿主](../extensions/host.md)。
 - 管理员接口 `GET /api/platforms` 返回各通道的运行状态与非密钥账号标识。官方机器人配置经现有配置 API 验证，读回时掩去 AppSecret，配置变更提示重启。通道行为见 [QQ 接入](../adapter-qq/qq.md)。
 - 决策 Trace 和任务数据库是不同事实来源：Trace 记录过程、任务终态以持久化任务状态为准。
 
@@ -47,6 +52,8 @@
 V12在现有session保护层注册 `/api/capabilities`、`/api/tasks/{id}/runtime` 与 `/api/tasks/{id}/control`；能力目录、会话范围与任务操作继续由后端核实。
 
 决策追踪增加真实消息处理统计与待判断、已领取、执行中、待核实筛选，读取受认证保护的 `/api/decisions/status`。返回数据来自消息持久状态，支持会话编号、状态和0–100条限额；机器人和self不进入统计。批次入口、消息数、实际作者和锚点随新Trace事件展示，旧事件缺少字段时不补造。页面每10秒在可见时刷新状态，异常显示错误而非假造空队列；待核实只有查看入口，不提供盲目重试。
+
+「决策记录」可按浏览器所在时区选择日期，与事件类型及会话筛选同时生效。`/api/events` 使用 `from_ts`（含）和 `until_ts`（不含）按 Unix 秒检索，并返回 `has_more` 供同日分页。历史记录暂停插入实时流事件，清除日期恢复实时视图。「消息处理」继续显示当前持久状态。
 
 浏览器回归：[`webui-frontend/tests/trace-flow.spec.js`](../../../webui-frontend/tests/trace-flow.spec.js)，覆盖桌面/窄屏布局、批次/即时归属、失败不冒充忽略、队列筛选和只读状态。`pages_api.rs`验证认证、来源姓名、过滤、统计与只读未知执行状态。
 

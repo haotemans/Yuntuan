@@ -5,6 +5,7 @@ use yuantuan_core::db::SqliteExt;
 mod config;
 mod db;
 mod shutdown;
+mod logging;
 include!(concat!(env!("OUT_DIR"), "/plugins.rs"));
 
 use anyhow::Result;
@@ -27,12 +28,16 @@ async fn main() -> Result<()> {
             }
         }
     }
-    tracing_subscriber::fmt().with_target(false).init();
+    let runtime_logs = yuantuan_core::runtime_logs::RuntimeLogs::default();
+    logging::register_secrets(&runtime_logs, std::path::Path::new("config.toml"));
+    logging::register_secrets(&runtime_logs, std::path::Path::new("providers.toml"));
+    let _log_guard = logging::init(runtime_logs.clone());
     info!("云团骨架启动");
     let mut shutdown_signal = shutdown::Signal::new()?;
 
     // a. 配置：不存在则生成默认模板并继续使用默认值
     let cfg = config::load_or_default("config.toml")?;
+    runtime_logs.set_level(&cfg.log.level);
     info!(
         data_dir = %cfg.data.dir,
         napcat_listen = %cfg.napcat.listen_addr,
@@ -43,6 +48,12 @@ async fn main() -> Result<()> {
 
     // b. data/ 目录结构
     let data_root = db::init_data_dirs(&cfg.data.dir)?;
+    if let Ok(plugins) = std::fs::read_dir(data_root.join("plugins")) {
+        for plugin in plugins.flatten() { logging::register_secrets(&runtime_logs, &plugin.path().join("settings.json")); }
+    }
+    if let Err(error) = runtime_logs.start_file(&data_root.join("logs")) {
+        warn!(%error, "运行日志落盘不可用，使用有界内存缓存");
+    }
     info!(path = %data_root.display(), "data/ 目录结构就绪（memes/ artifacts/ archive/ logs/ backups/）");
 
     // b'. 启动时检测恢复标记：用户在 WebUI 点了「一键恢复」+ 手动重启后，这里把 tar 解压覆盖 data/
@@ -56,6 +67,7 @@ async fn main() -> Result<()> {
     let database = conn.database();
     info!(db = %data_root.join("yuantuan.db").display(), "SQLite 已打开（WAL）");
     yuantuan_core::db::migrate(&mut conn).await?;
+    cfg.qq_official.sync_memory_links(&mut conn).await?;
     if yuantuan_core::context_builder::ensure_default_persona(&mut conn).await? {
         info!("已初始化默认人格，可在面板中编辑");
     }
@@ -206,6 +218,13 @@ async fn main() -> Result<()> {
         info!(image = %cfg.sandbox.image, "Docker 开发沙箱已就绪");
     }
     let skill_registry = yuantuan_core::skills::SkillRegistry::new();
+    let diagnostics = Arc::new(
+        yuantuan_core::tools::diagnostics::Diagnostics::new(db_path.clone())
+            .with_sandbox_enabled(cfg.sandbox.enabled)
+            .with_runtime_logs(runtime_logs.clone()),
+    );
+    tools_registry.register_arc(diagnostics.clone());
+    skill_registry.register_arc(diagnostics);
     let llm_slot: yuantuan_core::bot::SharedLlm = Arc::new(RwLock::new(llm.clone()));
     let plugins = yuantuan_core::plugins::PluginManager::load_with_services(
         compiled_plugins(),
@@ -429,6 +448,8 @@ async fn main() -> Result<()> {
         }
     }
     let extras = yuantuan_webui::Extras {
+        runtime_logs: runtime_logs.clone(),
+        supervisor: supervisor.clone(),
         bus: bus.clone(),
         llm_slot,
         prefilter_slot,

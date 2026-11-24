@@ -57,14 +57,14 @@ impl OfficialQq {
                 delay = Duration::from_secs(2);
             }
             let code = error.downcast_ref::<Closed>().map(|e| e.0);
-            if matches!(code, Some(4914 | 4915)) {
+            if matches!(code, Some(4013 | 4014 | 4914 | 4915)) {
                 self.set_status(
                     "error",
                     Some("请核对 QQ 开放平台账号状态和群聊/单聊权限".into()),
                 );
                 return;
             }
-            if matches!(code, Some(4004 | 4006 | 4007 | 4009)) {
+            if matches!(code, Some(4004 | 4006 | 4007)) {
                 session = Session::default();
             }
             if code == Some(4004) {

@@ -469,6 +469,94 @@ async fn bare_mention_reads_ignored_question_and_does_not_duplicate_inflight_wor
     );
 }
 
+#[tokio::test]
+async fn vague_question_and_quoted_mentions_produce_one_clarification() {
+    let model = Model::default();
+    let mut deps = fixture(model.clone()).await;
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let captured = sent.clone();
+    let send: reply_engine::SendFn = Arc::new(move |request| {
+        captured.lock().unwrap().push(request.segments);
+        Box::pin(async { Ok(json!({"message_id":99})) })
+    });
+    let engine = reply_engine::ReplyEngine::new(
+        deps.db_path.clone(),
+        deps.bus.clone(),
+        send,
+        deps.self_ids.clone(),
+        Arc::new(RwLock::new(reply_engine::ReplyCfg {
+            total_budget_ms: 0,
+            ..Default::default()
+        })),
+        deps.mood.clone(),
+    )
+    .spawn();
+    deps.reply = Some(engine.clone());
+    let ambient = message(&deps, false, "p_1", "回答一下上面的问题").await;
+    let batch = crate::window::pending(&deps.db_path).await.unwrap().remove(0);
+    handle_periodic(&deps, batch).await;
+    assert!(model.inputs.lock().unwrap().is_empty());
+    assert!(sent.lock().unwrap().is_empty());
+
+    let mut db = crate::db::connect(&deps.db_path).await.unwrap();
+    db.execute(
+        "UPDATE messages SET external_msg_id=88 WHERE msg_id=?1",
+        params![ambient.msg_id],
+    )
+    .await
+    .unwrap();
+    for _ in 0..2 {
+        let mut mention = message(&deps, true, "p_1", " ").await;
+        mention.reply_to = Some(88);
+        assert!(handle_inner(&deps, &mention, mention.msg_id).await.is_none());
+    }
+    assert!(engine.shutdown(Duration::from_secs(10)).await);
+    assert!(model.inputs.lock().unwrap().is_empty());
+    let sent = sent.lock().unwrap();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0][1]["data"]["text"], " 你指的是哪条？引用一下原消息，我接着看。");
+    drop(sent);
+    let anchor: i64 = sqlx::query_scalar("SELECT reply_anchor_id FROM messages WHERE sender_pid='self'")
+        .fetch_one(&mut *db)
+        .await
+        .unwrap();
+    assert_eq!(anchor, ambient.msg_id);
+}
+
+#[tokio::test]
+async fn diagnostics_command_uses_records_without_a_model() {
+    let model = Model::default();
+    let mut deps = fixture(model.clone()).await;
+    *deps.llm.write().unwrap() = None;
+    let diagnostics = Arc::new(crate::tools::diagnostics::Diagnostics::new(deps.db_path.clone()));
+    let skills = crate::skills::SkillRegistry::new();
+    skills.register_arc(diagnostics);
+    deps.skill_registry = Some(skills);
+    let captures = Arc::new(Mutex::new(Vec::new()));
+    let sent = captures.clone();
+    let send: reply_engine::SendFn = Arc::new(move |request| {
+        sent.lock().unwrap().push(request.segments);
+        Box::pin(async { Ok(json!({"message_id":77})) })
+    });
+    let engine = reply_engine::ReplyEngine::new(
+        deps.db_path.clone(), deps.bus.clone(), send, deps.self_ids.clone(),
+        Arc::new(RwLock::new(reply_engine::ReplyCfg { total_budget_ms: 0, ..Default::default() })),
+        deps.mood.clone(),
+    ).spawn();
+    deps.reply = Some(engine.clone());
+    let mut db = crate::db::connect(&deps.db_path).await.unwrap();
+    let failed = message(&deps, true, "p_1", "图片为何失败").await;
+    db.execute("UPDATE messages SET decision_state='failed',decision_error='Decision角色未配置' WHERE msg_id=?1",params![failed.msg_id]).await.unwrap();
+    let command = message(&deps, false, "p_1", "/自检").await;
+    assert!(is_immediate(&deps, &command));
+    assert!(handle_inner(&deps, &command, command.msg_id).await.is_none());
+    assert!(engine.shutdown(Duration::from_secs(10)).await);
+    assert!(model.inputs.lock().unwrap().is_empty());
+    let text = serde_json::to_string(&*captures.lock().unwrap()).unwrap();
+    assert!(text.contains("参与判断"));
+    assert!(text.contains("所需能力或模型未就绪"));
+}
+
 struct WorkProbe(Arc<std::sync::atomic::AtomicUsize>);
 #[async_trait::async_trait]
 impl crate::tools::Tool for WorkProbe {

@@ -98,10 +98,12 @@ Router明确选中事项但材料缺失时，任务创建整体回滚，失败�
 
 两种协议共享根预算、2个任务槽、去重、版本屏障与回聊链路；parallel_safe是契约元数据，本阶段不增加单任务内并行工具。WebUI工具执行记录显示协议、调用编号、任务版本、状态、耗时和错误；任务完成、工具成功与QQ送达继续分开。模型原生函数格式参见[官方说明](https://developers.openai.com/api/docs/guides/function-calling?api-mode=chat)。
 
-验证入口：[`tool_protocol.rs`](../../../crates/core/tests/tool_protocol.rs) 用本地mock运行同一任务的双协议、调用配对、权限/来源、去重、错误分类及V17→V18保留回归；[`tasks-flow.spec.js`](../../../webui-frontend/tests/tasks-flow.spec.js) 与[`pages_api.rs`](../../../crates/webui/tests/pages_api.rs) 覆盖前后端状态。真实Provider原生执行、Docker依赖、浏览器和通用文件收发仍需后续验证，不能以这些mock或CI代替。
+验证入口：[`tool_protocol.rs`](../../../crates/core/tests/tool_protocol.rs) 用本地mock运行同一任务的双协议、调用配对、权限/来源、去重、错误分类及旧 V17 数据升级到当前架构的保留回归；[`tasks-flow.spec.js`](../../../webui-frontend/tests/tasks-flow.spec.js) 与[`pages_api.rs`](../../../crates/webui/tests/pages_api.rs) 覆盖前后端状态。真实Provider原生执行、Docker依赖、浏览器和通用文件收发仍需后续验证，不能以这些mock或CI代替。
 
 
 ## 工具发现与参数修正
+
+内置 `diagnostics.recent` 同时注册为 Tool 与 Skill，目录和 Agent 执行均沿用现有能力开关及类型化会话范围。记录来源与参数见[运行自检](diagnostics.md)。
 
 插件页可单独设置 Tool 的会话范围，Agent 目录和调用继续使用同一 SQLite 能力策略。面板更新字段及交互见[扩展宿主](../extensions/host.md)。
 
