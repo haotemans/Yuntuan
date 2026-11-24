@@ -65,3 +65,17 @@ test('log read failures stay visible', async ({ page }) => {
   await page.goto('/logs')
   await expect(page.getByText('日志读取失败', { exact: true })).toBeVisible()
 })
+
+test('initial read failure recovers with history pagination', async ({ page }) => {
+  await setup(page)
+  let reads = 0
+  await page.route('**/api/logs?**', route => {
+    if (++reads === 1) return route.fulfill({ status: 500, json: { error: '日志读取失败' } })
+    return route.fulfill({ json: { entries, latest_id: 102, has_more: true, targets: [], storage: { capacity: 2000, minimum_level: 'INFO' } } })
+  })
+  await page.goto('/logs')
+  await expect(page.getByText('日志读取失败', { exact: true })).toBeVisible()
+  await expect(page.locator('.log-row')).toHaveCount(2)
+  await expect(page.getByRole('button', { name: '加载更早记录' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '模型请求失败，服务返回 HTTP 429' })).toBeVisible()
+})

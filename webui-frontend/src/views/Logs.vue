@@ -119,7 +119,7 @@ async function fetchLogs(mode = 'reset') {
     const { data } = await api.get(`/logs?${params}`, { signal: controller.signal })
     if (stopped || current !== generation) return
     const entries = data.entries || []
-    if (mode === 'reset') {
+    if (mode === 'reset' || (mode === 'live' && !cursor)) {
       logs.value = entries; hasMore.value = data.has_more
       cursor = data.latest_id || 0; selected.value = entries[0] || null
     } else {
@@ -127,7 +127,7 @@ async function fetchLogs(mode = 'reset') {
       if (mode === 'older') hasMore.value = data.has_more
       else cursor = entries.length ? Math.max(...entries.map(entry => entry.id)) : data.latest_id || cursor
     }
-    gap.value = Boolean(data.gap)
+    gap.value = gap.value || Boolean(data.gap)
     storage.value = data.storage; targets.value = data.targets || []; error.value = ''
   } catch (e) {
     if (!stopped && current === generation && e.code !== 'ERR_CANCELED') error.value = e.response?.data?.error || '读取运行日志失败，请稍后刷新'
