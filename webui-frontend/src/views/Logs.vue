@@ -8,25 +8,27 @@
     <n-alert v-if="statusError" type="warning" :bordered="false">{{ statusError }}</n-alert>
     <section class="runtime-metrics" aria-label="主进程状态">
       <article><span class="metric-icon"><yt-icon name="terminal" /></span><div><span>主进程</span><strong class="mono">{{ status?.process?.pid ?? '—' }}<small>PID</small></strong></div></article>
-      <article><span class="metric-icon violet"><yt-icon name="trace" /></span><div><span>运行时长</span><strong class="mono">{{ duration(status?.uptime_secs) }}</strong></div></article>
-      <article><span class="metric-icon cyan"><yt-icon name="models" /></span><div><span>CPU 占用</span><strong class="mono">{{ percent(status?.process?.cpu_percent) }}</strong></div></article>
-      <article><span class="metric-icon green"><yt-icon name="mcp" /></span><div><span>内存占用</span><strong class="mono">{{ bytes(status?.process?.memory_bytes) }}</strong></div></article>
+      <article><span class="metric-icon"><yt-icon name="trace" /></span><div><span>运行时长</span><strong class="mono">{{ duration(status?.uptime_secs) }}</strong></div></article>
+      <article><span class="metric-icon"><yt-icon name="models" /></span><div><span>CPU 占用</span><strong class="mono">{{ percent(status?.process?.cpu_percent) }}</strong></div></article>
+      <article><span class="metric-icon"><yt-icon name="mcp" /></span><div><span>内存占用</span><strong class="mono">{{ bytes(status?.process?.memory_bytes) }}</strong></div></article>
     </section>
 
-    <div class="runtime-tabs" role="tablist" aria-label="控制台视图">
-      <button role="tab" :aria-selected="tab === 'logs'" :class="{ active: tab === 'logs' }" @click="tab = 'logs'"><yt-icon name="terminal" :size="17" />运行日志</button>
-      <button role="tab" :aria-selected="tab === 'process'" :class="{ active: tab === 'process' }" @click="tab = 'process'"><yt-icon name="mcp" :size="17" />进程与组件</button>
-      <span class="spacer" /><span class="capture-state"><i :class="{ live: tab === 'process' || (!paused && !date) }" />{{ tab === 'process' ? '每 10 秒更新' : date ? '历史记录' : paused ? '已暂停更新' : '每 2 秒更新' }}</span>
+    <div class="runtime-tabs">
+      <n-tabs v-model:value="tab" type="line" size="small" role="tablist" aria-label="控制台视图">
+        <n-tab name="logs" role="tab" tabindex="0" :aria-selected="tab === 'logs'" @keydown.enter="tab = 'logs'" @keydown.space.prevent="tab = 'logs'">运行日志</n-tab>
+        <n-tab name="process" role="tab" tabindex="0" :aria-selected="tab === 'process'" @keydown.enter="tab = 'process'" @keydown.space.prevent="tab = 'process'">进程与组件</n-tab>
+      </n-tabs>
+      <span class="capture-state"><i :class="{ live: tab === 'process' || (!paused && !date) }" />{{ tab === 'process' ? '每 10 秒更新' : date ? '历史记录' : paused ? '已暂停更新' : '每 2 秒更新' }}</span>
     </div>
 
     <template v-if="tab === 'logs'">
-      <form class="log-filters" @submit.prevent="reset">
-        <n-select v-model:value="level" aria-label="日志级别" :options="levelOptions" placeholder="全部级别" clearable @update:value="reset" />
-        <n-select v-model:value="target" aria-label="日志模块" :options="targetOptions" placeholder="全部模块" clearable filterable @update:value="reset" />
-        <n-input v-model:value="search" :input-props="{ 'aria-label': '搜索日志' }" placeholder="搜索错误信息、关键词…" clearable />
-        <label class="log-date"><input v-model="date" aria-label="日志日期" type="date" @change="reset" /></label>
-        <n-button attr-type="submit" secondary type="primary">筛选</n-button>
-        <n-button v-if="date || level || target || search" text @click="clearFilters">重置</n-button>
+      <form class="yt-toolbar log-filters" @submit.prevent="reset">
+        <n-select v-model:value="level" size="small" aria-label="日志级别" :options="levelOptions" placeholder="全部级别" clearable @update:value="reset" />
+        <n-select v-model:value="target" size="small" aria-label="日志模块" :options="targetOptions" placeholder="全部模块" clearable filterable @update:value="reset" />
+        <n-input v-model:value="search" size="small" :input-props="{ 'aria-label': '搜索日志' }" placeholder="搜索日志内容或上下文" clearable />
+        <label class="log-date">日期<input v-model="date" aria-label="日志日期" type="date" @change="reset" /></label>
+        <n-button attr-type="submit" size="small" secondary type="primary">筛选</n-button>
+        <n-button v-if="date || level || target || search" size="small" text @click="clearFilters">重置</n-button>
       </form>
       <div v-if="storage?.dropped_writes || storage?.disk_errors || gap" class="log-storage-warning" role="status">
         {{ gap ? '更新期间部分记录已移出缓存，请检查磁盘日志。' : '' }}
@@ -34,27 +36,30 @@
         <template v-if="storage?.disk_errors">日志落盘出现错误，请检查磁盘空间和权限。</template>
       </div>
       <div class="log-workspace">
-        <section class="console" aria-label="运行日志列表">
-          <div class="console-toolbar"><span class="console-title"><i /><i /><i /><span>runtime.log</span></span><span class="spacer" /><span>{{ logs.length }} 条</span><button :aria-label="paused ? '恢复更新' : '暂停更新'" @click="paused = !paused">{{ paused ? '继续' : '暂停' }}</button></div>
-          <div class="console-columns"><span>时间</span><span>级别</span><span>模块 / 信息</span></div>
-          <div class="console-body" :aria-busy="loading">
-            <button v-for="entry in logs" :key="entry.id" class="log-row" :class="[entry.level.toLowerCase(), { selected: selected?.id === entry.id }]" @click="selected = entry">
-              <time>{{ time(entry.ts) }}</time><span class="log-level">{{ entry.level }}</span><span class="log-content"><span class="log-target">{{ moduleName(entry.target) }}</span><span>{{ entry.message }}</span></span>
+        <section class="log-list" aria-label="运行日志列表">
+          <header class="log-list-head"><h2>日志记录<span class="record-count mono">{{ logs.length }}</span></h2><n-button size="tiny" secondary :aria-label="paused ? '恢复更新' : '暂停更新'" @click="paused = !paused">{{ paused ? '恢复更新' : '暂停更新' }}</n-button></header>
+          <div class="log-columns" aria-hidden="true"><span>时间</span><span>级别</span><span>来源模块</span><span>日志内容</span></div>
+          <div class="log-list-body" :aria-busy="loading">
+            <button v-for="entry in logs" :key="entry.id" class="log-row" :class="[entry.level.toLowerCase(), { selected: selected?.id === entry.id }]" :aria-pressed="selected?.id === entry.id" @click="selected = entry">
+              <time :datetime="new Date(entry.ts).toISOString()"><span>{{ day(entry.ts) }}</span><span>{{ time(entry.ts) }}</span></time>
+              <span class="log-level" :class="entry.level.toLowerCase()">{{ entry.level }}</span>
+              <span class="log-target" :title="entry.target">{{ moduleName(entry.target) }}</span>
+              <span class="log-content">{{ entry.message }}</span>
             </button>
-            <div v-if="!logs.length" class="console-empty"><yt-icon name="terminal" :size="30" /><strong>{{ loading ? '正在读取日志' : '暂无匹配日志' }}</strong><span>{{ loading ? '连接运行记录中…' : '调整筛选条件或等待新的运行记录' }}</span></div>
+            <div v-if="!logs.length" class="log-empty"><empty-state :title="loading ? '正在读取日志' : '暂无匹配日志'" /><p>{{ loading ? '连接运行记录中…' : '调整筛选条件或等待新的运行记录' }}</p></div>
           </div>
-          <footer class="console-footer"><span><i />采集 {{ storage?.minimum_level || '—' }} · {{ storage?.persisting ? '已开启落盘' : '内存缓存' }}</span><button v-if="hasMore" :disabled="loading" @click="loadOlder">加载更早记录</button><span v-else>最近 {{ storage?.capacity ?? '—' }} 条缓存</span></footer>
+          <footer class="log-list-footer"><span>采集 {{ storage?.minimum_level || '—' }} · {{ storage?.persisting ? '已开启落盘' : '内存缓存' }}</span><n-button v-if="hasMore" size="tiny" text :loading="loading" @click="loadOlder">加载更早记录</n-button><span v-else>最近 {{ storage?.capacity ?? '—' }} 条缓存</span></footer>
         </section>
 
         <aside class="log-detail" aria-label="日志详情">
           <template v-if="selected">
             <header><span class="detail-kicker">{{ selected.level === 'ERROR' ? '错误详情' : '日志详情' }}</span><n-button text size="small" @click="copy">{{ copied ? '已复制' : '复制记录' }}</n-button></header>
-            <div class="detail-summary"><span class="detail-level" :class="selected.level.toLowerCase()">{{ selected.level }}</span><time>{{ dateTime(selected.ts) }}</time></div>
+            <div class="detail-summary"><span class="log-level" :class="selected.level.toLowerCase()">{{ selected.level }}</span><time>{{ dateTime(selected.ts) }}</time></div>
             <h2>{{ selected.message }}</h2>
             <dl><div><dt>来源模块</dt><dd class="mono">{{ selected.target }}</dd></div><div v-if="selected.file"><dt>发生位置</dt><dd class="mono">{{ selected.file }}<template v-if="selected.line">:{{ selected.line }}</template></dd></div></dl>
             <template v-if="Object.keys(selected.fields || {}).length"><h3>上下文与异常</h3><div v-for="(value, name) in selected.fields" :key="name" class="log-field"><span>{{ name }}</span><pre>{{ value }}</pre></div></template>
           </template>
-          <div v-else class="detail-empty"><yt-icon name="trace" :size="30" /><h2>查看发生了什么</h2><p>选择一条日志，查看来源、异常信息和关联上下文。</p></div>
+          <div v-else class="detail-empty"><empty-state title="选择一条日志" /><p>查看来源、异常信息和关联上下文</p></div>
         </aside>
       </div>
     </template>
@@ -157,6 +162,7 @@ function duration(value) { if (value == null) return '—'; const hours = Math.f
 function bytes(value) { return value == null ? '—' : `${(value / 1024 / 1024).toFixed(1)} MB` }
 function percent(value) { return value == null ? '—' : `${value.toFixed(1)}%` }
 function time(value) { return new Date(value).toLocaleTimeString('zh-CN', { hour12: false }) }
+function day(value) { return new Date(value).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) }
 function dateTime(value) { return new Date(value).toLocaleString('zh-CN', { hour12: false }) }
 function moduleName(value) { return value.split('::').slice(-2).join(' / ') }
 function stateLabel(value) { return ({ starting: '启动中', running: '运行中', backoff: '等待重启', stopped: '已停止', failed: '启动失败' })[value] || value }
@@ -167,621 +173,562 @@ onUnmounted(() => { stopped = true; clearInterval(timer); controller?.abort() })
 </script>
 
 <style scoped>
-.runtime-page {
-  max-width:1700px;
-  margin:0 auto;
-}
 .runtime-metrics {
-  display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
-  gap:16px;
-  margin:22px 0 28px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 .runtime-metrics article {
-  display:flex;
-  gap:16px;
-  align-items:center;
-  padding:22px;
-  background:var(--yt-surface);
-  border:1px solid var(--yt-card-border);
-  border-radius:14px;
-  box-shadow:var(--yt-card-shadow);
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 18px 20px;
+  background: var(--yt-surface);
+  border: 1px solid var(--yt-card-border);
+  border-radius: 12px;
+  box-shadow: var(--yt-card-shadow);
+  min-width: 0;
 }
 .metric-icon {
-  width:42px;
-  height:42px;
-  display:grid;
-  place-items:center;
-  border-radius:12px;
-  color:var(--yt-primary);
-  background:var(--yt-active-bg);
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--yt-ink-3);
+  background: var(--yt-soft-bg);
 }
-.metric-icon.violet {
-  color:var(--yt-violet);
-  background:var(--yt-violet-soft);
-}
-.metric-icon.cyan {
-  color:var(--yt-cyan);
-  background:var(--yt-cyan-soft);
-}
-.metric-icon.green {
-  color:var(--yt-ok);
-  background:var(--yt-ok-soft);
-}
-.runtime-metrics article div>span {
-  color:var(--yt-ink-3);
-  font-size:12px;
+.runtime-metrics article div > span {
+  color: var(--yt-ink-3);
+  font-size: 12px;
 }
 .runtime-metrics strong {
-  display:block;
-  font-size:25px;
-  line-height:1.5;
-  letter-spacing:-1px;
+  display: block;
+  font-size: 23px;
+  line-height: 1.6;
+  font-weight: 600;
+  color: var(--yt-ink-1);
 }
 .runtime-metrics small {
-  font-size:11px;
-  color:var(--yt-ink-3);
-  margin-left:9px;
-  letter-spacing:0;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--yt-ink-3);
+  margin-left: 8px;
 }
 .runtime-tabs {
-  display:flex;
-  align-items:center;
-  border-bottom:1px solid var(--yt-card-border);
-  margin-bottom:20px;
-  gap:25px;
-}
-.runtime-tabs>button {
-  display:flex;
-  gap:8px;
-  align-items:center;
-  background:none;
-  border:0;
-  padding:0 0 14px;
-  color:var(--yt-ink-3);
-  font-size:14px;
-  border-bottom:2px solid transparent;
-  cursor:pointer;
-}
-.runtime-tabs>button.active {
-  color:var(--yt-primary);
-  border-color:var(--yt-primary);
+  position: relative;
 }
 .capture-state {
-  font-size:12px;
-  display:flex;
-  gap:8px;
-  align-items:center;
-  padding-bottom:14px;
-  color:var(--yt-ink-3);
+  position: absolute;
+  right: 0;
+  top: 8px;
+  font-size: 12px;
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  color: var(--yt-ink-3);
 }
-.capture-state i,.console-footer i {
-  width:6px;
-  height:6px;
-  background:#64748b;
-  border-radius:50%;
-  display:inline-block;
+.capture-state i {
+  width: 6px;
+  height: 6px;
+  background: var(--yt-ink-3);
+  border-radius: 50%;
 }
-.capture-state i.live,.console-footer i {
-  background:#34d399;
-  box-shadow:0 0 0 3px #34d39912;
+.capture-state i.live {
+  background: var(--yt-ok);
 }
-.spacer {
-  flex:1;
+.log-filters > .n-select {
+  width: 130px;
 }
-.log-filters {
-  display:flex;
-  gap:10px;
-  margin-bottom:16px;
-  align-items:center;
-  flex-wrap:wrap;
+.log-filters > .n-select:nth-child(2) {
+  width: 200px;
 }
-.log-filters>.n-select {
-  width:145px;
-}
-.log-filters>.n-select:nth-child(2) {
-  width:215px;
-}
-.log-filters>.n-input {
-  flex:1;
-  min-width:180px;
+.log-filters > .n-input {
+  flex: 1;
+  min-width: 180px;
 }
 .log-date {
-  display:flex;
-  align-items:center;
-  border:1px solid var(--yt-card-border);
-  border-radius:6px;
-  background:var(--yt-surface);
-  height:34px;
-  padding:0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--yt-ink-3);
+  font-size: 12px;
 }
 .log-date input {
-  background:none;
-  color:var(--yt-ink-2);
-  border:none;
-  font:inherit;
-  width:136px;
-  color-scheme:light dark;
+  background: var(--yt-surface);
+  color: var(--yt-ink-2);
+  border: 1px solid var(--yt-card-border);
+  border-radius: 6px;
+  font: inherit;
+  height: 28px;
+  padding: 0 8px;
+  min-width: 0;
+  color-scheme: light;
+}
+:global(html.dark) .log-date input {
+  color-scheme: dark;
 }
 .log-workspace {
-  display:grid;
-  grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr);
-  gap:20px;
-  align-items:start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: start;
 }
-.console {
-  background:#101827;
-  color:#cbd5e1;
-  border:1px solid #253247;
-  border-radius:13px;
-  overflow:hidden;
-  box-shadow:0 8px 24px #0f172a0a;
+.log-list, .log-detail {
+  min-width: 0;
+  color: var(--yt-ink-1);
+  background: var(--yt-surface);
+  border: 1px solid var(--yt-card-border);
+  border-radius: 12px;
+  box-shadow: var(--yt-card-shadow);
+  overflow: hidden;
 }
-.console-toolbar {
-  display:flex;
-  gap:14px;
-  align-items:center;
-  padding:14px 18px;
-  background:#172235;
-  border-bottom:1px solid #273447;
-  font-size:11px;
-  color:#8797af;
+.log-list-head, .log-detail header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--yt-card-border);
 }
-.console-title {
-  display:flex;
-  gap:6px;
-  align-items:center;
+.log-list-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
 }
-.console-title i {
-  width:7px;
-  height:7px;
-  border-radius:50%;
-  background:#52617b;
+.record-count {
+  color: var(--yt-ink-3);
+  background: var(--yt-soft-bg);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 400;
 }
-.console-title i:first-child {
-  background:#f87171;
+.log-columns, .log-row {
+  display: grid;
+  grid-template-columns: 72px 58px minmax(90px, .7fr) minmax(0, 2fr);
+  gap: 14px;
+  padding: 12px 18px;
 }
-.console-title i:nth-child(2) {
-  background:#fbbf24;
+.log-columns {
+  color: var(--yt-ink-3);
+  background: var(--yt-elevated);
+  border-bottom: 1px solid var(--yt-card-border);
+  font-size: 12px;
 }
-.console-title i:nth-child(3) {
-  background:#34d399;
-}
-.console-title span {
-  margin-left:10px;
-  font-family:var(--yt-mono);
-  color:#bfcee2;
-}
-.console button {
-  font:inherit;
-  cursor:pointer;
-}
-.console-toolbar button,.console-footer button {
-  border:1px solid #394b65;
-  border-radius:5px;
-  background:transparent;
-  color:#cbd5e1;
-  padding:3px 9px;
-}
-.console-columns,.log-row {
-  display:grid;
-  grid-template-columns:72px 52px minmax(0,1fr);
-  gap:12px;
-}
-.console-columns {
-  padding:11px 18px;
-  color:#75859d;
-  border-bottom:1px solid #233046;
-  font-size:11px;
-}
-.console-body {
-  height:min(62vh,680px);
-  min-height:340px;
-  overflow:auto;
-  scrollbar-color:#394b65 #101827;
+.log-list-body {
+  height: min(60vh, 640px);
+  min-height: 320px;
+  overflow: auto;
+  scrollbar-color: var(--yt-card-border-hover) transparent;
+  scrollbar-width: thin;
 }
 .log-row {
-  width:100%;
-  text-align:left;
-  background:none;
-  border:0;
-  border-left:3px solid transparent;
-  color:#b5c2d6;
-  padding:12px 15px;
-  font-family:var(--yt-mono);
-  font-size:11px;
-  line-height:1.7;
-  border-bottom:1px solid #ffffff05;
+  width: 100%;
+  text-align: left;
+  align-items: start;
+  background: transparent;
+  border: 0;
+  box-shadow: inset 0 -1px var(--yt-card-border);
+  color: var(--yt-ink-2);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  cursor: pointer;
+  position: relative;
 }
 .log-row:hover {
-  background:#ffffff04;
+  background: var(--yt-hover-bg);
 }
 .log-row.selected {
-  background:#2563eb15;
-  border-left-color:#60a5fa;
+  background: var(--yt-active-bg);
 }
-.log-row.error {
-  background:#ef444409;
-}
-.log-row.error.selected {
-  background:#ef444415;
-  border-left-color:#f87171;
+.log-row.selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--yt-primary);
 }
 .log-row time {
-  color:#657892;
+  display: flex;
+  flex-direction: column;
+  color: var(--yt-ink-3);
+  font: 11px/1.8 var(--yt-mono);
+}
+.log-row time span:last-child {
+  color: var(--yt-ink-2);
+  font-size: 12px;
 }
 .log-level {
-  color:#7dd3fc;
-  font-size:10px;
-  font-weight:700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  color: var(--yt-ink-2);
+  background: var(--yt-soft-bg);
+  border-radius: 5px;
+  padding: 2px 7px;
+  font: 500 10px/1.8 var(--yt-mono);
 }
-.error .log-level {
-  color:#fb7185;
+.log-level.info {
+  color: var(--yt-primary);
+  background: var(--yt-active-bg);
 }
-.warn .log-level {
-  color:#fbbf24;
+.log-level.error {
+  color: var(--yt-danger);
+  background: var(--yt-danger-soft);
 }
-.debug .log-level {
-  color:#a78bfa;
+.log-level.warn {
+  color: var(--yt-jk-num);
+  background: var(--yt-warning-soft);
 }
-.log-content {
-  min-width:0;
-  overflow-wrap:anywhere;
-  white-space:pre-wrap;
+.log-level.debug {
+  color: var(--yt-violet-ink);
+  background: var(--yt-violet-soft);
 }
 .log-target {
-  display:block;
-  color:#697f9f;
-  font-size:10px;
-  margin-bottom:3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--yt-ink-3);
+  font: 11px/1.8 var(--yt-mono);
 }
-.console-footer {
-  padding:12px 18px;
-  border-top:1px solid #273447;
-  font-size:10px;
-  color:#8394ad;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
+.log-content {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
-.console-footer i {
-  margin-right:7px;
+.log-list-footer {
+  padding: 12px 18px;
+  border-top: 1px solid var(--yt-card-border);
+  font-size: 11px;
+  color: var(--yt-ink-3);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
-.console-empty {
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  gap:12px;
-  min-height:330px;
-  color:#697f9f;
+.log-empty {
+  padding: 70px 16px;
 }
-.console-empty strong {
-  font-size:14px;
-  font-weight:500;
-  color:#b5c2d6;
-}
-.console-empty span {
-  font-size:12px;
+.log-empty p, .detail-empty p {
+  text-align: center;
+  color: var(--yt-ink-3);
+  font-size: 12px;
+  line-height: 1.8;
+  margin: 0;
 }
 .log-detail {
-  padding:22px;
-  background:var(--yt-surface);
-  border:1px solid var(--yt-card-border);
-  border-radius:13px;
-  min-height:360px;
-  position:sticky;
-  top:20px;
-  max-height:85vh;
-  overflow:auto;
+  position: sticky;
+  top: 20px;
+  max-height: 80vh;
+  overflow: auto;
+  padding: 0 20px 20px;
 }
 .log-detail header {
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  border-bottom:1px solid var(--yt-card-border);
-  padding-bottom:15px;
+  margin: 0 -20px;
+  padding: 14px 20px;
 }
 .detail-kicker {
-  font-size:13px;
-  font-weight:600;
+  font-size: 14px;
+  font-weight: 600;
 }
 .detail-summary {
-  display:flex;
-  gap:12px;
-  align-items:center;
-  flex-wrap:wrap;
-  margin-top:20px;
-}
-.detail-level {
-  font:600 10px var(--yt-mono);
-  background:var(--yt-active-bg);
-  color:var(--yt-primary);
-  padding:4px 8px;
-  border-radius:4px;
-}
-.detail-level.error {
-  color:var(--yt-danger);
-  background:var(--yt-danger-soft);
-}
-.detail-level.warn {
-  color:var(--yt-warning);
-  background:var(--yt-warning-soft);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 20px;
 }
 .detail-summary time {
-  font-size:11px;
-  color:var(--yt-ink-3);
+  font: 11px var(--yt-mono);
+  color: var(--yt-ink-3);
 }
 .log-detail h2 {
-  font-size:16px;
-  font-weight:600;
-  line-height:1.7;
-  overflow-wrap:anywhere;
-  margin:15px 0 24px;
-  white-space:pre-wrap;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  margin: 12px 0 20px;
+  white-space: pre-wrap;
 }
 .log-detail dl {
-  display:flex;
-  flex-direction:column;
-  gap:16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 18px;
+  border-top: 1px solid var(--yt-card-border);
 }
 .log-detail dt {
-  font-size:11px;
-  color:var(--yt-ink-3);
-  margin-bottom:6px;
+  font-size: 12px;
+  color: var(--yt-ink-3);
+  margin-bottom: 6px;
 }
 .log-detail dd {
-  margin:0;
-  font-size:11px;
-  overflow-wrap:anywhere;
-  color:var(--yt-ink-2);
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--yt-ink-2);
 }
 .log-detail h3 {
-  font-size:12px;
-  margin:25px 0 12px;
+  font-size: 13px;
+  margin: 24px 0 12px;
+  font-weight: 600;
 }
 .log-field {
-  margin:12px 0;
+  margin: 12px 0 0;
+  border: 1px solid var(--yt-card-border);
+  border-radius: 8px;
+  overflow: hidden;
 }
-.log-field>span {
-  font:11px var(--yt-mono);
-  color:var(--yt-ink-3);
+.log-field > span {
+  display: block;
+  padding: 8px 12px;
+  font: 11px var(--yt-mono);
+  color: var(--yt-ink-3);
+  background: var(--yt-elevated);
+  border-bottom: 1px solid var(--yt-card-border);
 }
 .log-field pre {
-  margin:6px 0 0;
-  padding:12px;
-  background:var(--yt-code-bg);
-  border-radius:7px;
-  font:11px/1.8 var(--yt-mono);
-  white-space:pre-wrap;
-  overflow-wrap:anywhere;
-  color:var(--yt-ink-2);
+  margin: 0;
+  padding: 12px;
+  font: 12px/1.8 var(--yt-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--yt-ink-2);
 }
 .detail-empty {
-  padding:60px 15px;
-  text-align:center;
-  color:var(--yt-ink-3);
-}
-.detail-empty h2 {
-  font-size:14px;
-  margin:15px 0 7px;
-  color:var(--yt-ink-2);
-}
-.detail-empty p {
-  font-size:12px;
-  line-height:1.8;
+  padding: 80px 0;
 }
 .log-storage-warning {
-  background:var(--yt-warning-soft);
-  color:var(--yt-ink-2);
-  padding:10px 14px;
-  margin-bottom:12px;
-  border-radius:8px;
-  font-size:12px;
+  background: var(--yt-warning-soft);
+  color: var(--yt-ink-2);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 12px;
 }
 .process-heading {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  margin:25px 0 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 6px 0 -2px;
 }
 .process-heading h2 {
-  font-size:14px;
-  margin:0;
+  font-size: 14px;
+  margin: 0;
 }
-.process-heading>span {
-  font-size:12px;
-  color:var(--yt-ink-3);
+.process-heading > span {
+  font-size: 12px;
+  color: var(--yt-ink-3);
 }
 .component-grid {
-  display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  gap:16px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
 }
 .component-card {
-  padding:20px;
-  border:1px solid var(--yt-card-border);
-  border-radius:12px;
-  background:var(--yt-surface);
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--yt-card-border);
+  border-radius: 12px;
+  background: var(--yt-surface);
+  box-shadow: var(--yt-card-shadow);
 }
 .component-head {
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .component-icon {
-  color:var(--yt-ink-3);
+  color: var(--yt-ink-3);
 }
 .component-state {
-  font-size:11px;
-  color:var(--yt-ink-3);
-  background:var(--yt-soft-bg);
-  padding:3px 8px;
-  border-radius:5px;
+  font-size: 11px;
+  color: var(--yt-ink-3);
+  background: var(--yt-soft-bg);
+  padding: 3px 8px;
+  border-radius: 5px;
 }
 .component-state.running {
-  color:var(--yt-ok);
-  background:var(--yt-ok-soft);
+  color: var(--yt-ok);
+  background: var(--yt-ok-soft);
 }
-.component-state.backoff,.component-state.starting {
-  color:var(--yt-warning);
-  background:var(--yt-warning-soft);
+.component-state.backoff, .component-state.starting {
+  color: var(--yt-jk-num);
+  background: var(--yt-warning-soft);
 }
 .component-state.failed {
-  color:var(--yt-danger);
-  background:var(--yt-danger-soft);
+  color: var(--yt-danger);
+  background: var(--yt-danger-soft);
 }
 .component-card h3 {
-  font-size:14px;
-  margin:16px 0 4px;
+  font-size: 14px;
+  margin: 16px 0 4px;
 }
-.component-card>p {
-  font-size:11px;
-  color:var(--yt-ink-3);
-  margin:0;
+.component-card > p {
+  font-size: 12px;
+  color: var(--yt-ink-3);
+  margin: 0;
 }
 .component-card footer {
-  display:flex;
-  justify-content:space-between;
-  gap:8px;
-  font-size:10px;
-  color:var(--yt-ink-3);
-  margin-top:22px;
-  padding-top:13px;
-  border-top:1px solid var(--yt-card-border);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--yt-ink-3);
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--yt-card-border);
 }
 .component-card .component-reason {
-  color:var(--yt-warning);
-  font-size:11px;
-  margin-top:10px;
+  color: var(--yt-jk-num);
+  font-size: 12px;
+  margin-top: 10px;
 }
-.environment-list,.child-processes {
-  border:1px solid var(--yt-card-border);
-  background:var(--yt-surface);
-  border-radius:12px;
-  overflow:hidden;
+.environment-list, .child-processes {
+  border: 1px solid var(--yt-card-border);
+  background: var(--yt-surface);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--yt-card-shadow);
 }
-.environment-list>div {
-  display:flex;
-  justify-content:space-between;
-  padding:16px 20px;
-  font-size:12px;
-  border-bottom:1px solid var(--yt-card-border);
+.environment-list > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 20px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--yt-card-border);
 }
-.environment-list>div:last-child {
-  border:0;
+.environment-list > div:last-child {
+  border: 0;
 }
 .environment-list span {
-  color:var(--yt-ink-3);
+  color: var(--yt-ink-3);
 }
 .environment-list .text-green {
-  color:var(--yt-ok);
+  color: var(--yt-ok);
 }
-.child-header,.child-row {
-  display:grid;
-  grid-template-columns:2fr 1fr 1fr 1fr;
-  padding:14px 20px;
-  gap:10px;
-  font-size:12px;
+.child-header, .child-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  padding: 14px 20px;
+  gap: 10px;
+  font-size: 12px;
 }
 .child-header {
-  color:var(--yt-ink-3);
-  background:var(--yt-elevated);
-  font-size:11px;
+  color: var(--yt-ink-3);
+  background: var(--yt-elevated);
 }
 .child-row {
-  border-top:1px solid var(--yt-card-border);
+  border-top: 1px solid var(--yt-card-border);
 }
 .child-row strong {
-  font-weight:500;
-  overflow-wrap:anywhere;
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
 .child-empty {
-  padding:22px;
-  text-align:center;
-  color:var(--yt-ink-3);
-  font-size:12px;
+  padding: 22px;
+  text-align: center;
+  color: var(--yt-ink-3);
+  font-size: 12px;
 }
-button:focus-visible,input:focus-visible {
-  outline:2px solid var(--yt-primary);
-  outline-offset:2px;
+button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--yt-primary);
+  outline-offset: -2px;
 }
-@media(min-width:1650px) {
+@media (min-width: 1600px) {
   .log-workspace {
-    grid-template-columns:minmax(0,1.9fr) minmax(340px,1fr);
+    grid-template-columns: minmax(0, 1fr) 400px;
   }
 }
-@media(max-width:1150px) {
-  .runtime-metrics {
-    gap:10px;
-  }
+@media (max-width: 1150px) {
   .runtime-metrics article {
-    padding:16px;
-    gap:10px;
+    padding: 14px;
+    gap: 10px;
   }
   .runtime-metrics strong {
-    font-size:21px;
+    font-size: 20px;
   }
   .log-workspace {
-    grid-template-columns:minmax(0,1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
   .log-detail {
-    position:static;
-    max-height:none;
+    position: static;
+    max-height: none;
   }
   .component-grid {
-    grid-template-columns:repeat(2,minmax(0,1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
-@media(max-width:650px) {
+@media (max-width: 650px) {
   .runtime-metrics {
-    grid-template-columns:repeat(2,minmax(0,1fr));
-    margin-top:15px;
-  }
-  .runtime-tabs {
-    gap:16px;
-  }
-  .capture-state {
-    font-size:10px;
-  }
-  .log-filters>.n-select,.log-filters>.n-select:nth-child(2) {
-    width:calc(50% - 5px);
-  }
-  .log-filters>.n-input {
-    flex-basis:100%;
-  }
-  .console-columns,.log-row {
-    grid-template-columns:58px 42px minmax(0,1fr);
-    gap:7px;
-  }
-  .log-row {
-    padding:10px 8px;
-    font-size:10px;
-  }
-  .console-columns {
-    padding:10px;
-  }
-  .console-toolbar,.console-footer {
-    padding:12px;
-  }
-  .component-grid {
-    grid-template-columns:minmax(0,1fr);
-  }
-  .runtime-metrics article {
-    padding:13px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
   .metric-icon {
-    width:34px;
-    height:34px;
+    width: 30px;
+    height: 30px;
   }
-  .console-body {
-    min-height:320px;
+  .runtime-tabs {
+    padding-bottom: 26px;
   }
-  .child-header,.child-row {
-    padding:12px;
-    font-size:10px;
+  .capture-state {
+    top: auto;
+    bottom: 0;
+  }
+  .log-filters > .n-select, .log-filters > .n-select:nth-child(2) {
+    width: calc(50% - 5px);
+  }
+  .log-filters > .n-input {
+    flex-basis: 100%;
+  }
+  .log-columns {
+    display: none;
+  }
+  .log-row {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+    gap: 6px 12px;
+    padding: 14px;
+  }
+  .log-row time {
+    grid-row: 1 / 3;
+  }
+  .log-target {
+    grid-row: 1;
+    grid-column: 2;
+    align-self: center;
+  }
+  .log-row .log-level {
+    grid-row: 1;
+    grid-column: 3;
+  }
+  .log-content {
+    grid-row: 2;
+    grid-column: 2 / 4;
+    -webkit-line-clamp: 3;
+  }
+  .log-list-head, .log-list-footer {
+    padding: 12px 14px;
+  }
+  .component-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .child-header, .child-row {
+    grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr));
+    padding: 12px;
+    font-size: 11px;
   }
 }
 </style>
