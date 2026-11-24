@@ -52,7 +52,8 @@
 
 ## 5. Pull Requests & Merging
 - Reuse existing PRs or create one when appropriate.
-- Merge automatically when explicitly authorized and required checks pass.
+- Standing user authorization: automatically commit and push completed work, then merge the task PR into `main` once required CI for its exact current head and applicable browser regressions pass. Mark a draft PR ready when necessary; do not stop at a passing branch or ask for confirmation again.
+- UI and browser behavior changes require relevant browser tests. For changes without browser impact, report `Browser: Not Applicable` with the reason and complete the applicable checks. Respect a later explicit request to defer merging or deployment.
 - Prefer the repository's established merge strategy.
 - Never force-push, bypass protection, or merge failing required checks.
 - Verify remote commits, CI results, and final merge state.
@@ -66,7 +67,7 @@
 - Report concisely: changes, commit, push, CI, merge, and blockers.
 
 ## 7. Server Deployment
-- Deploy only when the user requests a server update; code/CI-only work does not authorize deployment. Respect an explicit request to defer deployment.
+- Standing user authorization: after the validated application/UI change is merged into `main`, automatically deploy that merged version to the existing server and finish the health/QQ checks below. No additional deployment confirmation is needed. Respect an explicit request to defer deployment; documentation-only changes do not require a service update unless requested.
 - By default, build/update/restart only the `yuantuan` service. Keep the existing NapCat container running; do not recreate, redeploy, or restart NapCat without a separate explicit request.
 - After preparing the image, update only the application with `docker compose -f deploy/compose.yml up -d --no-deps --no-build yuantuan`. Do not run untargeted Compose `up`, `down`, or `restart` during an application update.
 - Do not apply NapCat Compose changes as part of a normal application deployment; preserve its container and named volumes to retain QQ login state.
@@ -76,6 +77,6 @@
 - If SSH or another external dependency is blocked, preserve prepared artifacts and report the blocker; do not claim deployment succeeded.
 
 ## Execution Order
-Inspect → Implement → Update Docs & Structure → Validate → Commit → Push → Check CI → Merge (if authorized).
+Inspect → Implement → Update Docs & Structure → Validate (including applicable browser tests) → Commit → Push → Check exact-head CI → Merge into main → Verify the merged revision/artifact → Deploy application changes → Verify health and QQ connection.
 
 **Keep code clean, documentation accurate, project structure consistent, and operations efficient.**
