@@ -8,6 +8,8 @@
 
 ## 实际行为
 
+面板提交 Provider 配置时，新凭据同步登记到[运行日志](../runtime/console.md)的脱敏器后再进入校验与保存流程，日志读取继续使用管理员会话鉴权。
+
 QQ 官方机器人配置独立于模型服务，主配置写入时会校验 AppID 和 AppSecret，并返回重启要求。字段与运行状态见 [QQ 接入](../adapter-qq/qq.md)。
 
 - `LlmGateway` 对 `decision`、`bot_chat`、`agent_exec` 分别绑定 Provider/Model；角色职责独立，但可使用同一实际模型。
