@@ -16,7 +16,7 @@
     <div class="runtime-tabs" role="tablist" aria-label="控制台视图">
       <button role="tab" :aria-selected="tab === 'logs'" :class="{ active: tab === 'logs' }" @click="tab = 'logs'"><yt-icon name="terminal" :size="17" />运行日志</button>
       <button role="tab" :aria-selected="tab === 'process'" :class="{ active: tab === 'process' }" @click="tab = 'process'"><yt-icon name="mcp" :size="17" />进程与组件</button>
-      <span class="spacer" /><span class="capture-state"><i :class="{ live: !paused && !date }" />{{ date ? '历史记录' : paused ? '已暂停更新' : '每 2 秒更新' }}</span>
+      <span class="spacer" /><span class="capture-state"><i :class="{ live: tab === 'process' || (!paused && !date) }" />{{ tab === 'process' ? '每 10 秒更新' : date ? '历史记录' : paused ? '已暂停更新' : '每 2 秒更新' }}</span>
     </div>
 
     <template v-if="tab === 'logs'">

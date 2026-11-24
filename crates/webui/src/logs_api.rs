@@ -49,7 +49,8 @@ pub async fn logs(State(state): State<AppState>, Query(q): Query<LogQuery>) -> R
 
 pub async fn status(State(state): State<AppState>) -> Json<Value> {
     let process = tokio::task::spawn_blocking(process_info).await.unwrap_or_else(|_|json!({"unavailable":true}));
-    Json(json!({"process":process,"uptime_secs":state.started.elapsed().as_secs(),
+    let uptime = process["run_time_secs"].as_u64().unwrap_or_else(||state.started.elapsed().as_secs());
+    Json(json!({"process":process,"uptime_secs":uptime,
         "components":state.extras.supervisor.snapshot(),"total_restarts":state.extras.supervisor.total_restarts(),
         "platforms":(state.extras.platform_status)(),"storage":state.extras.runtime_logs.status(),
         "bash_registered":state.extras.tools_registry.get("sandbox_exec").is_some()}))
@@ -80,7 +81,7 @@ fn process_info() -> Value {
     }
     children.truncate(64);
     json!({"pid":pid.as_u32(),"memory_bytes":own.map(|p|p.memory()),"cpu_percent":own.map(|p|p.cpu_usage()),
-        "cpu_sample_ready":system.process(pid).is_some(),"children":children})
+        "run_time_secs":own.map(|p|p.run_time()),"children":children})
 }
 
 #[cfg(test)]
