@@ -143,6 +143,7 @@ import EmptyState from '../components/EmptyState.vue'
 import CountUp from '../components/CountUp.vue'
 import YtSkeleton from '../components/YtSkeleton.vue'
 import { subscribeWs } from '../ws'
+import { mergeEventRows, messageEventKey } from '../event-feed'
 
 /** @type {import('vue').Ref<Record<string, any>>} */
 const d = ref({})
@@ -153,9 +154,27 @@ const hourSeries = ref(Array.from({ length: 24 }, () => ({ in: 0, out: 0 })))
 const hasHourData = ref(false)
 const loadingFirst = ref(true)
 const refreshing = ref(false)
-const loadError = ref('')
+const metricsError = ref(''), eventsError = ref('')
+const loadError = computed(() => metricsError.value || eventsError.value)
 const ui = useUiStore()
 let timer = null
+let metricsTimer = null, metricsPending = false, metricsAgain = false, stopped = false
+let liveDuringLoad = null
+const seenMessages = new Set()
+
+function rememberMessage(event) {
+  const key = messageEventKey(event)
+  if (key == null) return true
+  if (seenMessages.has(key)) return false
+  seenMessages.add(key)
+  if (seenMessages.size > 2000) seenMessages.delete(seenMessages.values().next().value)
+  return true
+}
+
+function queueMetricsRefresh() {
+  if (metricsTimer || stopped) return
+  metricsTimer = setTimeout(() => { metricsTimer = null; void loadMetrics() }, 1000)
+}
 
 function sample(key, v) {
   if (typeof v !== 'number') return
@@ -204,13 +223,14 @@ function aggregateHours(events) {
   return { buckets, any }
 }
 
-async function load() {
-  if (refreshing.value) return
-  refreshing.value = true
-  loadError.value = ''
+async function loadMetrics() {
+  if (metricsPending) { metricsAgain = true; return }
+  metricsPending = true
   try {
     const { data } = await api.get('/dashboard')
+    if (stopped) return
     d.value = data
+    metricsError.value = ''
     ui.setMood(data.mood)
     sample('inToday', data.messages_in_today)
     sample('outToday', data.messages_out_today)
@@ -219,43 +239,49 @@ async function load() {
     sample('tokens', data.tokens_today)
     sample('mem', Math.round((data.mem_rss_bytes ?? 0) / 1048576))
   } catch {
-    loadError.value = '运行数据获取失败，请检查后端服务状态。'
+    if (!stopped) metricsError.value = '运行数据获取失败，请检查后端服务状态。'
+  } finally {
+    metricsPending = false
+    if (metricsAgain) { metricsAgain = false; queueMetricsRefresh() }
   }
+}
+
+async function load() {
+  if (refreshing.value || stopped) return
+  refreshing.value = true
+  liveDuringLoad = []
+  await loadMetrics()
   try {
     const { data } = await api.get('/events?limit=500')
-    recent.value = data.events.slice(0, 8)
-    const { buckets, any } = aggregateHours(data.events)
+    if (stopped) return
+    const events = mergeEventRows([...liveDuringLoad, ...data.events])
+    for (const event of events) rememberMessage(event)
+    recent.value = events.slice(0, 8)
+    const { buckets, any } = aggregateHours(events)
     hourSeries.value = buckets
     hasHourData.value = any
+    eventsError.value = ''
   } catch {
-    loadError.value = '事件流获取失败，请检查后端服务状态。'
+    if (!stopped) eventsError.value = '事件流获取失败，请检查后端服务状态。'
+  } finally {
+    liveDuringLoad = null
+    loadingFirst.value = false
+    refreshing.value = false
   }
-  loadingFirst.value = false
-  refreshing.value = false
 }
 
 function onWsEvent(ev) {
-  if (!ev || !ev.kind) return
+  if (stopped || !ev || !ev.kind || !rememberMessage(ev)) return
   const now = Math.floor(Date.now() / 1000)
-  if (ev.kind === 'MessageReceived') {
-    d.value.messages_in_today = (d.value.messages_in_today ?? 0) + 1
-    sample('inToday', d.value.messages_in_today)
-  } else if (ev.kind === 'BubbleSent') {
-    d.value.messages_out_today = (d.value.messages_out_today ?? 0) + 1
-    sample('outToday', d.value.messages_out_today)
-  } else if (ev.kind === 'DecisionMade') {
-    d.value.decision_calls_today = (d.value.decision_calls_today ?? 0) + 1
-    sample('decision', d.value.decision_calls_today)
-    if (ev.payload?.mood) ui.setMood(ev.payload.mood)
-  } else if (ev.kind === 'TaskCreated') {
-    d.value.active_tasks = (d.value.active_tasks ?? 0) + 1
-    sample('tasks', d.value.active_tasks)
-  } else if (ev.kind === 'TaskFinished') {
-    d.value.active_tasks = Math.max(0, (d.value.active_tasks ?? 0) - 1)
-    sample('tasks', d.value.active_tasks)
+  if (['MessageReceived', 'BubbleSent', 'DecisionMade', 'TaskCreated', 'TaskFinished'].includes(ev.kind)) {
+    // A database snapshot may already include a live event. Refresh authoritative
+    // counters in batches rather than adding that same event to them again.
+    queueMetricsRefresh()
   }
   const item = { _k: Math.random(), kind: ev.kind, payload: ev.payload ?? ev, ts: ev.ts ?? now }
-  recent.value = [item, ...recent.value].slice(0, 8)
+  if (ev.kind === 'DecisionMade' && item.payload.mood) ui.setMood(item.payload.mood)
+  if (liveDuringLoad) { liveDuringLoad.unshift(item); liveDuringLoad.length = Math.min(liveDuringLoad.length, 500) }
+  recent.value = mergeEventRows([item, ...recent.value], 8)
   const midnight = new Date(); midnight.setHours(0, 0, 0, 0)
   const t0 = Math.floor(midnight.getTime() / 1000)
   if (item.ts >= t0) {
@@ -271,7 +297,7 @@ onMounted(() => {
   timer = setInterval(load, 60000)
   off = subscribeWs(onWsEvent)
 })
-onUnmounted(() => { clearInterval(timer); off && off() })
+onUnmounted(() => { stopped = true; clearInterval(timer); clearTimeout(metricsTimer); off && off() })
 </script>
 
 <style scoped>

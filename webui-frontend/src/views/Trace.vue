@@ -132,6 +132,7 @@ import { subscribeWs, wsConnected } from '../ws'
 import { kindColor, kindLabel, actionColor, eventSummary, fmtAgo, fmtTs } from '../fmt'
 import JsonView from '../components/JsonView.vue'
 import EmptyState from '../components/EmptyState.vue'
+import { mergeEventRows, messageEventKey } from '../event-feed'
 
 /** @type {import('vue').Ref<any[]>} */
 const items = ref([])
@@ -198,9 +199,12 @@ function actionTagColor(a) {
 }
 
 let eventsRequest = null
+let liveDuringLoad = []
 async function fetchPage(beforeId = null) {
   eventsRequest?.abort()
   const request = new AbortController()
+  const arrivals = []
+  liveDuringLoad = arrivals
   eventsRequest = request
   loading.value = true
   eventsError.value = ''
@@ -219,9 +223,9 @@ async function fetchPage(beforeId = null) {
     const { data } = await api.get(`/events?${params}`, { signal: request.signal })
     if (request.signal.aborted) return
     if (beforeId) {
-      items.value = items.value.concat(data.events)
+      items.value = mergeEventRows([...items.value, ...data.events])
     } else {
-      items.value = data.events
+      items.value = mergeEventRows([...arrivals, ...data.events])
       sel.value = items.value[0] || null
     }
     hasMore.value = data.has_more ?? (data.events.length === 50)
@@ -261,11 +265,14 @@ onMounted(() => {
   void reset()
   poll = setInterval(() => { if (!document.hidden && !statusLoading) refreshStatus() }, 10000)
   off = subscribeWs((ev) => {
-    if (date.value) return
+    if (date.value || !ev?.kind) return
     if (kind.value && ev.kind !== kind.value) return
     if (chat.value && ev.chat_id !== chat.value && ev.payload?.chat_id !== chat.value) return
-    items.value.unshift({ _k: Math.random(), kind: ev.kind, payload: ev, ts: Math.floor(Date.now() / 1000) })
-    if (items.value.length > 300) items.value.pop()
+    const key = messageEventKey(ev)
+    if (key != null && items.value.some(item => messageEventKey(item) === key)) return
+    const item = { _k: Math.random(), kind: ev.kind, payload: ev.payload ?? ev, ts: ev.ts ?? Math.floor(Date.now() / 1000) }
+    if (eventsRequest) { liveDuringLoad.unshift(item); liveDuringLoad.length = Math.min(liveDuringLoad.length, 300) }
+    items.value = mergeEventRows([item, ...items.value], 300)
   })
 })
 onUnmounted(() => { statusRequest++; eventsRequest?.abort(); off?.(); if (poll) clearInterval(poll) })

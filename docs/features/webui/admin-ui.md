@@ -12,6 +12,8 @@
 
 - Rust Axum 后端提供受保护的 `/api/*`、`/ws` 和嵌入式静态前端；登录与状态接口例外处理。
 - Vue 管理页面提供总览、决策追踪、任务、配置等入口；WebSocket 推送观测事件，用于 UI 展示。
+- 总览与决策追踪按本地 `msg_id` 合并同一条 `MessageReceived` 的 HTTP 历史和实时推送，保留持久事件编号用于分页。HTTP 请求期间到达的新事件会并入返回结果；不同消息编号即使文字、作者和时间相同也分别显示，缺少编号时不按正文猜测去重。
+- 总览记住最近 2000 个已见消息编号，避免重复推送叠加小时图。收发数、决策数和运行中任务数由受保护的 `/api/dashboard` 返回，相关实时事件触发约一秒合批刷新，避免已被快照计入的事件再次累加。请求失败保留最近一次数据并显示错误。
 - WebUI 的 HTTP 路由可使用已绑定的 TCP 监听器启动，记忆库接口回归直接复用该入口以避免并行测试抢占临时端口。
 - 工作台有独立「定时任务」页，使用受管理员会话保护的 `/api/schedules`。规则见 [定时任务](../core/scheduler.md)。
 - 插件能力的会话范围与启停通过管理员会话保护的 `PATCH /api/capabilities` 更新，字段及权限规则见[扩展宿主](../extensions/host.md)。
@@ -38,6 +40,7 @@
 - [`crates/webui/src/state.rs`](../../../crates/webui/src/state.rs)
 - [`crates/webui/src/static_files.rs`](../../../crates/webui/src/static_files.rs)
 - [`crates/webui/src/ws.rs`](../../../crates/webui/src/ws.rs)
+- [`webui-frontend/src/event-feed.js`](../../../webui-frontend/src/event-feed.js)
 - [`webui-frontend/src/views/Dashboard.vue`](../../../webui-frontend/src/views/Dashboard.vue)
 - [`webui-frontend/src/views/Login.vue`](../../../webui-frontend/src/views/Login.vue)
 - [`webui-frontend/src/views/Trace.vue`](../../../webui-frontend/src/views/Trace.vue)
@@ -46,6 +49,9 @@
 
 - [`crates/webui/tests/auth_status.rs`](../../../crates/webui/tests/auth_status.rs)
 - [`crates/webui/tests/pages_api.rs`](../../../crates/webui/tests/pages_api.rs)
+- [`webui-frontend/tests/dashboard-flow.spec.js`](../../../webui-frontend/tests/dashboard-flow.spec.js) 验证快照／推送去重、加载期间的新消息、相同文字的不同消息及统计不重复累加；CI 同步运行。
+
+事件去重修复以浏览器模拟 HTTP／WebSocket 验证交接时序，尚未部署验收。生产排查中对应“1”的消息与事件各只有一条，未发现该消息重复摄取；修复没有修改历史消息或事件数据。
 
 维护规则：修改上列源码的功能行为时，同一 PR 更新本页；新增、删除或迁移模块时同步更新 `catalog.json`。测试入口只代表可追踪的验证位置，不代表本次执行通过。
 
