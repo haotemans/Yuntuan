@@ -8,8 +8,11 @@
       <n-button size="small" secondary :loading="loading" @click="load">刷新</n-button>
     </header>
     <n-alert v-if="loadError" type="error" :bordered="false">{{ loadError }}</n-alert>
-
-    <div class="schedules-grid">
+    <n-tabs v-model:value="mode" type="line" class="schedule-tabs">
+      <n-tab name="agent">云团任务</n-tab><n-tab name="tool">固定工具</n-tab>
+    </n-tabs>
+    <AgentSchedules v-if="mode === 'agent'" />
+    <div v-else class="schedules-grid">
       <n-card title="新建任务" size="small" class="schedule-editor">
         <n-form label-placement="top" :show-feedback="false" :disabled="creating" @submit.prevent="createTask">
             <n-form-item label="执行工具">
@@ -84,6 +87,8 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import { api } from '../api'
 import EmptyState from '../components/EmptyState.vue'
+import AgentSchedules from '../components/AgentSchedules.vue'
+const mode = ref('agent')
 
 const tasks = ref([])
 const options = ref([])
@@ -191,6 +196,7 @@ onUnmounted(() => { disposed = true; clearInterval(timer); request?.abort() })
 
 <style scoped>
 .yt-page-title { margin: 0; }
+.schedule-tabs { margin-bottom: 16px; }
 .schedules-grid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .schedules-grid > * { min-width: 0; }
 .create-actions { display: flex; justify-content: flex-end; margin-top: 12px; }

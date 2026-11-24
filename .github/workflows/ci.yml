@@ -49,6 +49,9 @@ jobs:
       - name: Task runtime browser tests
         working-directory: webui-frontend
         run: npm run test:tasks
+      - name: Agent schedule and sandbox browser tests
+        working-directory: webui-frontend
+        run: npx playwright test agent-schedules.spec.js
       - name: Decision scheduling browser tests
         working-directory: webui-frontend
         run: npm run test:trace
@@ -100,6 +103,7 @@ jobs:
           cargo test --locked -p yuantuan-mcp-http
           cargo test --locked -p yuantuan-plugin-tencent-docs -p yuantuan-plugin-quark-drive
           cargo test --locked -p yuantuan-core --lib scheduler::tests
+          cargo test --locked -p yuantuan-core --lib scheduler::agents::tests
           cargo test --locked -p yuantuan-webui --test pages_api connector_probe
           cargo test --locked -p yuantuan-plugin-qzone
           cargo test --locked -p yuantuan-core --test qzone_host
@@ -130,6 +134,18 @@ jobs:
         run: |
           docker build --target connector-runtime -t yuantuan-connector-runtime:ci .
           docker run --rm --entrypoint node yuantuan-connector-runtime:ci --version
+
+      - name: Docker Bash sandbox execution (no external model)
+        run: |
+          docker build --label org.opencontainers.image.revision=${{ github.sha }} -t yuantuan-sandbox:local deploy/sandbox
+          cargo test --locked -p yuantuan-core --test sandbox_docker -- --ignored --nocapture
+          docker save yuantuan-sandbox:local | gzip > /tmp/yuantuan-sandbox.tar.gz
+
+      - name: Upload validated Bash sandbox image
+        uses: actions/upload-artifact@v4
+        with:
+          name: yuantuan-sandbox-linux-x86_64
+          path: /tmp/yuantuan-sandbox.tar.gz
 
       - name: Quark private worker native execution (no external account)
         run: |

@@ -69,6 +69,8 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { api } from '../api'
+import { useRoute } from 'vue-router'
+const route = useRoute()
 import { fmtTs } from '../fmt'
 import EmptyState from '../components/EmptyState.vue'
 
@@ -103,7 +105,13 @@ async function load() {
   if(version!==listVersion)return
   list.value = data.tasks || []
   firstLoaded.value = true
-  const selected=list.value.find(t=>t.task_id===cur.value?.task_id) || list.value[0]
+  const requested=cur.value?.task_id || route.query.task
+  if (requested && !list.value.some(t=>t.task_id===requested)) {
+    const exact=await api.get(`/tasks?task_id=${encodeURIComponent(String(requested))}`)
+    if(version!==listVersion)return
+    list.value.unshift(...(exact.data.tasks || []))
+  }
+  const selected=requested ? list.value.find(t=>t.task_id===requested) : list.value[0]
   if(selected) await open(selected)
   else {++requestVersion;cur.value=null;runtime.value=null;brief.value=null;briefVersions.value=[];events.value=[];invocations.value=[]}
 }

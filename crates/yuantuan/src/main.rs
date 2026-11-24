@@ -213,14 +213,18 @@ async fn main() -> Result<()> {
     let tools_registry = yuantuan_core::tools::Registry::new();
     if cfg.sandbox.enabled {
         let sandbox = yuantuan_core::tools::sandbox::SandboxExecTool::new(cfg.sandbox.clone())?;
-        sandbox.check_available().await?;
-        tools_registry.register(sandbox);
-        info!(image = %cfg.sandbox.image, "Docker 开发沙箱已就绪");
+        match sandbox.check_available().await {
+            Ok(()) => {
+                tools_registry.register(sandbox);
+                info!(image = %cfg.sandbox.image, "Docker 开发沙箱已就绪");
+            }
+            Err(error) => warn!(%error, "Bash 环境不可用，未注册 sandbox_exec；请在定时任务页查看状态，修复后重启"),
+        }
     }
     let skill_registry = yuantuan_core::skills::SkillRegistry::new();
     let diagnostics = Arc::new(
         yuantuan_core::tools::diagnostics::Diagnostics::new(db_path.clone())
-            .with_sandbox_enabled(cfg.sandbox.enabled)
+            .with_sandbox_enabled(tools_registry.get("sandbox_exec").is_some())
             .with_runtime_logs(runtime_logs.clone()),
     );
     tools_registry.register_arc(diagnostics.clone());
@@ -261,8 +265,17 @@ async fn main() -> Result<()> {
         });
     }
 
-    // h1''. MCP stdio client（Q-M01 裁决：spawn 外部 MCP server，tools 注入 ToolRegistry）
-    //        未配置 = 跳过；任一 server 失败 = warn + 继续（不阻塞其他）
+    // Daily Agent plans share the existing persistent runner and its tool policy.
+    {
+        let db = db_path.clone();
+        let tools = tools_registry.clone();
+        let bus = bus.clone();
+        let llm = llm_slot.clone();
+        supervisor.spawn("scheduled_agents", move || {
+            yuantuan_core::scheduler::agents::spawn(db.clone(), tools.clone(), bus.clone(), llm.clone())
+        });
+    }
+    // MCP stdio: unconfigured servers are skipped, failures don't stop other services.
     let (mcp_manager, mcp_failures) = yuantuan_core::mcp::McpManager::spawn_all(&cfg.mcp).await;
     if !cfg.mcp.servers.is_empty() {
         info!(
@@ -505,6 +518,9 @@ async fn main() -> Result<()> {
             })
         },
         backup_cfg: backup_cfg_slot.clone(),
+        sandbox: cfg.sandbox.clone(),
+        account_owner: cfg.security.super_admin_qq,
+        bash_probe_lock: Arc::new(tokio::sync::Mutex::new(())),
         tools_registry: tools_registry.clone(),
         skill_registry: skill_registry.clone(),
         plugin_manager: Some(plugins.clone()),

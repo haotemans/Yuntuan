@@ -11,6 +11,9 @@ pub const SESSION_TTL: Duration = Duration::from_secs(24 * 3600);
 /// 装配层注入（main 组装；测试自行构造）
 #[derive(Clone)]
 pub struct Extras {
+    pub sandbox: yuantuan_core::tools::sandbox::SandboxConfig,
+    pub account_owner: Option<u64>,
+    pub bash_probe_lock: Arc<tokio::sync::Mutex<()>>,
     pub runtime_logs: yuantuan_core::runtime_logs::RuntimeLogs,
     pub supervisor: yuantuan_core::supervisor::Supervisor,
     /// Event Bus（/ws 全量推送）
@@ -57,6 +60,9 @@ impl Extras {
     /// 测试装配：全部槽取默认值，归纳句柄空，self_qq 为 0
     pub fn for_test(config_path: PathBuf, providers_path: PathBuf) -> Self {
         Self {
+            sandbox: Default::default(),
+            account_owner: None,
+            bash_probe_lock: Arc::new(tokio::sync::Mutex::new(())),
             runtime_logs: Default::default(),
             supervisor: Default::default(),
             bus: yuantuan_core::event::EventBus::new(64),

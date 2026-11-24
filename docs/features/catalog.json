@@ -501,11 +501,13 @@
     },
     {
       "id": "scheduler",
-      "title": "统一每日只读工具调度与分享守护",
-      "status": "新增持久调度代码（真实账号联调与部署待完成）",
+      "title": "每日 Agent、工具调度与分享守护",
+      "status": "每日工具调度已实现，新增每日 Agent 入口（实际业务验收另计）",
       "doc": "docs/features/core/scheduler.md",
       "source": [
         "crates/core/src/scheduler.rs",
+        "crates/core/src/scheduler/agents.rs",
+        "crates/webui/src/agent_api.rs",
         "crates/webui/src/schedule_api.rs",
         "webui-frontend/src/views/Schedules.vue"
       ],
@@ -513,6 +515,9 @@
         "crates/core/tests/sqlx_storage.rs",
         "webui-frontend/tests/plugins-flow.spec.js",
         "crates/core/src/scheduler.rs",
+        "crates/core/src/scheduler/agents.rs",
+        "crates/core/tests/agent_loop.rs",
+        "webui-frontend/tests/agent-schedules.spec.js",
         "crates/webui/tests/pages_api.rs",
         "webui-frontend/tests/tasks-flow.spec.js"
       ],

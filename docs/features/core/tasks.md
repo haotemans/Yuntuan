@@ -112,3 +112,9 @@ Router明确选中事项但材料缺失时，任务创建整体回滚，失败�
 Agent对invalid_arguments依据字段路径和Schema修正，无法从任务说明或已有结果获得的业务条件才wait_input；不自动编造目标、默认时长或凭据。预检拒绝不启动工具，修正继续原任务的有界loop，不重启Router或重置预算。副作用未知时仍停止，不把调用方便理解为无限重试。
 
 验证：[`tool_usability.rs`](../../../crates/core/tests/tool_usability.rs) 覆盖无Skill但有Tool时的Chat能力、停用/范围/未就绪过滤和错误路径；[`dispatch_tests.rs`](../../../crates/core/src/bot/dispatch_tests.rs) 用本地mock跑Router→Agent→错误参数拒绝→修正→成功回执，仅实际执行一次，并检查周期入口读取当前开关。mock验证接口与宿主行为，不证明真实模型一定选对工具。
+
+## 管理员定时入口与沙箱状态
+
+V23 每日计划复用本执行器，任务与触发记录共享创建事务，来源标为 admin_schedule。原聊天任务继续核验用户原话，保留原有事务。规则见[定时任务](scheduler.md)。定时任务没有聊天原消息锚点，本版只在后台保存结果，不进入 QQ outbox。任务回放支持 ?task=<id> 打开指定任务，列表未包含时单独查询，不能误选其他任务。
+
+Bash 仍需独立 Docker 环境及 sandbox 配置。启动预检失败时不注册工具并记录 WARN，主应用继续服务；管理员可在定时任务页查看不可用状态并检查环境，修复后重启。运行参数页新增启停、镜像、网络、内存与命令时限配置，保存提示重启。预检仅证明 daemon/镜像可达，实际退出码与输出以工具回执为准。CI 新增真实 Linux Docker 集成测试及带提交标签的沙箱镜像制品；rootless/生产链路需独立现场验收。隔离与文件保留边界见[沙箱参考](../../reference/agent-sandbox.md)。

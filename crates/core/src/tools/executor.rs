@@ -12,6 +12,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+fn effect_allowed(ctx: &ToolCtx, tool: &dyn Tool) -> bool {
+    !(ctx.chat_type == "private" && ctx.chat_id == "scheduled" && ctx.task_id.is_some())
+        || matches!(tool.policy().effect, ToolEffect::ReadOnly | ToolEffect::WorkspaceWrite)
+}
+
 pub async fn register(path: &Path, tool: &dyn Tool) -> Result<ToolDefinition> {
     let definition = ToolDefinition::of(tool);
     ensure!(
@@ -45,7 +50,7 @@ pub async fn catalog(
             continue;
         }
         if let Some(tool) = registry.get(name) {
-            if tool.available_in_chat(ctx)
+            if tool.available_in_chat(ctx) && effect_allowed(ctx, tool.as_ref())
                 && crate::capabilities::allowed(path, name, "tool", ctx).await?
             {
                 out.push(register(path, tool.as_ref()).await?);
@@ -148,6 +153,7 @@ pub async fn execute(
         ));
     };
     if !tool.available_in_chat(ctx)
+        || !effect_allowed(ctx, tool.as_ref())
         || (!s.allowed.is_empty() && !s.allowed.contains(&call.name))
         || !crate::capabilities::allowed(path, &call.name, "tool", ctx).await?
     {

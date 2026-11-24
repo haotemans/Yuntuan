@@ -33,7 +33,7 @@ timeout_secs = 60
 max_output_bytes = 16384
 ```
 
-默认 `enabled=false`：旧配置继续运行，不注册沙箱工具，也不调用 Docker。启用后启动检查 Docker daemon 与本地镜像均为 Linux；不可用则启动报错。执行时 `--pull=never`，镜像必须预先构建。修改配置重启生效；配置 API 在写文件前校验沙箱字段，明确返回 `requires_restart`。当前没有专用沙箱设置页面。
+默认 `enabled=false`：旧配置继续运行，不注册沙箱工具，也不调用 Docker。启用后启动检查 Docker daemon 与本地镜像均为 Linux；不可用时告警、不注册 Bash，主应用继续服务，修复后重启。执行时 `--pull=never`，镜像必须预先构建。修改配置重启生效；配置 API 在写文件前校验沙箱字段，明确返回 `requires_restart`。运行参数页提供沙箱配置，定时任务页展示注册状态与环境预检；预检不执行命令。
 
 `timeout_secs` 上限 90 秒，为 Docker 创建、停止和清理留出时间；Agent 原有 120 秒工具超时、10 轮预算、默认最多 2 个任务并发。每次命令可申请更短的超时，不能超过配置上限。
 

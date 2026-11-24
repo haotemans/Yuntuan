@@ -19,6 +19,19 @@
       <n-grid cols="1 m:2" :x-gap="16" :y-gap="16" responsive="screen">
         <n-gi>
           <div class="param-col">
+            <n-card title="Bash 执行沙箱" size="small">
+              <p class="sandbox-note">{{ agentStatus?.bash?.message || '沙箱配置保存后重启云团生效。请先部署专用 Docker 环境与沙箱镜像。' }}</p>
+              <n-form label-placement="top" :show-feedback="false" class="clean-form">
+                <n-form-item label="启用 Bash 沙箱"><n-switch v-model:value="f.sandbox.enabled" aria-label="启用 Bash 沙箱" /></n-form-item>
+                <n-form-item label="沙箱镜像"><n-input v-model:value="f.sandbox.image" :input-props="{'aria-label':'沙箱镜像'}" /></n-form-item>
+                <n-form-item label="网络访问"><n-select v-model:value="f.sandbox.network" :options="[{label:'禁用网络',value:'none'},{label:'允许网络（含服务器可达内网）',value:'bridge'}]" aria-label="沙箱网络" /></n-form-item>
+                <n-form-item label="单次命令时限（秒）"><n-input-number v-model:value="f.sandbox.timeout_secs" :min="1" :max="90" :precision="0" /></n-form-item>
+                <n-form-item label="内存上限（MiB）"><n-input-number v-model:value="f.sandbox.memory_mb" :min="128" :max="4096" :precision="0" /></n-form-item>
+              </n-form>
+              <p class="sandbox-note">命令在独立容器的任务工作区执行。检查仅验证当前进程加载的 Docker 连接和镜像，不执行 Bash，也不安装依赖。修改配置后需重启，再检查。</p>
+              <n-button size="small" secondary :loading="probing" @click="probeBash">检查当前环境</n-button>
+              <n-alert v-if="bashProbe" :type="bashProbe.ok ? 'success' : 'warning'" :bordered="false" style="margin-top:12px">{{ bashProbe.message }}</n-alert>
+            </n-card>
             <n-card title="夜间记忆归纳" size="small">
               <n-form label-placement="left" label-width="150" :show-feedback="false" class="clean-form">
                 <n-form-item label="启用定时归纳">
@@ -144,6 +157,7 @@ const ok = ref(false)
 const restartList = ref([])
 
 const f = ref({
+  sandbox: { enabled:false,docker_command:'docker',image:'yuantuan-sandbox:local',namespace:'yuantuan',network:'none',memory_mb:512,cpus:1,pids_limit:128,timeout_secs:60,max_output_bytes:16384 },
   consolidation: { enabled: true, daily_time: '03:00', run_on_startup: false, portrait_daily_limit: 10, portrait_interval_secs: 60, conversation_daily_limit: 20 },
   context: { budget_chars: 40000, k: 20, roster_mem_per: 3 },
   reply: {
@@ -160,6 +174,13 @@ const f = ref({
   meme: { steal_enabled: true },
 })
 const whole = ref({})
+const agentStatus = ref(null), bashProbe = ref(null), probing = ref(false)
+async function probeBash() {
+  probing.value = true
+  try { bashProbe.value = (await api.post('/runtime/bash/check')).data }
+  catch(e) { bashProbe.value = {ok:false,message:e.response?.data?.error || '环境检查失败'} }
+  finally { probing.value = false }
+}
 
 const totalBudgetSecs = computed({
   get: () => Math.round(f.value.reply.total_budget_ms / 1000),
@@ -170,10 +191,11 @@ onMounted(async () => {
   const { data } = await api.get('/config')
   const c = data.config || {}
   whole.value = c
-  for (const k of ['consolidation', 'context', 'reply', 'prefilter', 'pipeline', 'meme']) {
+  for (const k of ['consolidation', 'context', 'reply', 'prefilter', 'pipeline', 'meme', 'sandbox']) {
     if (c[k]) f.value[k] = { ...f.value[k], ...c[k] }
   }
   loaded.value = true
+  try { agentStatus.value = (await api.get('/runtime/agent')).data } catch { /* Keep configuration usable when status is unavailable. */ }
   try { policy.value = (await api.get('/decisions/status?limit=0')).data.policy } catch { /* unknown policy stays explicit */ }
 })
 
@@ -190,6 +212,7 @@ async function save() {
       prefilter: { ...f.value.prefilter },
       pipeline: { ...f.value.pipeline },
       meme: { ...f.value.meme },
+      sandbox: { ...f.value.sandbox },
     }
     const { data } = await api.post('/config', { config })
     ok.value = true
@@ -222,4 +245,5 @@ async function save() {
 }
 .save-msg.ok { color: var(--yt-ok); }
 .save-msg.fail { color: var(--yt-danger); }
+.sandbox-note {color:var(--yt-ink-3);font-size:12px;line-height:1.7;margin:0 0 12px}
 </style>

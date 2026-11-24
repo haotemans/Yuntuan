@@ -75,6 +75,7 @@ test('creates a daily tool task from the navigation and manages its result and t
   await page.getByRole('button', { name: '切换导航栏' }).click()
   await page.getByText('定时任务', { exact: true }).click()
   await expect(page).toHaveURL(/\/schedules$/)
+  await page.getByText('固定工具', { exact: true }).click()
   await page.getByLabel('执行工具').click()
   await page.getByText('搜索夸克网盘', { exact: true }).click()
   await page.getByLabel('搜索关键词').fill('工作记录')

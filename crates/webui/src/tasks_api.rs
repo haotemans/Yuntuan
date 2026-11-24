@@ -14,6 +14,7 @@ use yuantuan_core::db::SqliteExt;
 pub struct TasksQuery {
     state: Option<String>,
     limit: Option<i64>,
+    task_id: Option<String>,
 }
 
 pub async fn list(
@@ -33,11 +34,11 @@ pub async fn list(
         let mut stmt = conn
             .prepare(
                 "SELECT task_id, goal, state, budget_max_calls, used_calls, created_by_pid, chat_id, created_at, finished_at
-                 FROM tasks WHERE state = ?1 ORDER BY created_at DESC LIMIT ?2",
+                 FROM tasks WHERE state = ?1 AND (?3 IS NULL OR task_id=?3) ORDER BY created_at DESC LIMIT ?2",
             ).await
             .map_err(|e| err(&format!("查询失败: {e}")))?;
         let it = stmt
-            .query_map(params![s, limit], task_row)
+            .query_map(params![s, limit, q.task_id], task_row)
             .await
             .map_err(|e| err(&format!("查询失败: {e}")))?;
         it.filter_map(|r| r.ok()).collect()
@@ -45,11 +46,11 @@ pub async fn list(
         let mut stmt = conn
             .prepare(
                 "SELECT task_id, goal, state, budget_max_calls, used_calls, created_by_pid, chat_id, created_at, finished_at
-                 FROM tasks ORDER BY created_at DESC LIMIT ?1",
+                 FROM tasks WHERE (?2 IS NULL OR task_id=?2) ORDER BY created_at DESC LIMIT ?1",
             ).await
             .map_err(|e| err(&format!("查询失败: {e}")))?;
         let it = stmt
-            .query_map(params![limit], task_row)
+            .query_map(params![limit, q.task_id], task_row)
             .await
             .map_err(|e| err(&format!("查询失败: {e}")))?;
         it.filter_map(|r| r.ok()).collect()

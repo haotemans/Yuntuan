@@ -592,6 +592,9 @@ struct HelloToolForTest;
 
 #[async_trait::async_trait]
 impl yuantuan_core::tools::Tool for HelloToolForTest {
+    fn policy(&self) -> yuantuan_core::tools::ToolPolicy {
+        yuantuan_core::tools::ToolPolicy { effect:yuantuan_core::tools::ToolEffect::ReadOnly, ..Default::default() }
+    }
     fn name(&self) -> &'static str {
         "hello"
     }
@@ -611,4 +614,34 @@ impl yuantuan_core::tools::Tool for HelloToolForTest {
             data: serde_json::json!({"greeted": who}),
         })
     }
+}
+
+#[tokio::test(flavor="multi_thread",worker_threads=2)]
+async fn scheduled_agent_runs_existing_loop_and_retains_admin_provenance() {
+    use yuantuan_core::scheduler::agents::{self,Draft};
+    let (base_url, calls) = spawn_mock_llm().await;
+    let (_guard,path)=temp_db().await;
+    let providers=_guard.path().join("scheduled-providers.toml");
+    std::fs::write(&providers,format!("[provider.mock]\nbase_url = \"{base_url}\"\napi_key_env = \"\"\n[roles]\nagent_exec = {{provider=\"mock\",model=\"m\"}}\n")).unwrap();
+    let tools=Registry::new(); tools.register(HelloToolForTest);
+    let bus=EventBus::new(64);
+    let mut rx=bus.subscribe();
+    let runner=agent::spawn_runner(TaskRunnerDeps {db_path:path.clone(),tools:tools.clone(),bus:bus.clone(),llm:Arc::new(std::sync::RwLock::new(Some(Arc::new(LlmGateway::load(&providers).unwrap()))))});
+    let id=agents::register(&path,&tools,"p_123",Draft {title:"每日验证".into(),goal:"问候 agent 并整理结果".into(),daily_time:"09:00".into(),allowed_tools:vec!["hello".into()],max_calls:5,timeout_secs:60}).await.unwrap();
+    let task=agents::trigger(&path,&tools,&bus,id,true,true).await.unwrap();
+    let finished=wait_finished(&mut rx,&task).await;
+    assert_eq!(finished.final_state.as_deref(),Some("finished"));
+    assert_eq!(calls.load(Ordering::SeqCst),2);
+    let history=agents::history(&path,id).await.unwrap();
+    assert_eq!(history.len(),1);
+    assert_eq!(history[0]["phase"],"finished");
+    assert!(history[0]["result"].as_str().unwrap().contains("已完成"));
+    let mut c=yuantuan_core::db::connect(&path).await.unwrap();
+    let brief=agent::brief::current(&mut c,&task).await.unwrap();
+    assert_eq!(brief["origin"],"admin_schedule");
+    assert_eq!(brief["schedule_id"],id);
+    assert!(brief["request"].is_null());
+    let delivery:String=sqlx::query_scalar("SELECT delivery_state FROM task_runtime WHERE task_id=?").bind(&task).fetch_one(&mut *c).await.unwrap();
+    assert_eq!(delivery,"none");
+    runner.abort(); let _=runner.await;
 }
