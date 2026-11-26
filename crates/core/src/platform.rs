@@ -10,6 +10,12 @@ pub fn chat_platform(id: &str) -> Option<&'static str> {
     id.starts_with(QQ_OFFICIAL_PREFIX).then_some(QQ_OFFICIAL_ID)
 }
 
+/// Resolve the protocol/platform identifier for any chat ID, defaulting to `ONEBOT_ID`
+/// when no explicit platform prefix is present.
+pub fn resolved_chat_platform(id: &str) -> &'static str {
+    chat_platform(id).unwrap_or(ONEBOT_ID)
+}
+
 pub fn valid_openid(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128

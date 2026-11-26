@@ -297,12 +297,33 @@ struct Services {
     tools: crate::tools::Registry,
     db_path: PathBuf,
     account_owner: Arc<AtomicU64>,
+    owner_identities: Arc<RwLock<Vec<String>>>,
 }
 #[async_trait]
 impl HostServices for Services {
     fn account_owner_qq(&self) -> Option<u64> {
         let id = self.account_owner.load(Ordering::Acquire);
         (id > 0).then_some(id)
+    }
+    fn account_owner(&self) -> Option<String> {
+        self.owner_identities
+            .read()
+            .unwrap()
+            .first()
+            .cloned()
+            .or_else(|| self.account_owner_qq().map(|id| id.to_string()))
+    }
+    fn is_account_owner(&self, ctx: &ToolCtx) -> bool {
+        let raw = ctx.sender_pid.strip_prefix("p_").unwrap_or(&ctx.sender_pid);
+        if raw.is_empty() {
+            return false;
+        }
+        let owners = self.owner_identities.read().unwrap();
+        if owners.iter().any(|o| o == raw || o == &ctx.sender_pid) {
+            return true;
+        }
+        self.account_owner_qq()
+            .is_some_and(|qq| raw == qq.to_string())
     }
     async fn call_protocol(
         &self,
@@ -527,6 +548,7 @@ pub struct PluginManager {
     services: ServiceRegistry,
     db_path: PathBuf,
     account_owner: Arc<AtomicU64>,
+    owner_identities: Arc<RwLock<Vec<String>>>,
 }
 
 enum Change {
@@ -560,6 +582,22 @@ impl PluginManager {
     pub fn set_account_owner(&self, owner: Option<u64>) {
         self.account_owner
             .store(owner.unwrap_or(0), Ordering::Release);
+        let mut owners = self.owner_identities.write().unwrap();
+        if let Some(id) = owner.filter(|&n| n > 0) {
+            let s = id.to_string();
+            if !owners.contains(&s) {
+                owners.insert(0, s);
+            }
+        }
+    }
+    /// Register platform-agnostic owner identifiers (e.g. OpenIDs, non-numeric user IDs).
+    pub fn set_owner_identities(&self, ids: Vec<String>) {
+        let mut owners = self.owner_identities.write().unwrap();
+        for id in ids {
+            if !id.trim().is_empty() && !owners.contains(&id) {
+                owners.push(id);
+            }
+        }
     }
     pub async fn load(
         plugins: Vec<Arc<dyn Plugin>>,
@@ -633,6 +671,7 @@ impl PluginManager {
             services,
             db_path: data_root.join("yuantuan.db"),
             account_owner: Arc::new(AtomicU64::new(0)),
+            owner_identities: Arc::new(RwLock::new(vec![])),
         };
         // Validate the complete catalog before starting any plugin.
         let mut ids = std::collections::HashSet::new();
@@ -696,6 +735,7 @@ impl PluginManager {
                     tools: manager.tools.clone(),
                     db_path: manager.db_path.clone(),
                     account_owner: manager.account_owner.clone(),
+                    owner_identities: manager.owner_identities.clone(),
                     services: manager.services.clone(),
                     uses_group_moderation: plugin.uses_group_moderation(),
                 });
@@ -1103,6 +1143,7 @@ impl PluginManager {
             tools: self.tools.clone(),
             db_path: self.db_path.clone(),
             account_owner: self.account_owner.clone(),
+            owner_identities: self.owner_identities.clone(),
             services: self.services.clone(),
             uses_group_moderation: entry.plugin.uses_group_moderation(),
         });

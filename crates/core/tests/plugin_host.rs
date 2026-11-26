@@ -1059,7 +1059,11 @@ async fn protocol_gateway_routes_actions_and_enforces_chat_scope() {
             Ok(ToolOutput {
                 summary: "ok".into(),
                 artifacts: vec![],
-                data: res,
+                data: json!({
+                    "action": res["action"],
+                    "params": res["params"],
+                    "is_owner": self.0.is_account_owner(ctx),
+                }),
             })
         }
     }
@@ -1126,5 +1130,14 @@ async fn protocol_gateway_routes_actions_and_enforces_chat_scope() {
     };
     assert!(tool.call(&denied_ctx, json!({})).await.is_err());
     assert_eq!(gw.0.load(Ordering::Relaxed), 1);
+
+    manager.set_owner_identities(vec!["qq-official_user_123_OWNER".into()]);
+    let owner_ctx = ToolCtx {
+        chat_id: "42".into(),
+        sender_pid: "qq-official_user_123_OWNER".into(),
+        ..denied_ctx
+    };
+    let owner_out = tool.call(&owner_ctx, json!({})).await.unwrap();
+    assert_eq!(owner_out.data["is_owner"], true);
     manager.shutdown().await;
 }
