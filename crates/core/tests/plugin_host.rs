@@ -1068,7 +1068,13 @@ async fn protocol_gateway_routes_actions_and_enforces_chat_scope() {
     #[async_trait]
     impl Plugin for GatewayPlugin {
         fn metadata(&self) -> PluginMeta {
-            meta("proto")
+            PluginMeta {
+                id: "proto",
+                name: "proto",
+                version: "0.1.0",
+                description: "test",
+                api_version: API_VERSION,
+            }
         }
         async fn start(&self, ctx: PluginContext, _: Value) -> Result<Capabilities> {
             Ok(Capabilities {
@@ -1079,9 +1085,9 @@ async fn protocol_gateway_routes_actions_and_enforces_chat_scope() {
     }
 
     let f = Fixture::new();
-    f.save(
+    f.settings(
         "proto",
-        &PluginSettings {
+        PluginSettings {
             allowed_chats: Some(vec!["42".into()]),
             ..enabled()
         },
