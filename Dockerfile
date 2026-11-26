@@ -29,10 +29,11 @@ COPY plugins/nai-image/Cargo.toml plugins/nai-image/
 COPY plugins/qzone/Cargo.toml plugins/qzone/
 COPY plugins/tencent-docs/Cargo.toml plugins/tencent-docs/
 COPY plugins/quark-drive/Cargo.toml plugins/quark-drive/
+COPY plugins/qq/Cargo.toml plugins/qq/
 
 # 占位的 dummy src,让 cargo fetch 只拉依赖
 RUN for d in crates/core crates/plugin-api crates/mcp-http crates/adapter-qq crates/webui crates/yuantuan \
-        plugins/anysearch plugins/social-media plugins/moderator plugins/nai-image plugins/qzone plugins/tencent-docs plugins/quark-drive; do \
+        plugins/anysearch plugins/social-media plugins/moderator plugins/nai-image plugins/qzone plugins/tencent-docs plugins/quark-drive plugins/qq; do \
         mkdir -p "$d/src" && echo "fn main(){}" > "$d/src/lib.rs"; \
     done && \
     echo "fn main(){}" > crates/yuantuan/src/main.rs && \

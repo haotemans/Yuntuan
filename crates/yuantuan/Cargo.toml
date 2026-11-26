@@ -7,6 +7,7 @@ edition = "2021"
 yuantuan-plugin-tencent-docs = { path = "../../plugins/tencent-docs", optional = true }
 yuantuan-plugin-quark-drive = { path = "../../plugins/quark-drive", optional = true }
 yuantuan-plugin-qzone = { path = "../../plugins/qzone", optional = true }
+yuantuan-plugin-qq = { path = "../../plugins/qq", optional = true }
 yuantuan-plugin-moderator = { path = "../../plugins/moderator", optional = true }
 yuantuan-plugin-anysearch = { path = "../../plugins/anysearch", optional = true }
 yuantuan-plugin-nai-image = { path = "../../plugins/nai-image", optional = true }
@@ -28,8 +29,9 @@ tracing-subscriber = "0.3"
 plugin-tencent-docs = ["dep:yuantuan-plugin-tencent-docs"]
 plugin-quark-drive = ["dep:yuantuan-plugin-quark-drive"]
 plugin-qzone = ["dep:yuantuan-plugin-qzone"]
+plugin-qq = ["dep:yuantuan-plugin-qq"]
 plugin-anysearch = ["dep:yuantuan-plugin-anysearch"]
-default = ["plugin-social-media", "plugin-anysearch", "plugin-moderator", "plugin-nai-image", "plugin-qzone", "plugin-tencent-docs", "plugin-quark-drive"]
+default = ["plugin-social-media", "plugin-anysearch", "plugin-moderator", "plugin-nai-image", "plugin-qzone", "plugin-qq", "plugin-tencent-docs", "plugin-quark-drive"]
 plugin-moderator = ["dep:yuantuan-plugin-moderator"]
 plugin-nai-image = ["dep:yuantuan-plugin-nai-image"]
 plugin-social-media = ["dep:yuantuan-plugin-social-media"]
@@ -56,6 +58,10 @@ feature = "plugin-nai-image"
 [[package.metadata.yuantuan.plugins]]
 dependency = "yuantuan-plugin-qzone"
 feature = "plugin-qzone"
+
+[[package.metadata.yuantuan.plugins]]
+dependency = "yuantuan-plugin-qq"
+feature = "plugin-qq"
 
 [[package.metadata.yuantuan.plugins]]
 dependency = "yuantuan-plugin-tencent-docs"
