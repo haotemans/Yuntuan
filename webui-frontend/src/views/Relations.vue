@@ -6,6 +6,11 @@
         <span class="yt-page-sub mono">{{ data.nodes.length }} 节点 · {{ data.edges.length }} 关系</span>
       </div>
       <n-space align="center" :size="10">
+        <n-radio-group v-model:value="platformFilter" size="small" aria-label="平台来源">
+          <n-radio-button value="">全部</n-radio-button>
+          <n-radio-button value="onebot">OneBot</n-radio-button>
+          <n-radio-button value="qq_official">QQ 官方</n-radio-button>
+        </n-radio-group>
         <n-select :value="sel?.id" :options="data.nodes.map(n => ({ label: n.name || n.id, value: n.id }))"
                   filterable clearable :disabled="loading || !!loadError" placeholder="定位人物节点" size="small" style="width: 200px" @update:value="selectPerson" />
         <n-button size="small" secondary :disabled="loading || !!loadError || !hasNodes" @click="net?.fit({ animation: !reduceMotion })">重置视图</n-button>
@@ -117,6 +122,7 @@ const detailError = ref('')
 /** @type {import('vue').Ref<{ nodes: any[], edges: any[] }>} */
 const data = ref({ nodes: [], edges: [] })
 const selfQq = ref(0)
+const platformFilter = ref('')
 const ui = useUiStore()
 const route = useRoute()
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -276,7 +282,8 @@ async function loadGraph() {
   loading.value = true
   loadError.value = ''
   try {
-    const { data: d } = await api.get('/relations', { signal: requests.signal })
+    const url = platformFilter.value ? `/relations?platform=${encodeURIComponent(platformFilter.value)}` : '/relations'
+    const { data: d } = await api.get(url, { signal: requests.signal })
     if (disposed) return
     if (!Array.isArray(d?.nodes) || !Array.isArray(d?.edges)) throw new Error('关系图谱数据格式异常')
     data.value = d
@@ -400,6 +407,7 @@ onMounted(() => {
   void loadGraph()
 })
 
+watch(platformFilter, () => { void loadGraph() })
 watch(() => route.query.person, id => { if (!loading.value) selectPerson(typeof id === 'string' ? id : null) })
 
 onUnmounted(() => {
