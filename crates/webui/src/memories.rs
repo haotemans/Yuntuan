@@ -376,6 +376,13 @@ pub async fn conversations(State(state): State<AppState>, Query(q): Query<MemQue
     q.validate()?;
     let mut conn = state.open_db().await.map_err(db_error)?;
     let mut b=QueryBuilder::<Sqlite>::new("SELECT chat_id,chat_type,MAX(ts) AS last_seen FROM messages WHERE chat_type IN ('group','private')");
+    if let Some(platform) = q.platform.as_deref() {
+        if platform == yuantuan_core::platform::QQ_OFFICIAL_ID {
+            b.push(" AND chat_id LIKE 'qq-official_%'");
+        } else if platform == yuantuan_core::platform::ONEBOT_ID {
+            b.push(" AND chat_id NOT LIKE 'qq-official_%'");
+        }
+    }
     if let Some(person) = q.person_id {
         b.push(" AND sender_pid IN ");
         person_members(&mut b, &person);

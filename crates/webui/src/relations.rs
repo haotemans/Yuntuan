@@ -1,9 +1,10 @@
 //! 关系网数据：nodes(persons，确保含 self) + edges(relationship_edges 当前全量值)。
 
 use crate::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row;
 use std::collections::{BTreeMap, HashSet};
@@ -50,9 +51,21 @@ pub async fn person_detail(
     ))
 }
 
+#[derive(Default, Deserialize)]
+pub struct RelationsQuery {
+    platform: Option<String>,
+}
+
 pub async fn relations(
     State(state): State<AppState>,
+    Query(q): Query<RelationsQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if q.platform
+        .as_deref()
+        .is_some_and(|v| !["onebot", "qq_official"].contains(&v))
+    {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({"error":"平台参数无效"}))));
+    }
     let mut conn = state
         .open_db()
         .await
@@ -63,26 +76,41 @@ pub async fn relations(
         let mut stmt = conn
             .prepare(
                 "SELECT p.person_id, COALESCE(p.display_name, ''), p.first_seen, p.last_seen,
+                    (SELECT i.platform FROM identities i
+                     WHERE i.person_id = p.person_id
+                     ORDER BY i.id DESC LIMIT 1),
                     (SELECT i.platform_uid FROM identities i
-                     WHERE i.person_id = p.person_id AND i.platform = 'qq'
+                     WHERE i.person_id = p.person_id
                      ORDER BY i.id DESC LIMIT 1)
                  FROM persons p",
             )
             .await
             .map_err(|e| err(&format!("查询失败: {e}")))?;
+        let resolver = state.extras.avatar_resolver.as_ref();
         let rows = stmt
             .query_map(yuantuan_core::db::params![], |r| {
-                let qq = r
-                    .try_get::<Option<String>, _>(4)?
-                    .filter(|uid| !uid.is_empty() && uid.bytes().all(|b| b.is_ascii_digit()));
-                let avatar_url = qq
-                    .as_ref()
-                    .map(|uid| format!("https://q1.qlogo.cn/g?b=qq&nk={uid}&s=100"));
+                let id: String = r.try_get(0)?;
+                let platform: Option<String> = r.try_get(4)?;
+                let platform_uid = r
+                    .try_get::<Option<String>, _>(5)?
+                    .filter(|uid| !uid.is_empty());
+                let qq = match (platform.as_deref(), platform_uid.as_deref()) {
+                    (Some("qq"), Some(uid)) if uid.bytes().all(|b| b.is_ascii_digit()) => {
+                        Some(uid.to_owned())
+                    }
+                    _ => None,
+                };
+                let avatar_url = match (resolver, platform.as_deref(), platform_uid.as_deref()) {
+                    (Some(f), Some(p), Some(uid)) => f(p, uid),
+                    _ => None,
+                };
                 Ok(json!({
-                    "id": r.try_get::<String, _>(0)?,
+                    "id": id,
                     "name": r.try_get::<String, _>(1)?,
                     "first_seen": r.try_get::<i64, _>(2)?,
                     "last_seen": r.try_get::<i64, _>(3)?,
+                    "platform": platform,
+                    "platform_uid": platform_uid,
                     "qq": qq,
                     "avatar_url": avatar_url,
                 }))
@@ -91,8 +119,21 @@ pub async fn relations(
             .map_err(|e| err(&format!("查询失败: {e}")))?;
         nodes.extend(rows.filter_map(|r| r.ok()));
     }
+    if let Some(platform) = q.platform.as_deref() {
+        nodes.retain(|n| {
+            let id = n["id"].as_str().unwrap_or("");
+            if id == "self" {
+                return true;
+            }
+            if platform == yuantuan_core::platform::QQ_OFFICIAL_ID {
+                id.starts_with(yuantuan_core::platform::QQ_OFFICIAL_PREFIX)
+            } else {
+                !id.starts_with(yuantuan_core::platform::QQ_OFFICIAL_PREFIX)
+            }
+        });
+    }
     let own_qqs = sqlx::query_scalar::<_, String>(
-        "SELECT platform_uid FROM identities WHERE person_id = 'self' AND platform = 'qq' ORDER BY id DESC",
+        "SELECT platform_uid FROM identities WHERE person_id = 'self' ORDER BY id DESC",
     )
     .fetch_all(&mut *conn)
     .await
@@ -117,6 +158,16 @@ pub async fn relations(
             .await
             .map_err(|e| err(&format!("查询失败: {e}")))?;
         edges.extend(rows.filter_map(|r| r.ok()));
+    }
+    if q.platform.is_some() {
+        let visible: HashSet<String> = nodes
+            .iter()
+            .filter_map(|n| n["id"].as_str().map(str::to_owned))
+            .collect();
+        edges.retain(|e| {
+            e["from"].as_str().is_some_and(|id| visible.contains(id))
+                && e["to"].as_str().is_some_and(|id| visible.contains(id))
+        });
     }
 
     Ok(Json(canonical_graph(
