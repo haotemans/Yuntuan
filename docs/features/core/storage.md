@@ -76,3 +76,5 @@ V20 新增 SQLite 表 \`scheduled_tools\` 与待执行索引，记录工具、�
 ## V23 每日 Agent 计划
 
 [迁移 SQL](../../../crates/core/src/db/scheduled_agents_v23.sql) 追加计划与运行关联表，当前数据库版本23。原 scheduled_tools、任务、人物/消息/记忆及插件配置不改写。删除计划仅使历史的 schedule_id 置空，任务和工具回执保留。创建任务与触发收据/下一次时间使用同一写事务，失败整体回滚。规则见[定时任务](scheduler.md)。
+
+[V0.24 迁移 SQL](../../../crates/core/src/db/memory_identity_v24.sql) 新增平台无关的 `memory_identity_links`、`memory_aliases` 与 `memory_directory`，自动回填既有 `qq_memory_links` 并通过触发器保持向后兼容，当前数据库版本24。

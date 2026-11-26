@@ -173,40 +173,6 @@ async fn profiles_for(
     Ok(result)
 }
 
-/// Platform-agnostic avatar URL resolver injected by platform adapters.
-pub type AvatarResolver = Arc<dyn Fn(&str, &str) -> Option<String> + Send + Sync>;
-
-/// Core interface for platform adapters to register cross-channel identity links
-/// without coupling core memory tables to a specific platform.
-pub async fn sync_platform_identity_links(
-    conn: &mut sqlx::SqliteConnection,
-    platform: &str,
-    links: &[(String, String)],
-) -> Result<()> {
-    let mut tx = conn.begin_immediate().await?;
-    let removed = sqlx::query("DELETE FROM memory_identity_links WHERE platform=?1")
-        .bind(platform)
-        .execute(&mut *tx)
-        .await?;
-    for (source_pid, target_pid) in links {
-        sqlx::query(
-            "INSERT OR REPLACE INTO memory_identity_links(source_pid,target_pid,platform) VALUES(?1,?2,?3)",
-        )
-        .bind(source_pid)
-        .bind(target_pid)
-        .bind(platform)
-        .execute(&mut *tx)
-        .await?;
-    }
-    if removed.rows_affected() > 0 || !links.is_empty() {
-        sqlx::query("UPDATE memory_material_epoch SET epoch=epoch+1 WHERE id=1")
-            .execute(&mut *tx)
-            .await?;
-    }
-    tx.commit().await?;
-    Ok(())
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct RecalledMemory {
     pub id: i64,
