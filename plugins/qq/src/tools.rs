@@ -103,13 +103,13 @@ impl Op {
         }
     }
 
-    fn command(self) -> &'static str {
+    fn commands(self) -> &'static [&'static str] {
         match self {
-            Self::GroupInfo => "/群信息",
-            Self::MemberInfo => "/群成员",
-            Self::EssenceList => "/精华消息",
-            Self::Poke => "/戳一戳",
-            Self::UserInfo | Self::GroupNotice => "",
+            Self::GroupInfo => &["/群信息"],
+            Self::MemberInfo => &["/群成员"],
+            Self::EssenceList => &["/精华消息"],
+            Self::Poke => &["/戳一戳"],
+            Self::UserInfo | Self::GroupNotice => &[],
         }
     }
 
@@ -404,25 +404,31 @@ impl Skill for Handler {
         SkillDef {
             name: self.op.tool_name(),
             description: self.op.skill_description(),
-            input_schema: self.op.schema(),
-            output_type: SkillOutputType::Text,
+            prompt_template: String::new(),
+            tools: vec![self.op.tool_name()],
+            role_hint: None,
         }
+    }
+
+    fn is_information_lookup(&self) -> bool {
+        matches!(self.op, Op::GroupInfo | Op::MemberInfo | Op::EssenceList)
+    }
+
+    fn commands(&self) -> &'static [&'static str] {
+        self.op.commands()
     }
 
     fn accepts_empty_command(&self) -> bool {
         true
     }
 
-    fn match_message(&self, msg: &IncomingMessage) -> Option<Value> {
-        let cmd = self.op.command();
-        if cmd.is_empty() {
-            return None;
-        }
-        let text = msg.text.trim();
-        if text == cmd {
+    fn match_message(&self, _ctx: &ToolCtx, text: &str) -> Option<Value> {
+        let cmd = self.op.commands().first().copied()?;
+        let trimmed = text.trim();
+        if trimmed == cmd {
             return Some(json!({}));
         }
-        let rest = text.strip_prefix(cmd)?.trim();
+        let rest = trimmed.strip_prefix(cmd)?.trim();
         if rest.is_empty() {
             return Some(json!({}));
         }
@@ -434,8 +440,20 @@ impl Skill for Handler {
         None
     }
 
-    async fn execute(&self, ctx: &ToolCtx, slots: Value) -> Result<ToolOutput> {
-        let args = if slots.is_object() { slots } else { json!({}) };
+    async fn invoke(&self, ctx: &ToolCtx, slots: Value) -> Result<ToolOutput> {
+        let mut args = if slots.is_object() {
+            slots.clone()
+        } else {
+            json!({})
+        };
+        if matches!(self.op, Op::MemberInfo | Op::Poke) && args.get("user_id").is_none() {
+            if let Some(uid) = slot_text(&slots, &["user_text", "user_id"])
+                .and_then(|s| s.parse::<u64>().ok())
+                .filter(|&n| n >= 10000)
+            {
+                args["user_id"] = json!(uid);
+            }
+        }
         self.host
             .authorize_tool_for_skill(ctx, self.op.tool_name(), &args)
             .await?;
