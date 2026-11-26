@@ -3097,7 +3097,7 @@ dependencies = [
  "tracing",
  "yuantuan-core",
  "yuantuan-mcp-http",
- "yuantuan-plugin-moderator",
+ "yuantuan-plugin-qq",
  "yuantuan-plugin-quark-drive",
 ]
 

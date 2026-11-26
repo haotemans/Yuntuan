@@ -26,7 +26,7 @@ Tool 参数为 `content`（最多2000字）、可选 `images`（最多9张）和
 
 Skill 委托 Publisher 前调用 `HostServices::authorize_tool_for_skill`；这只检查已注册 Tool，不递归进入同一插件的调用 Gate，故单并发也可正常运行。状态/记录 Skill 显式声明支持空参数；该声明不绕过权限。共享 API 与独立页面机制见[扩展宿主](../host.md)。
 
-适配器复用已有 `NapcatSender`，只调用 `get_version_info`、`get_login_info` 和 `send_qzone_msg`。本次核对的服务器 NapCat bundle 包含该发布接口及上述参数；未安装该接口的其他版本不能据此认为兼容。QQ空间调用不是腾讯公开开放平台 API，也没有把第三方 Skill 冒充腾讯官方 Skill；[`SKILL.md`](../../../../plugins/qzone/SKILL.md) 是云团自己的操作契约，随编译后的 Skill 注册提供。
+适配器复用已有 `NapcatSender`，只调用 `get_version_info`、`get_login_info` 和 `send_qzone_msg`。本次核对的服务器 NapCat bundle 包含该发布接口及上述参数；未安装该接口的其他版本不能据此认为兼容。QQ空间调用不是腾讯公开开放平台 API，也没有把第三方 Skill 冒充腾讯官方 Skill；[`SKILL.md`](../../../../plugins/qq/src/qzone/SKILL.md) 是云团自己的操作契约，随编译后的 Skill 注册提供。
 
 只有带合法 `tid` 的成功回执才记为发布成功。缺失回执、传输异常或取消后保留未确认状态，不自动重试；API 错误正文、Cookie、Token 和图片 base64 不进入返回信息。发布请求使用90秒回执等待，总插件与工具预算默认120秒。
 

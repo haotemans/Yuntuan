@@ -24,6 +24,6 @@ sysinfo = "0.38.4"
 
 [dev-dependencies]
 async-trait = "0.1"
-yuantuan-plugin-moderator = { path = "../../plugins/moderator" }
+yuantuan-plugin-qq = { path = "../../plugins/qq" }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
