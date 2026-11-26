@@ -2,8 +2,6 @@ use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::db::SqliteExt;
-
 pub const ONEBOT_ID: &str = "onebot";
 pub const QQ_OFFICIAL_ID: &str = "qq_official";
 pub const QQ_OFFICIAL_PREFIX: &str = "qq-official_";

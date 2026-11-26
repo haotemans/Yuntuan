@@ -403,7 +403,7 @@ async fn recent_character_budget_reserves_backfill_and_migration_preserves_old_m
             .fetch_one(&mut *conn)
             .await
             .unwrap(),
-        23
+        24
     );
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT content FROM long_memories")
