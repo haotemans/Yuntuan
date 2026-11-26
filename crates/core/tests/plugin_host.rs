@@ -1022,3 +1022,103 @@ async fn membership_service_is_restricted_to_declared_moderator_and_receives_app
         manager.shutdown().await;
     }
 }
+
+#[tokio::test]
+async fn protocol_gateway_routes_actions_and_enforces_chat_scope() {
+    struct MockGateway(AtomicUsize);
+    #[async_trait]
+    impl ProtocolGateway for MockGateway {
+        fn protocol_id(&self) -> &'static str {
+            "onebot"
+        }
+        fn account_id(&self) -> Option<String> {
+            Some("10001".into())
+        }
+        fn is_connected(&self) -> bool {
+            true
+        }
+        async fn call_action(&self, _ctx: &ToolCtx, action: &str, params: Value) -> Result<Value> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(json!({ "action": action, "params": params }))
+        }
+    }
+
+    struct GatewayTool(Arc<dyn HostServices>);
+    #[async_trait]
+    impl Tool for GatewayTool {
+        fn name(&self) -> &'static str {
+            "proto.echo"
+        }
+        fn description(&self) -> &'static str {
+            "call protocol"
+        }
+        async fn call(&self, ctx: &ToolCtx, args: Value) -> Result<ToolOutput> {
+            assert!(self.0.is_protocol_connected("onebot"));
+            assert_eq!(self.0.protocol_account("onebot").as_deref(), Some("10001"));
+            let res = self.0.call_protocol(ctx, "onebot", "get_login_info", args).await?;
+            Ok(ToolOutput {
+                summary: "ok".into(),
+                artifacts: vec![],
+                data: res,
+            })
+        }
+    }
+
+    struct GatewayPlugin;
+    #[async_trait]
+    impl Plugin for GatewayPlugin {
+        fn metadata(&self) -> PluginMeta {
+            meta("proto")
+        }
+        async fn start(&self, ctx: PluginContext, _: Value) -> Result<Capabilities> {
+            Ok(Capabilities {
+                tools: vec![Arc::new(GatewayTool(ctx.host))],
+                skills: vec![],
+            })
+        }
+    }
+
+    let f = Fixture::new();
+    f.save(
+        "proto",
+        &PluginSettings {
+            allowed_chats: Some(vec!["42".into()]),
+            ..enabled()
+        },
+    );
+    let gw = Arc::new(MockGateway(AtomicUsize::new(0)));
+    let mut registry = ServiceRegistry::new();
+    registry.register_protocol(gw.clone());
+    let tools = Registry::new();
+    let manager = PluginManager::load_with_registry(
+        vec![Arc::new(GatewayPlugin)],
+        f.root.clone(),
+        f.root.join("source"),
+        tools.clone(),
+        SkillRegistry::new(),
+        Arc::new(RwLock::new(None)),
+        registry,
+    )
+    .await
+    .unwrap();
+
+    let tool = tools.get("proto.echo").unwrap();
+    let ok_ctx = ToolCtx {
+        task_id: None,
+        chat_id: "42".into(),
+        chat_type: "group".into(),
+        sender_pid: "p_123".into(),
+        locale: None,
+    };
+    let out = tool.call(&ok_ctx, json!({"x": 1})).await.unwrap();
+    assert_eq!(out.data["action"], "get_login_info");
+    assert_eq!(gw.0.load(Ordering::Relaxed), 1);
+
+    let denied_ctx = ToolCtx {
+        chat_id: "99".into(),
+        ..ok_ctx
+    };
+    assert!(tool.call(&denied_ctx, json!({})).await.is_err());
+    assert_eq!(gw.0.load(Ordering::Relaxed), 1);
+    manager.shutdown().await;
+}

@@ -16,6 +16,8 @@ use anyhow::{bail, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::any::{Any, TypeId};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 pub const API_VERSION: u32 = 2;
@@ -118,6 +120,62 @@ pub trait GroupModeration: Send + Sync {
     }
 }
 
+/// Generic protocol backend gateway (e.g. OneBot 11, Telegram, Discord, Feishu).
+/// Core protocol backends implement this so platform-specific plugins can invoke
+/// protocol actions without coupling core or plugin-api to a single platform.
+#[async_trait]
+pub trait ProtocolGateway: Send + Sync {
+    fn protocol_id(&self) -> &'static str;
+    fn account_id(&self) -> Option<String> {
+        None
+    }
+    fn is_connected(&self) -> bool {
+        true
+    }
+    async fn call_action(&self, ctx: &ToolCtx, action: &str, params: Value) -> Result<Value>;
+}
+
+/// Extensible capability registry passed from the host/adapters to the plugin manager.
+/// Replaces positional platform-specific service arguments.
+#[derive(Clone, Default)]
+pub struct ServiceRegistry {
+    protocols: BTreeMap<String, Arc<dyn ProtocolGateway>>,
+    extensions: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
+}
+
+impl ServiceRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register_protocol(&mut self, gateway: Arc<dyn ProtocolGateway>) -> &mut Self {
+        self.protocols
+            .insert(gateway.protocol_id().to_string(), gateway);
+        self
+    }
+
+    pub fn protocol(&self, id: &str) -> Option<&Arc<dyn ProtocolGateway>> {
+        self.protocols.get(id)
+    }
+
+    pub fn protocols(&self) -> impl Iterator<Item = (&str, &Arc<dyn ProtocolGateway>)> {
+        self.protocols.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    pub fn register<T: ?Sized + Send + Sync + 'static>(&mut self, service: Arc<T>) -> &mut Self {
+        self.extensions
+            .insert(TypeId::of::<Arc<T>>(), Arc::new(service));
+        self
+    }
+
+    pub fn get<T: ?Sized + Send + Sync + 'static>(&self) -> Option<Arc<T>> {
+        self.extensions
+            .get(&TypeId::of::<Arc<T>>())
+            .and_then(|v| v.downcast_ref::<Arc<T>>())
+            .cloned()
+    }
+}
+
 /// Host services are scoped to one plugin. Call context is supplied by the host.
 /// Native Rust code is trusted code: this interface is not an OS sandbox.
 #[async_trait]
@@ -125,6 +183,36 @@ pub trait HostServices: Send + Sync {
     /// Configured account administrator; never chosen by model/tool arguments.
     fn account_owner_qq(&self) -> Option<u64> {
         None
+    }
+    /// Platform-agnostic configured account owner identifier.
+    fn account_owner(&self) -> Option<String> {
+        self.account_owner_qq().map(|id| id.to_string())
+    }
+    /// Returns true if the caller in `ctx` matches the configured account owner.
+    fn is_account_owner(&self, ctx: &ToolCtx) -> bool {
+        let Some(owner) = self.account_owner() else {
+            return false;
+        };
+        let raw = ctx.sender_pid.strip_prefix("p_").unwrap_or(&ctx.sender_pid);
+        !raw.is_empty() && raw == owner
+    }
+    /// Invoke an action on a registered core protocol backend (e.g. "onebot").
+    async fn call_protocol(
+        &self,
+        _ctx: &ToolCtx,
+        protocol: &str,
+        _action: &str,
+        _params: Value,
+    ) -> Result<Value> {
+        bail!("协议后端 {protocol} 未启用")
+    }
+    /// Connected account identifier for the given protocol backend, if available.
+    fn protocol_account(&self, _protocol: &str) -> Option<String> {
+        None
+    }
+    /// Whether the given protocol backend is currently connected.
+    fn is_protocol_connected(&self, _protocol: &str) -> bool {
+        false
     }
     async fn qzone(&self, _ctx: &ToolCtx, _action: QzoneAction) -> Result<Value> {
         bail!("QQ空间服务未启用")
