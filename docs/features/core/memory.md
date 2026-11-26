@@ -180,3 +180,7 @@ Context为实际发送来源或精确文件命中附加registered_asset，包含
 连续3个人出现同模型配置、同类别失败时，持久保存当晚熔断，停止剩余人物领取；重启不清额度，同一天换模型配置可继续剩余额度。失败也计入当晚人数，每人仅一个批次，成功并不等同于画像有变化。中断的运行租约到期后可重新领取，未完成结果不得落库。人物页显示最近成功整理、待处理数量和按需展开的批次详情；原始发言时间与整理处理时间明确分开，旧故障没有原因时显示未知，不补造解释。
 
 回归：[`profile_refresh.rs`](../../../crates/core/tests/profile_refresh.rs)、nightly单元测试、[`memories_api.rs`](../../../crates/webui/tests/memories_api.rs)、[`memories-flow.spec.js`](../../../webui-frontend/tests/memories-flow.spec.js)覆盖新旧不连续范围、字符额度、热换模型、有限修复/熔断、来源/私聊隔离、失败回滚、V18升级及UI。Mock和浏览器测试不代表真实夜间模型结果或服务器已经更新。
+
+## V24：平台无关记忆身份接口
+
+新增迁移 [`memory_identity_v24.sql`](../../../crates/core/src/db/memory_identity_v24.sql)，在核心层建立平台无关的 `memory_identity_links`、`memory_aliases` 与 `memory_directory`（自动回填既有 `qq_memory_links` 并通过触发器保持向后兼容）。核心记忆查询（[`memory.rs`](../../../crates/core/src/memory.rs)、[`semantic.rs`](../../../crates/core/src/memory/semantic.rs)）与 WebUI `/memories`（[`memories.rs`](../../../crates/webui/src/memories.rs)、[`Memories.vue`](../../../webui-frontend/src/views/Memories.vue)）改为使用通用身份视图、由平台适配器注入 `AvatarResolver`（`adapter-qq` 提供 QQ 头像格式化），并支持按 `platform`（`onebot` / `qq_official`）筛选隔离不同平台记忆。

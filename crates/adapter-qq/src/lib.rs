@@ -16,3 +16,14 @@ pub use client::{
     onebot_gateway, send_fn, shared_token, AdapterHandle, NapcatConfig, NapcatSender, SharedToken,
 };
 pub use server::spawn;
+
+/// Platform-specific avatar URL formatter registered into the core/webui memory interface.
+pub fn avatar_resolver() -> yuantuan_core::memory::AvatarResolver {
+    std::sync::Arc::new(|platform, uid| {
+        if platform == "qq" && !uid.is_empty() && uid.bytes().all(|c| c.is_ascii_digit()) {
+            Some(format!("https://q1.qlogo.cn/g?b=qq&nk={uid}&s=100"))
+        } else {
+            None
+        }
+    })
+}

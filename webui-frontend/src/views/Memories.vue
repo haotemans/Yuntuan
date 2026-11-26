@@ -9,7 +9,8 @@
     </div>
 
     <div class="yt-toolbar memory-toolbar" :class="{ 'profile-toolbar': tab === 'profile' }">
-      <n-input v-model:value="search" clearable :maxlength="100" placeholder="搜索昵称、QQ 或记忆内容" aria-label="搜索记忆" />
+      <n-input v-model:value="search" clearable :maxlength="100" placeholder="搜索昵称、账号或记忆内容" aria-label="搜索记忆" />
+      <n-select v-model:value="platformFilter" :options="platformOptions" clearable placeholder="全部平台" aria-label="平台来源" />
       <n-select v-if="tab !== 'profile'" v-model:value="conversationKey" :options="conversationOptions" :loading="conversationsLoading" :disabled="conversationsLoading" clearable filterable placeholder="全部会话" aria-label="来源会话" />
     </div>
 
@@ -195,6 +196,11 @@ type Activity = { legacy_baseline?: number; today_count: number; last_seen?: num
 type Tab = 'memories' | 'summaries' | 'profile' | 'messages'
 const router = useRouter()
 const search = ref('')
+const platformFilter = ref<string | null>(null)
+const platformOptions = [
+  { label: 'OneBot QQ', value: 'onebot' },
+  { label: 'QQ 官方机器人', value: 'qq_official' },
+]
 const conversationKey = ref<string | null>(null)
 const conversations = ref<Conversation[]>([])
 const conversationsLoading = ref(false)
@@ -297,6 +303,7 @@ function showVersionSource(version: ProfileVersion) { closeHistory(false); sourc
 function query(includePerson = true) {
   const p = new URLSearchParams()
   if (includePerson && selectedPerson.value) p.set('person_id', selectedPerson.value.id)
+  if (platformFilter.value) p.set('platform', platformFilter.value)
   if (search.value.trim()) p.set('search', search.value.trim())
   if (tab.value !== 'profile' && conversationKey.value) { const [kind, id] = JSON.parse(conversationKey.value); p.set('chat_id', id); if (kind) p.set('chat_type', kind) }
   return p
@@ -390,6 +397,7 @@ watch(search, () => {
   }, 250)
 })
 watch(conversationKey, () => { peoplePage.value = 1; void loadPeople(); resetRecords() })
+watch(platformFilter, () => { selectedPerson.value = null; peoplePage.value = 1; void loadPeople(); if (tab.value !== 'profile') void loadConversations(); resetRecords() })
 async function loadSource() {
   if (!sourceRecord) return
   sourceController?.abort()
@@ -415,8 +423,8 @@ onBeforeUnmount(() => { disposed = true; clearTimeout(searchTimer); clearInterva
 </script>
 
 <style scoped>
-.memory-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 300px); gap: 12px; }
-.memory-toolbar.profile-toolbar { grid-template-columns: minmax(0, 1fr); }
+.memory-toolbar { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(140px, 180px) minmax(180px, 280px); gap: 12px; }
+.memory-toolbar.profile-toolbar { grid-template-columns: minmax(200px, 1fr) minmax(140px, 200px); }
 .person-activity, .message-filters { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 12px 0; color: var(--yt-ink-3); font-size: 12px; }
 .message-filters input { background: var(--yt-card-bg); color: var(--yt-ink-2); border: 1px solid var(--yt-card-border); border-radius: 6px; padding: 5px 8px; font: inherit; }
 .memory-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 18px; align-items: start; }

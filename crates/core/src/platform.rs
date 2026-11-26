@@ -2,8 +2,6 @@ use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::db::SqliteExt;
-
 pub const ONEBOT_ID: &str = "onebot";
 pub const QQ_OFFICIAL_ID: &str = "qq_official";
 pub const QQ_OFFICIAL_PREFIX: &str = "qq-official_";
@@ -71,25 +69,15 @@ impl OfficialQqConfig {
     }
 
     pub async fn sync_memory_links(&self, conn: &mut sqlx::SqliteConnection) -> Result<()> {
-        let mut tx = conn.begin_immediate().await?;
-        let removed = sqlx::query("DELETE FROM qq_memory_links")
-            .execute(&mut *tx)
-            .await?;
-        if self.validate().is_ok() {
-            for (openid, qq) in &self.memory_links {
-                sqlx::query("INSERT INTO qq_memory_links(official_pid,onebot_pid) VALUES(?,?)")
-                    .bind(official_person_id(&self.app_id, openid))
-                    .bind(format!("p_{qq}"))
-                    .execute(&mut *tx)
-                    .await?;
-            }
-        }
-        if removed.rows_affected() > 0 || !self.memory_links.is_empty() {
-            sqlx::query("UPDATE memory_material_epoch SET epoch=epoch+1 WHERE id=1")
-                .execute(&mut *tx).await?;
-        }
-        tx.commit().await?;
-        Ok(())
+        let links: Vec<(String, String)> = if self.validate().is_ok() {
+            self.memory_links
+                .iter()
+                .map(|(openid, qq)| (official_person_id(&self.app_id, openid), format!("p_{qq}")))
+                .collect()
+        } else {
+            vec![]
+        };
+        crate::memory::sync_platform_identity_links(conn, "qq", &links).await
     }
 }
 

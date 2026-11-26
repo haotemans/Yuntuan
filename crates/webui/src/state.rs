@@ -36,6 +36,7 @@ pub struct Extras {
     /// adapter 连接状态探针（断连 >30s 视为离线，由装配侧换算好）
     pub adapter_connected: Arc<dyn Fn() -> bool + Send + Sync>,
     pub platform_status: Arc<dyn Fn() -> Vec<yuantuan_core::platform::PlatformStatus> + Send + Sync>,
+    pub avatar_resolver: Option<yuantuan_core::memory::AvatarResolver>,
     /// NapCat access_token 共享槽（ws_handler 每次连接时 read，热应用 write 立即生效）
     pub napcat_token_slot: Option<yuantuan_core::napcat_slot::SharedToken>,
     /// 备份配置共享槽（面板写回后热应用，每日调度器每轮循环 read）
@@ -79,6 +80,7 @@ impl Extras {
             self_qq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             adapter_connected: Arc::new(|| false),
             platform_status: Arc::new(Vec::new),
+            avatar_resolver: None,
             napcat_token_slot: None,
             backup_cfg: yuantuan_core::backup::shared_backup_cfg(),
             tools_registry: yuantuan_core::tools::Registry::new(),

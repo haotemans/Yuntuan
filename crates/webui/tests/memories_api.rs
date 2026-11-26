@@ -485,6 +485,8 @@ async fn linked_platform_accounts_share_one_directory_card_and_keep_original_sou
 
     c.execute_batch("DELETE FROM qq_memory_links;").await.unwrap();
     assert_eq!(r.get("/api/memories/people").await["total"], 4);
+    assert_eq!(r.get("/api/memories/people?platform=qq_official").await["total"], 2);
+    assert_eq!(r.get("/api/memories/people?platform=onebot").await["total"], 2);
 }
 
 #[tokio::test]
