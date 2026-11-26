@@ -26,7 +26,7 @@ Tool 参数为 `content`（最多2000字）、可选 `images`（最多9张）和
 
 Skill 委托 Publisher 前调用 `HostServices::authorize_tool_for_skill`；这只检查已注册 Tool，不递归进入同一插件的调用 Gate，故单并发也可正常运行。状态/记录 Skill 显式声明支持空参数；该声明不绕过权限。共享 API 与独立页面机制见[扩展宿主](../host.md)。
 
-适配器复用已有 `NapcatSender`，只调用 `get_version_info`、`get_login_info` 和 `send_qzone_msg`。本次核对的服务器 NapCat bundle 包含该发布接口及上述参数；未安装该接口的其他版本不能据此认为兼容。QQ空间调用不是腾讯公开开放平台 API，也没有把第三方 Skill 冒充腾讯官方 Skill；[`SKILL.md`](../../../../plugins/qzone/SKILL.md) 是云团自己的操作契约，随编译后的 Skill 注册提供。
+适配器复用已有 `NapcatSender`，只调用 `get_version_info`、`get_login_info` 和 `send_qzone_msg`。本次核对的服务器 NapCat bundle 包含该发布接口及上述参数；未安装该接口的其他版本不能据此认为兼容。QQ空间调用不是腾讯公开开放平台 API，也没有把第三方 Skill 冒充腾讯官方 Skill；[`SKILL.md`](../../../../plugins/qq/src/qzone/SKILL.md) 是云团自己的操作契约，随编译后的 Skill 注册提供。
 
 只有带合法 `tid` 的成功回执才记为发布成功。缺失回执、传输异常或取消后保留未确认状态，不自动重试；API 错误正文、Cookie、Token 和图片 base64 不进入返回信息。发布请求使用90秒回执等待，总插件与工具预算默认120秒。
 
@@ -40,9 +40,9 @@ Skill 委托 Publisher 前调用 `HostServices::authorize_tool_for_skill`；这�
 
 ## 对应实现
 
-- [`plugins/qzone/src/lib.rs`](../../../../plugins/qzone/src/lib.rs)：插件元数据、配置和注册。
-- [`plugins/qzone/src/tools.rs`](../../../../plugins/qzone/src/tools.rs)：Tool/Skill、命令解析、统一权限检查。
-- [`plugins/qzone/src/publisher.rs`](../../../../plugins/qzone/src/publisher.rs)：持久回执、额度、去重与结果呈现。
+- [`plugins/qq/src/qzone/mod.rs`](../../../../plugins/qq/src/qzone/mod.rs)：插件元数据、配置和注册（已并入统一 QQ 插件包，保留原插件 ID `qzone`）。
+- [`plugins/qq/src/qzone/tools.rs`](../../../../plugins/qq/src/qzone/tools.rs)：Tool/Skill、命令解析、统一权限检查。
+- [`plugins/qq/src/qzone/publisher.rs`](../../../../plugins/qq/src/qzone/publisher.rs)：持久回执、额度、去重与结果呈现。
 - [`crates/core/src/plugins/qzone.rs`](../../../../crates/core/src/plugins/qzone.rs)：宿主能力与安全图片转换边界。
 - [`crates/adapter-qq/src/qzone.rs`](../../../../crates/adapter-qq/src/qzone.rs)：账号权限、原生动作和回执。
 
@@ -50,7 +50,7 @@ Skill 委托 Publisher 前调用 `HostServices::authorize_tool_for_skill`；这�
 
 ## 验证入口
 
-- [`plugins/qzone/src/tests.rs`](../../../../plugins/qzone/src/tests.rs)：混合入口去重、权限、额度、重启、取消、缺失回执与落盘失败。
+- [`plugins/qq/src/qzone/tests.rs`](../../../../plugins/qq/src/qzone/tests.rs)：混合入口去重、权限、额度、重启、取消、缺失回执与落盘失败。
 - [`crates/core/tests/qzone_host.rs`](../../../../crates/core/tests/qzone_host.rs)：真实插件宿主、工具开关/会话范围、单并发不死锁；连接器为 fake。
 - 宿主/适配器模块内测试：图片边界、容器传输、账号、可见范围与回执；[`client.rs`](../../../../crates/adapter-qq/src/client.rs) 验证发布等待预算。
 - [`bot.rs`](../../../../crates/core/src/bot.rs) 的命令到发送回归包含无参数查询；[`plugins-flow.spec.js`](../../../../webui-frontend/tests/plugins-flow.spec.js) 验证独立配置页、参数元数据、权限开关及配置保存。

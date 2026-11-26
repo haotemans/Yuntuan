@@ -67,7 +67,7 @@ async fn command_and_agent_share_tool_permissions_without_recursively_taking_the
     let skills = SkillRegistry::new();
     let external = Arc::new(Connector::default());
     let manager = PluginManager::load_with_services(
-        vec![yuantuan_plugin_qzone::plugin()],
+        vec![yuantuan_plugin_qq::qzone_plugin()],
         root.clone(),
         root.join("source"),
         tools.clone(),

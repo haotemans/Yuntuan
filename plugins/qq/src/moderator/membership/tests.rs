@@ -148,7 +148,7 @@ async fn request_commands_validate_ids_operator_and_rejection_reason() {
 #[tokio::test(start_paused = true)]
 async fn plugin_stop_cancels_automatic_request_polling() {
     let h = Arc::new(host(Some(30), json!({})));
-    let p = crate::plugin();
+    let p = crate::moderator_plugin();
     let caps = p
         .start(
             PluginContext { host: h.clone() },

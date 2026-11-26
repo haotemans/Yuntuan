@@ -2913,11 +2913,9 @@ dependencies = [
  "yuantuan-core",
  "yuantuan-plugin-anysearch",
  "yuantuan-plugin-api",
- "yuantuan-plugin-moderator",
  "yuantuan-plugin-nai-image",
  "yuantuan-plugin-qq",
  "yuantuan-plugin-quark-drive",
- "yuantuan-plugin-qzone",
  "yuantuan-plugin-social-media",
  "yuantuan-plugin-tencent-docs",
  "yuantuan-webui",
@@ -2967,7 +2965,7 @@ dependencies = [
  "toml",
  "tracing",
  "yuantuan-plugin-api",
- "yuantuan-plugin-qzone",
+ "yuantuan-plugin-qq",
 ]
 
 [[package]]
@@ -3005,18 +3003,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "yuantuan-plugin-moderator"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "serde",
- "serde_json",
- "tokio",
- "yuantuan-plugin-api",
-]
-
-[[package]]
 name = "yuantuan-plugin-nai-image"
 version = "0.1.0"
 dependencies = [
@@ -3047,17 +3033,6 @@ dependencies = [
 
 [[package]]
 name = "yuantuan-plugin-qq"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "serde_json",
- "tokio",
- "yuantuan-plugin-api",
-]
-
-[[package]]
-name = "yuantuan-plugin-qzone"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -3122,7 +3097,7 @@ dependencies = [
  "tracing",
  "yuantuan-core",
  "yuantuan-mcp-http",
- "yuantuan-plugin-moderator",
+ "yuantuan-plugin-qq",
  "yuantuan-plugin-quark-drive",
 ]
 

@@ -23,6 +23,6 @@ tar = "0.4"
 flate2 = "1"
 
 [dev-dependencies]
-yuantuan-plugin-qzone = { path = "../../plugins/qzone" }
+yuantuan-plugin-qq = { path = "../../plugins/qq" }
 axum = "0.8.9"
 tokio = { version = "1", features = ["full", "test-util"] }

@@ -10,7 +10,8 @@ fn main() {
         for entry in entries {
             let dependency = entry["dependency"].as_str().expect("plugin dependency");
             let feature = entry["feature"].as_str().expect("plugin feature");
-            for name in [dependency, feature] {
+            let fn_name = entry.get("entry").and_then(|v| v.as_str()).unwrap_or("plugin");
+            for name in [dependency, feature, fn_name] {
                 assert!(
                     !name.is_empty()
                         && name
@@ -28,7 +29,7 @@ fn main() {
                 "plugin feature missing"
             );
             output.push_str(&format!(
-                "#[cfg(feature = {feature:?})] plugins.push({}::plugin());\n",
+                "#[cfg(feature = {feature:?})] plugins.push({}::{fn_name}());\n",
                 dependency.replace('-', "_")
             ));
         }

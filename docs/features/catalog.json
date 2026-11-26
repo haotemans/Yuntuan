@@ -443,17 +443,17 @@
       "doc": "docs/features/extensions/plugins/moderator.md",
       "source": [
         "crates/adapter-qq/src/moderation.rs",
-        "plugins/moderator/src/lib.rs",
+        "plugins/qq/src/moderator/mod.rs",
         "crates/core/src/membership.rs",
         "crates/adapter-qq/src/moderation/membership.rs",
-        "plugins/moderator/src/membership.rs"
+        "plugins/qq/src/moderator/membership.rs"
       ],
       "tests": [
         "crates/adapter-qq/src/moderation/tests.rs",
-        "plugins/moderator/src/tests.rs",
+        "plugins/qq/src/moderator/tests.rs",
         "crates/core/tests/membership.rs",
         "crates/adapter-qq/src/moderation/membership/tests.rs",
-        "plugins/moderator/src/membership/tests.rs"
+        "plugins/qq/src/moderator/membership/tests.rs"
       ],
       "module": "extensions/plugins"
     },
@@ -463,14 +463,14 @@
       "status": "代码入口已实现（需真实QQ空间发布验收）",
       "doc": "docs/features/extensions/plugins/qzone.md",
       "source": [
-        "plugins/qzone/src/lib.rs",
-        "plugins/qzone/src/publisher.rs",
-        "plugins/qzone/src/tools.rs",
+        "plugins/qq/src/qzone/mod.rs",
+        "plugins/qq/src/qzone/publisher.rs",
+        "plugins/qq/src/qzone/tools.rs",
         "crates/core/src/plugins/qzone.rs",
         "crates/adapter-qq/src/qzone.rs"
       ],
       "tests": [
-        "plugins/qzone/src/tests.rs",
+        "plugins/qq/src/qzone/tests.rs",
         "crates/core/tests/qzone_host.rs",
         "crates/core/src/plugins/qzone.rs",
         "crates/adapter-qq/src/qzone.rs",

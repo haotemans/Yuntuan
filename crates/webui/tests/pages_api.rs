@@ -403,7 +403,7 @@ async fn start() -> Rig {
     extras.plugin_manager = Some(
         yuantuan_core::plugins::PluginManager::load(
             vec![
-                yuantuan_plugin_moderator::plugin(),
+                yuantuan_plugin_qq::moderator_plugin(),
                 yuantuan_plugin_quark_drive::plugin(),
             ],
             dir.clone(),

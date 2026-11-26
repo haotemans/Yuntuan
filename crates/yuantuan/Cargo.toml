@@ -6,9 +6,7 @@ edition = "2021"
 [dependencies]
 yuantuan-plugin-tencent-docs = { path = "../../plugins/tencent-docs", optional = true }
 yuantuan-plugin-quark-drive = { path = "../../plugins/quark-drive", optional = true }
-yuantuan-plugin-qzone = { path = "../../plugins/qzone", optional = true }
 yuantuan-plugin-qq = { path = "../../plugins/qq", optional = true }
-yuantuan-plugin-moderator = { path = "../../plugins/moderator", optional = true }
 yuantuan-plugin-anysearch = { path = "../../plugins/anysearch", optional = true }
 yuantuan-plugin-nai-image = { path = "../../plugins/nai-image", optional = true }
 yuantuan-plugin-api = { path = "../plugin-api" }
@@ -28,11 +26,11 @@ tracing-subscriber = "0.3"
 [features]
 plugin-tencent-docs = ["dep:yuantuan-plugin-tencent-docs"]
 plugin-quark-drive = ["dep:yuantuan-plugin-quark-drive"]
-plugin-qzone = ["dep:yuantuan-plugin-qzone"]
+plugin-qzone = ["plugin-qq"]
 plugin-qq = ["dep:yuantuan-plugin-qq"]
 plugin-anysearch = ["dep:yuantuan-plugin-anysearch"]
 default = ["plugin-social-media", "plugin-anysearch", "plugin-moderator", "plugin-nai-image", "plugin-qzone", "plugin-qq", "plugin-tencent-docs", "plugin-quark-drive"]
-plugin-moderator = ["dep:yuantuan-plugin-moderator"]
+plugin-moderator = ["plugin-qq"]
 plugin-nai-image = ["dep:yuantuan-plugin-nai-image"]
 plugin-social-media = ["dep:yuantuan-plugin-social-media"]
 
@@ -40,8 +38,9 @@ plugin-social-media = ["dep:yuantuan-plugin-social-media"]
 toml = "0.8"
 
 [[package.metadata.yuantuan.plugins]]
-dependency = "yuantuan-plugin-moderator"
+dependency = "yuantuan-plugin-qq"
 feature = "plugin-moderator"
+entry = "moderator_plugin"
 
 [[package.metadata.yuantuan.plugins]]
 dependency = "yuantuan-plugin-social-media"
@@ -56,8 +55,9 @@ dependency = "yuantuan-plugin-nai-image"
 feature = "plugin-nai-image"
 
 [[package.metadata.yuantuan.plugins]]
-dependency = "yuantuan-plugin-qzone"
+dependency = "yuantuan-plugin-qq"
 feature = "plugin-qzone"
+entry = "qzone_plugin"
 
 [[package.metadata.yuantuan.plugins]]
 dependency = "yuantuan-plugin-qq"
