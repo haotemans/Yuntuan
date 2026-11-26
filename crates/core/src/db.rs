@@ -445,6 +445,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("db/qq_memory_v22.sql"),
     ),
     ("V0.23 每日 Agent 任务与触发记录", include_str!("db/scheduled_agents_v23.sql")),
+    ("V0.24 平台无关记忆身份关联", include_str!("db/memory_identity_v24.sql")),
 ];
 
 pub async fn migrate(conn: &mut sqlx::SqliteConnection) -> Result<()> {

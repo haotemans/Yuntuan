@@ -5,6 +5,7 @@ use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 pub mod material_cache;
 pub mod nightly;
@@ -140,7 +141,7 @@ async fn profiles_for(
         return Ok(result);
     }
     let (directory_id, directory_join) = if directory {
-        ("d.directory_id", "JOIN qq_memory_directory d ON d.person_id=p.person_id")
+        ("d.directory_id", "JOIN memory_directory d ON d.person_id=p.person_id")
     } else {
         ("p.person_id", "")
     };
@@ -170,6 +171,40 @@ async fn profiles_for(
         }
     }
     Ok(result)
+}
+
+/// Platform-agnostic avatar URL resolver injected by platform adapters.
+pub type AvatarResolver = Arc<dyn Fn(&str, &str) -> Option<String> + Send + Sync>;
+
+/// Core interface for platform adapters to register cross-channel identity links
+/// without coupling core memory tables to a specific platform.
+pub async fn sync_platform_identity_links(
+    conn: &mut sqlx::SqliteConnection,
+    platform: &str,
+    links: &[(String, String)],
+) -> Result<()> {
+    let mut tx = conn.begin_immediate().await?;
+    let removed = sqlx::query("DELETE FROM memory_identity_links WHERE platform=?1")
+        .bind(platform)
+        .execute(&mut *tx)
+        .await?;
+    for (source_pid, target_pid) in links {
+        sqlx::query(
+            "INSERT OR REPLACE INTO memory_identity_links(source_pid,target_pid,platform) VALUES(?1,?2,?3)",
+        )
+        .bind(source_pid)
+        .bind(target_pid)
+        .bind(platform)
+        .execute(&mut *tx)
+        .await?;
+    }
+    if removed.rows_affected() > 0 || !links.is_empty() {
+        sqlx::query("UPDATE memory_material_epoch SET epoch=epoch+1 WHERE id=1")
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -270,7 +305,7 @@ pub async fn recall_scoped(
              AND (owner_type<>'chat' OR ?4='' OR NOT EXISTS(SELECT 1 FROM messages s WHERE s.msg_id=long_memories.source_msg_id AND s.chat_id=COALESCE(long_memories.source_chat_id,long_memories.owner_id) AND s.chat_type<>?4))
              AND (?4='' OR EXISTS(SELECT 1 FROM messages src WHERE src.msg_id=long_memories.source_msg_id AND src.chat_id=?2 AND src.chat_type=?4)))
             OR (owner_type='person' AND source_end_msg_id IS NULL
-                AND owner_id IN (SELECT alias FROM qq_memory_aliases WHERE person_id=?1)
+                AND owner_id IN (SELECT alias FROM memory_aliases WHERE person_id=?1)
                 AND EXISTS(SELECT 1 FROM memory_facts f JOIN messages m ON m.msg_id=f.source_msg_id
                     WHERE f.owner_type='person' AND f.owner_id=long_memories.owner_id
                       AND f.content=long_memories.content AND f.source_msg_id=long_memories.source_msg_id
@@ -370,4 +405,38 @@ pub async fn recall_scoped(
         }
     }
     Ok(result)
+}
+
+/// Platform-agnostic avatar URL resolver injected by platform adapters.
+pub type AvatarResolver = Arc<dyn Fn(&str, &str) -> Option<String> + Send + Sync>;
+
+/// Core interface for platform adapters to register cross-channel identity links
+/// without coupling core memory tables to a specific platform.
+pub async fn sync_platform_identity_links(
+    conn: &mut sqlx::SqliteConnection,
+    platform: &str,
+    links: &[(String, String)],
+) -> Result<()> {
+    let mut tx = conn.begin_immediate().await?;
+    let removed = sqlx::query("DELETE FROM memory_identity_links WHERE platform=?1")
+        .bind(platform)
+        .execute(&mut *tx)
+        .await?;
+    for (source_pid, target_pid) in links {
+        sqlx::query(
+            "INSERT OR REPLACE INTO memory_identity_links(source_pid,target_pid,platform) VALUES(?1,?2,?3)",
+        )
+        .bind(source_pid)
+        .bind(target_pid)
+        .bind(platform)
+        .execute(&mut *tx)
+        .await?;
+    }
+    if removed.rows_affected() > 0 || !links.is_empty() {
+        sqlx::query("UPDATE memory_material_epoch SET epoch=epoch+1 WHERE id=1")
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }

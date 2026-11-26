@@ -535,6 +535,7 @@ async fn main() -> Result<()> {
             })
         },
         backup_cfg: backup_cfg_slot.clone(),
+        avatar_resolver: Some(yuantuan_adapter_qq::avatar_resolver()),
         sandbox: cfg.sandbox.clone(),
         account_owner: cfg.security.super_admin_qq,
         management:Some(management),

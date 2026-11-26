@@ -164,7 +164,7 @@ pub async fn current(
                 PARTITION BY owner_id,item_key,source_chat_type,source_chat_id
                 ORDER BY source_end_id DESC,id DESC) AS rn
             FROM memory_items WHERE owner_type=?1 AND source_end_id<=?3
-              AND owner_id IN (SELECT ?2 UNION ALL SELECT alias FROM qq_memory_aliases WHERE ?1='person' AND person_id=?2)
+              AND owner_id IN (SELECT ?2 UNION ALL SELECT alias FROM memory_aliases WHERE ?1='person' AND person_id=?2)
               AND (
                 (owner_id=?2 AND source_chat_id=?4 AND source_chat_type=?5)
                 OR (?1='person' AND source_chat_type='group' AND kind IN ('portrait','inference','fact'))
@@ -221,7 +221,7 @@ pub async fn scoped_profile(
                 PARTITION BY p.person_id,p.field ORDER BY p.source_msg_id DESC,p.id DESC) AS identity_rank
             FROM person_profile_versions p JOIN messages m ON m.msg_id=p.source_msg_id
             WHERE m.sender_pid=p.person_id AND instr(m.text,p.evidence_quote)>0 AND p.source_msg_id<=?2
-              AND p.person_id IN (SELECT ?1 UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1)
+              AND p.person_id IN (SELECT ?1 UNION ALL SELECT alias FROM memory_aliases WHERE person_id=?1)
               AND (p.person_id=?1 OR m.chat_type='group')
         ), visible AS (
             SELECT *, ROW_NUMBER() OVER(PARTITION BY field ORDER BY source_msg_id DESC,id DESC) AS rn

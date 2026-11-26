@@ -26,6 +26,7 @@ pub struct MemQuery {
     person_id: Option<String>,
     chat_id: Option<String>,
     chat_type: Option<String>,
+    platform: Option<String>,
     search: Option<String>,
     limit: Option<i64>,
     page: Option<i64>,
@@ -41,6 +42,10 @@ impl MemQuery {
                 .chat_type
                 .as_deref()
                 .is_some_and(|v| !["group", "private"].contains(&v))
+            || self
+                .platform
+                .as_deref()
+                .is_some_and(|v| !["onebot", "qq_official"].contains(&v))
             || self
                 .search
                 .as_ref()
@@ -72,16 +77,17 @@ fn cte(summary: bool) -> String {
     format!("WITH records AS ({records}), enriched AS (
         SELECT r.*,COALESCE(NULLIF(p.display_name,''),CASE WHEN r.owner_type='self' THEN '云团' END) AS owner_name,
         COALESCE(d.directory_id,r.owner_id) AS directory_id,
-        (SELECT platform_uid FROM identities WHERE person_id=p.person_id AND platform='qq' ORDER BY id DESC LIMIT 1) AS qq,
+        (SELECT platform FROM identities WHERE person_id=p.person_id ORDER BY id DESC LIMIT 1) AS platform,
+        (SELECT platform_uid FROM identities WHERE person_id=p.person_id ORDER BY id DESC LIMIT 1) AS platform_uid,
         COALESCE(r.stored_chat_type,(SELECT chat_type FROM messages WHERE msg_id=r.source_msg_id AND chat_id=r.chat_id)) AS chat_type,
         (SELECT card FROM member_profiles WHERE person_id=r.owner_id AND chat_id=r.chat_id) AS card
-        FROM records r LEFT JOIN qq_memory_directory d ON d.person_id=r.owner_id AND r.owner_type='person'
+        FROM records r LEFT JOIN memory_directory d ON d.person_id=r.owner_id AND r.owner_type='person'
         LEFT JOIN persons p ON p.person_id=CASE WHEN r.owner_type='self' THEN 'self' ELSE COALESCE(d.directory_id,r.owner_id) END)")
 }
 
 fn person_members(builder: &mut QueryBuilder<'static, Sqlite>, person: &str) {
     builder.push("(SELECT ").push_bind(person.to_owned())
-        .push(" UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=")
+        .push(" UNION ALL SELECT alias FROM memory_aliases WHERE person_id=")
         .push_bind(person.to_owned()).push(")");
 }
 
@@ -110,6 +116,13 @@ fn filtered(summary: bool, q: &MemQuery, count: bool) -> QueryBuilder<'static, S
             .push_bind(id.clone())
             .push("='self'))");
     }
+    if let Some(platform) = q.platform.as_deref() {
+        if platform == yuantuan_core::platform::QQ_OFFICIAL_ID {
+            b.push(" AND (COALESCE(chat_id,'') LIKE 'qq-official_%' OR owner_id LIKE 'qq-official_%')");
+        } else if platform == yuantuan_core::platform::ONEBOT_ID {
+            b.push(" AND COALESCE(chat_id,'') NOT LIKE 'qq-official_%' AND owner_id NOT LIKE 'qq-official_%'");
+        }
+    }
     if let Some(term) = q
         .search
         .as_ref()
@@ -118,15 +131,30 @@ fn filtered(summary: bool, q: &MemQuery, count: bool) -> QueryBuilder<'static, S
     {
         b.push(" AND (instr(lower(content),").push_bind(term.clone()).push(")>0 OR instr(lower(COALESCE(owner_name,'')),")
             .push_bind(term.clone()).push(")>0 OR EXISTS(SELECT 1 FROM persons original WHERE original.person_id=e.owner_id AND instr(lower(COALESCE(original.display_name,'')),")
-            .push_bind(term.clone()).push(")>0) OR instr(lower(owner_id),").push_bind(term.clone()).push(")>0 OR instr(COALESCE(qq,''),")
+            .push_bind(term.clone()).push(")>0) OR instr(lower(owner_id),").push_bind(term.clone()).push(")>0 OR instr(COALESCE(platform_uid,''),")
             .push_bind(term.clone()).push(")>0 OR EXISTS(SELECT 1 FROM member_profiles mp WHERE mp.person_id=e.owner_id AND instr(lower(COALESCE(mp.card,'')),")
             .push_bind(term).push(")>0))");
     }
     b
 }
 
-fn identity(id: &str, name: Option<String>, qq: Option<String>, kind: &str) -> Value {
-    let qq = qq.filter(|s| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit()));
+fn identity(
+    resolver: Option<&yuantuan_core::memory::AvatarResolver>,
+    id: &str,
+    name: Option<String>,
+    platform: Option<String>,
+    platform_uid: Option<String>,
+    kind: &str,
+) -> Value {
+    let platform_uid = platform_uid.filter(|s| !s.is_empty());
+    let qq = match (platform.as_deref(), platform_uid.as_deref()) {
+        (Some("qq"), Some(uid)) if uid.bytes().all(|c| c.is_ascii_digit()) => Some(uid.to_owned()),
+        _ => None,
+    };
+    let avatar_url = match (resolver, platform.as_deref(), platform_uid.as_deref()) {
+        (Some(f), Some(p), Some(uid)) => f(p, uid),
+        _ => None,
+    };
     let name = name.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
         if kind == "chat" {
             format!("会话 {id}")
@@ -134,7 +162,7 @@ fn identity(id: &str, name: Option<String>, qq: Option<String>, kind: &str) -> V
             "未知成员".into()
         }
     });
-    json!({"id":id,"name":name,"qq":qq,"avatar_url":qq.as_ref().map(|q|format!("https://q1.qlogo.cn/g?b=qq&nk={q}&s=100")),"kind":kind})
+    json!({"id":id,"name":name,"platform":platform,"platform_uid":platform_uid,"qq":qq,"avatar_url":avatar_url,"kind":kind})
 }
 fn conversation(id: Option<String>, kind: Option<String>) -> Option<Value> {
     id.map(|id| {
@@ -187,7 +215,7 @@ async fn list(state: AppState, q: MemQuery, summary: bool) -> ApiResult {
         let owner_type:String=r.try_get("owner_type")?;
         let content:String=r.try_get("content")?;
         let mut item=json!({"id":r.try_get::<i64,_>("id")?,"owner_type":owner_type,"owner_id":owner_id,
-            "owner":identity(&directory_id,r.try_get("owner_name")?,r.try_get("qq")?,&owner_type),
+            "owner":identity(state.extras.avatar_resolver.as_ref(),&directory_id,r.try_get("owner_name")?,r.try_get("platform")?,r.try_get("platform_uid")?,&owner_type),
             "content":content,"source":r.try_get::<String,_>("source")?,"created_at":r.try_get::<i64,_>("created_at")?,
             "updated_at":r.try_get::<i64,_>("updated_at")?,"conversation":conversation(r.try_get("chat_id")?,r.try_get("chat_type")?),
             "source_msg_id":r.try_get::<Option<i64>,_>("source_msg_id")?,"source_end_msg_id":r.try_get::<Option<i64>,_>("source_end_msg_id")?,
@@ -212,8 +240,15 @@ pub async fn summaries(State(state): State<AppState>, Query(q): Query<MemQuery>)
 fn people_filtered(q: &MemQuery, count: bool) -> QueryBuilder<'static, Sqlite> {
     let mut b = QueryBuilder::<Sqlite>::new(
         "WITH matched AS (SELECT d.directory_id,MAX(p.last_seen) AS last_seen FROM persons p
-         JOIN qq_memory_directory d ON d.person_id=p.person_id WHERE 1=1",
+         JOIN memory_directory d ON d.person_id=p.person_id WHERE 1=1",
     );
+    if let Some(platform) = q.platform.as_deref() {
+        if platform == yuantuan_core::platform::QQ_OFFICIAL_ID {
+            b.push(" AND p.person_id LIKE 'qq-official_%'");
+        } else if platform == yuantuan_core::platform::ONEBOT_ID {
+            b.push(" AND p.person_id NOT LIKE 'qq-official_%'");
+        }
+    }
     if let Some(chat) = &q.chat_id {
         b.push(
             " AND EXISTS(SELECT 1 FROM messages m WHERE m.sender_pid=p.person_id AND m.chat_id=",
@@ -243,11 +278,12 @@ fn people_filtered(q: &MemQuery, count: bool) -> QueryBuilder<'static, Sqlite> {
         b.push("SELECT COUNT(*) FROM matched");
     } else {
         b.push("SELECT p.person_id,COALESCE(NULLIF(trim(p.display_name),''),(
-            SELECT peer.display_name FROM qq_memory_directory d JOIN persons peer ON peer.person_id=d.person_id
+            SELECT peer.display_name FROM memory_directory d JOIN persons peer ON peer.person_id=d.person_id
             WHERE d.directory_id=p.person_id AND trim(peer.display_name)<>''
             ORDER BY peer.last_seen DESC,peer.person_id LIMIT 1)) AS display_name,matched.last_seen,
-            (SELECT platform_uid FROM identities WHERE person_id=p.person_id AND platform='qq' ORDER BY id DESC LIMIT 1) AS qq,
-            (SELECT json_group_array(person_id) FROM qq_memory_directory
+            (SELECT platform FROM identities WHERE person_id=p.person_id ORDER BY id DESC LIMIT 1) AS platform,
+            (SELECT platform_uid FROM identities WHERE person_id=p.person_id ORDER BY id DESC LIMIT 1) AS platform_uid,
+            (SELECT json_group_array(person_id) FROM memory_directory
              WHERE directory_id=p.person_id AND person_id<>p.person_id) AS aliases
             FROM matched JOIN persons p ON p.person_id=matched.directory_id");
     }
@@ -283,7 +319,7 @@ pub async fn people(State(state): State<AppState>, Query(q): Query<MemQuery>) ->
         .map_err(db_error)?;
     let previews=sqlx::query("WITH latest AS (SELECT i.*,d.directory_id,
         ROW_NUMBER() OVER(PARTITION BY i.owner_id,item_key,source_chat_type,source_chat_id ORDER BY source_end_id DESC,id DESC) AS rn
-        FROM memory_items i JOIN qq_memory_directory d ON d.person_id=i.owner_id
+        FROM memory_items i JOIN memory_directory d ON d.person_id=i.owner_id
         WHERE owner_type='person' AND d.directory_id IN (SELECT value FROM json_each(?1))),
         ranked AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY directory_id ORDER BY CASE WHEN item_key='summary' THEN 0 ELSE 1 END,source_end_id DESC,id DESC) AS person_rank
         FROM latest WHERE rn=1 AND status IN ('current','uncertain') AND (valid_until IS NULL OR valid_until>unixepoch()))
@@ -307,7 +343,14 @@ pub async fn people(State(state): State<AppState>, Query(q): Query<MemQuery>) ->
         .take(size as usize)
         .map(|r| -> sqlx::Result<Value> {
             let id: String = r.try_get("person_id")?;
-            let mut person = identity(&id, r.try_get("display_name")?, r.try_get("qq")?, "person");
+            let mut person = identity(
+                state.extras.avatar_resolver.as_ref(),
+                &id,
+                r.try_get("display_name")?,
+                r.try_get("platform")?,
+                r.try_get("platform_uid")?,
+                "person",
+            );
             let aliases: String = r.try_get("aliases")?;
             person["aliases"] = serde_json::from_str(&aliases).map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
             let facts = portraits.remove(&id).unwrap_or_default();
@@ -437,7 +480,7 @@ pub async fn refresh_profile(
         "SELECT COALESCE((SELECT m.sender_pid FROM messages m
           LEFT JOIN memory_progress p ON p.owner_id=m.sender_pid AND p.stage='portrait' AND p.chat_type=''
           LEFT JOIN portrait_coverage c ON c.person_id=m.sender_pid AND c.msg_id=m.msg_id
-          WHERE m.sender_pid IN (SELECT ?1 UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1)
+          WHERE m.sender_pid IN (SELECT ?1 UNION ALL SELECT alias FROM memory_aliases WHERE person_id=?1)
             AND m.chat_type IN ('group','private') AND m.sender_bot=0 AND length(trim(COALESCE(m.text,'')))>=4
             AND m.msg_id>COALESCE(p.cursor,0) AND c.msg_id IS NULL
           ORDER BY m.msg_id DESC LIMIT 1),?1)",
