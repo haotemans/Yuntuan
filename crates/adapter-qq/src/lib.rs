@@ -11,5 +11,7 @@ mod server;
 pub use moderation::moderation_service;
 pub use qzone::qzone_service;
 
-pub use client::{send_fn, shared_token, AdapterHandle, NapcatConfig, NapcatSender, SharedToken};
+pub use client::{
+    onebot_gateway, send_fn, shared_token, AdapterHandle, NapcatConfig, NapcatSender, SharedToken,
+};
 pub use server::spawn;

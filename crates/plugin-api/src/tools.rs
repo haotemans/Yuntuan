@@ -26,6 +26,18 @@ pub struct ToolCtx {
     pub locale: Option<String>,
 }
 
+impl ToolCtx {
+    /// Infer the originating protocol/platform identifier from `chat_id` until
+    /// an explicit platform field is carried through all call sites.
+    pub fn inferred_platform(&self) -> &'static str {
+        if self.chat_id.starts_with("qq-official_") {
+            "qq_official"
+        } else {
+            "onebot"
+        }
+    }
+}
+
 /// 单个工具调用结果。
 /// 设计原则：Tool 不直接发消息，只返回结构化结果；由调用方（命令直派 / Agent / Bot）决定怎么发。
 #[derive(Debug, Clone, Serialize, Deserialize)]

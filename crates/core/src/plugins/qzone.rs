@@ -31,8 +31,8 @@ pub(super) async fn execute(
         ToolError::new(ToolErrorKind::PermissionDenied, "会话不在插件范围内")
     );
     let service = host
-        .qzone
-        .as_ref()
+        .services
+        .get::<dyn QzoneService>()
         .ok_or_else(|| ToolError::new(ToolErrorKind::Unavailable, "QQ空间适配器未启用"))?;
     if let QzoneAction::Publish { post, account_qq } = &mut action {
         post.validate()

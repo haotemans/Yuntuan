@@ -292,8 +292,8 @@ struct Services {
     llm: crate::bot::SharedLlm,
     policy: PluginSettings,
     io: Mutex<()>,
-    moderation: Option<Arc<dyn GroupModeration>>,
-    qzone: Option<Arc<dyn QzoneService>>,
+    services: ServiceRegistry,
+    uses_group_moderation: bool,
     tools: crate::tools::Registry,
     db_path: PathBuf,
     account_owner: Arc<AtomicU64>,
@@ -303,6 +303,41 @@ impl HostServices for Services {
     fn account_owner_qq(&self) -> Option<u64> {
         let id = self.account_owner.load(Ordering::Acquire);
         (id > 0).then_some(id)
+    }
+    async fn call_protocol(
+        &self,
+        ctx: &ToolCtx,
+        protocol: &str,
+        action: &str,
+        params: Value,
+    ) -> Result<Value> {
+        if self
+            .policy
+            .allowed_chats
+            .as_ref()
+            .is_some_and(|a| !a.contains(&ctx.chat_id))
+        {
+            return Err(ToolError::new(
+                ToolErrorKind::PermissionDenied,
+                "会话不在插件范围内",
+            )
+            .into());
+        }
+        let gateway = self.services.protocol(protocol).ok_or_else(|| {
+            ToolError::new(
+                ToolErrorKind::Unavailable,
+                format!("协议后端 {protocol} 未启用"),
+            )
+        })?;
+        gateway.call_action(ctx, action, params).await
+    }
+    fn protocol_account(&self, protocol: &str) -> Option<String> {
+        self.services.protocol(protocol).and_then(|g| g.account_id())
+    }
+    fn is_protocol_connected(&self, protocol: &str) -> bool {
+        self.services
+            .protocol(protocol)
+            .is_some_and(|g| g.is_connected())
     }
     async fn authorize_tool_for_skill(
         &self,
@@ -332,11 +367,11 @@ impl HostServices for Services {
         qzone::execute(self, ctx, action).await
     }
     async fn membership(&self, ctx: &ToolCtx, action: MembershipAction) -> Result<Value> {
-        if self.id != "moderator" {
+        if self.id != "moderator" || !self.uses_group_moderation {
             bail!("此插件不能管理好友或入群申请");
         }
-        self.moderation
-            .as_ref()
+        self.services
+            .get::<dyn GroupModeration>()
             .context("QQ申请审核服务未启用")?
             .membership(
                 ctx,
@@ -347,6 +382,9 @@ impl HostServices for Services {
             .await
     }
     async fn moderate(&self, ctx: &ToolCtx, action: ModerationAction) -> Result<()> {
+        if !self.uses_group_moderation {
+            bail!("插件未声明群管理能力");
+        }
         if self
             .policy
             .allowed_chats
@@ -355,8 +393,8 @@ impl HostServices for Services {
         {
             bail!("会话不在插件范围内");
         }
-        self.moderation
-            .as_ref()
+        self.services
+            .get::<dyn GroupModeration>()
             .context("插件未声明群管理能力或 QQ 适配器未启用")?
             .execute(ctx, action)
             .await
@@ -486,8 +524,7 @@ pub struct PluginManager {
     lifecycle: tokio::sync::RwLock<()>,
     stopped: AtomicBool,
     llm: crate::bot::SharedLlm,
-    moderation: Option<Arc<dyn GroupModeration>>,
-    qzone: Option<Arc<dyn QzoneService>>,
+    services: ServiceRegistry,
     db_path: PathBuf,
     account_owner: Arc<AtomicU64>,
 }
@@ -566,6 +603,25 @@ impl PluginManager {
         moderation: Option<Arc<dyn GroupModeration>>,
         qzone: Option<Arc<dyn QzoneService>>,
     ) -> Result<Arc<Self>> {
+        let mut services = ServiceRegistry::new();
+        if let Some(m) = moderation {
+            services.register::<dyn GroupModeration>(m);
+        }
+        if let Some(q) = qzone {
+            services.register::<dyn QzoneService>(q);
+        }
+        Self::load_with_registry(plugins, data_root, source_root, tools, skills, llm, services)
+            .await
+    }
+    pub async fn load_with_registry(
+        plugins: Vec<Arc<dyn Plugin>>,
+        data_root: PathBuf,
+        source_root: PathBuf,
+        tools: crate::tools::Registry,
+        skills: crate::skills::SkillRegistry,
+        llm: crate::bot::SharedLlm,
+        services: ServiceRegistry,
+    ) -> Result<Arc<Self>> {
         let mut manager = Self {
             entries: BTreeMap::new(),
             tools,
@@ -574,8 +630,7 @@ impl PluginManager {
             lifecycle: tokio::sync::RwLock::new(()),
             stopped: AtomicBool::new(false),
             llm: llm.clone(),
-            moderation: moderation.clone(),
-            qzone: qzone.clone(),
+            services,
             db_path: data_root.join("yuantuan.db"),
             account_owner: Arc::new(AtomicU64::new(0)),
         };
@@ -641,16 +696,8 @@ impl PluginManager {
                     tools: manager.tools.clone(),
                     db_path: manager.db_path.clone(),
                     account_owner: manager.account_owner.clone(),
-                    qzone: if meta.id == "qzone" {
-                        qzone.clone()
-                    } else {
-                        None
-                    },
-                    moderation: if plugin.uses_group_moderation() {
-                        moderation.clone()
-                    } else {
-                        None
-                    },
+                    services: manager.services.clone(),
+                    uses_group_moderation: plugin.uses_group_moderation(),
                 });
                 let result = gate
                     .run(plugin.start(PluginContext { host }, settings.config.clone()))
@@ -1056,16 +1103,8 @@ impl PluginManager {
             tools: self.tools.clone(),
             db_path: self.db_path.clone(),
             account_owner: self.account_owner.clone(),
-            qzone: if entry.meta.id == "qzone" {
-                self.qzone.clone()
-            } else {
-                None
-            },
-            moderation: if entry.plugin.uses_group_moderation() {
-                self.moderation.clone()
-            } else {
-                None
-            },
+            services: self.services.clone(),
+            uses_group_moderation: entry.plugin.uses_group_moderation(),
         });
         let result = async {
             let caps = gate

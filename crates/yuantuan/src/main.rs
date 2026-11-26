@@ -230,28 +230,33 @@ async fn main() -> Result<()> {
     tools_registry.register_arc(diagnostics.clone());
     skill_registry.register_arc(diagnostics);
     let llm_slot: yuantuan_core::bot::SharedLlm = Arc::new(RwLock::new(llm.clone()));
-    let plugins = yuantuan_core::plugins::PluginManager::load_with_services(
+    let mut backend_services = yuantuan_plugin_api::ServiceRegistry::new();
+    if let Some(h) = adapter.as_ref() {
+        let super_admin = cfg.security.super_admin_qq;
+        if let Some(qq) = super_admin {
+            info!(
+                super_admin_qq = qq,
+                "已启用管理员分级：仅超级管理员可使用主理人"
+            );
+        } else {
+            info!("未配置超级管理员，群管理退回兼容模式（群主/管理员可用）");
+        }
+        backend_services.register_protocol(yuantuan_adapter_qq::onebot_gateway(h.clone()));
+        backend_services.register::<dyn yuantuan_plugin_api::GroupModeration>(
+            yuantuan_adapter_qq::moderation_service(h.clone(), db_path.clone(), super_admin),
+        );
+        backend_services.register::<dyn yuantuan_plugin_api::QzoneService>(
+            yuantuan_adapter_qq::qzone_service(h.clone(), super_admin),
+        );
+    }
+    let plugins = yuantuan_core::plugins::PluginManager::load_with_registry(
         compiled_plugins(),
         data_root.clone(),
         std::path::PathBuf::from("plugins"),
         tools_registry.clone(),
         skill_registry.clone(),
         llm_slot.clone(),
-        adapter.as_ref().map(|h| {
-            let super_admin = cfg.security.super_admin_qq;
-            if let Some(qq) = super_admin {
-                info!(
-                    super_admin_qq = qq,
-                    "已启用管理员分级：仅超级管理员可使用主理人"
-                );
-            } else {
-                info!("未配置超级管理员，群管理退回兼容模式（群主/管理员可用）");
-            }
-            yuantuan_adapter_qq::moderation_service(h.clone(), db_path.clone(), super_admin)
-        }),
-        adapter
-            .as_ref()
-            .map(|h| yuantuan_adapter_qq::qzone_service(h.clone(), cfg.security.super_admin_qq)),
+        backend_services,
     )
     .await?;
     plugins.set_account_owner(cfg.security.super_admin_qq);

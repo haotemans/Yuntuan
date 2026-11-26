@@ -453,6 +453,51 @@ impl NapcatSender {
     }
 }
 
+/// Expose the OneBot 11 protocol transport as a generic `ProtocolGateway` for plugins.
+pub fn onebot_gateway(handle: AdapterHandle) -> Arc<dyn yuantuan_plugin_api::ProtocolGateway> {
+    Arc::new(OneBotGateway { handle })
+}
+
+struct OneBotGateway {
+    handle: AdapterHandle,
+}
+
+#[async_trait::async_trait]
+impl yuantuan_plugin_api::ProtocolGateway for OneBotGateway {
+    fn protocol_id(&self) -> &'static str {
+        yuantuan_core::platform::ONEBOT_ID
+    }
+
+    fn account_id(&self) -> Option<String> {
+        let id = self.handle.self_qq();
+        (id > 0).then(|| id.to_string())
+    }
+
+    fn is_connected(&self) -> bool {
+        self.handle.is_connected()
+    }
+
+    async fn call_action(
+        &self,
+        _ctx: &yuantuan_plugin_api::ToolCtx,
+        action: &str,
+        params: Value,
+    ) -> Result<Value> {
+        use yuantuan_plugin_api::{ToolError, ToolErrorKind};
+        if action.trim().is_empty() {
+            return Err(ToolError::new(
+                ToolErrorKind::InvalidArguments,
+                "协议动作名不能为空",
+            )
+            .into());
+        }
+        let sender = self.handle.sender().await.ok_or_else(|| {
+            ToolError::new(ToolErrorKind::Unavailable, "OneBot 协议后端未连接")
+        })?;
+        sender.action(action, params).await
+    }
+}
+
 #[cfg(test)]
 mod timeout_tests {
     use super::*;

@@ -77,3 +77,7 @@ V14迁移回归同步最新版本断言，继续验证已有申请、记忆、�
 ## 统一管理与守护重启
 
 装配主人和持久运维授权、管理工具与显式重启技能；运行时注入管理服务给 WebUI，重启请求通过内部 watch 信号进入优雅停机链路，由明确配置的进程守护恢复。不再要求容器部署的用户手动 SSH 重启，不操作 NapCat。运行时镜像声明 supervised 模式，需配合 Compose restart policy；完整授权/状态契约见[机器人管理](management.md)。
+
+## 能力注册表装配
+
+启动装配通过 `ServiceRegistry` 注册协议网关（`onebot_gateway`）及扩展服务（群管理、QQ 空间），并经 `PluginManager::load_with_registry` 注入插件宿主，替代逐项位置参数。

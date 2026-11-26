@@ -110,3 +110,10 @@ Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统
 ## 版本化管理与显式重载
 
 每个插件实例有不透明 revision，所有设置入口接受修改时更新版本。机器人自管理要求提供读取的 revision，在同一更新锁内比较，避免旧任务覆盖网页新配置。受控字段补丁继续保留凭据、会话范围和限额。显式 reload 即使配置相同也停止并重建实例，原调用排空、清理失败需重启、恢复旧实例等生命周期契约继续有效。聊天入口只开放授权的常规字段，身份分层与审计见[机器人管理](../runtime/management.md)。
+
+## 平台无关能力注册与协议网关
+
+为支持多平台接入并将协议传输与平台特性解耦，[`plugin-api`](../../../crates/plugin-api/src/lib.rs) 与 [`PluginManager::load_with_registry`](../../../crates/core/src/plugins.rs) 引入 `ServiceRegistry` 与 `ProtocolGateway`：
+
+- 协议后端（如 [`onebot_gateway`](../../../crates/adapter-qq/src/client.rs)）在启动装配时注册到 `ServiceRegistry`，宿主通过 `HostServices::call_protocol`、`protocol_account`、`is_protocol_connected` 与平台无关的 `account_owner` / `is_account_owner` 暴露给插件，并继续执行插件 `allowed_chats` 范围校验。
+- 原有 `GroupModeration`、`QzoneService` 与 `load_with_services` 通过 `ServiceRegistry` 保持向后兼容过渡，后续平台专属功能与兼容优化可直接作为插件基于协议网关实现。回归见 [`plugin_host.rs`](../../../crates/core/tests/plugin_host.rs)。
