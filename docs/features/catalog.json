@@ -479,6 +479,20 @@
       "module": "extensions/plugins"
     },
     {
+      "id": "qq-platform",
+      "title": "鸿雁：QQ 平台能力与兼容扩展",
+      "status": "代码入口已实现（基于协议网关，需真实 NapCat 验收）",
+      "doc": "docs/features/extensions/plugins/qq.md",
+      "source": [
+        "plugins/qq/src/lib.rs",
+        "plugins/qq/src/tools.rs"
+      ],
+      "tests": [
+        "plugins/qq/src/tests.rs"
+      ],
+      "module": "extensions/plugins"
+    },
+    {
       "id": "plugin-tencent-docs",
       "title": "子衿：腾讯文档",
       "status": "已新增接入代码（真实授权与网络验证待完成）",

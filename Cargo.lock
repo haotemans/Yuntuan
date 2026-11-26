@@ -2915,6 +2915,7 @@ dependencies = [
  "yuantuan-plugin-api",
  "yuantuan-plugin-moderator",
  "yuantuan-plugin-nai-image",
+ "yuantuan-plugin-qq",
  "yuantuan-plugin-quark-drive",
  "yuantuan-plugin-qzone",
  "yuantuan-plugin-social-media",
@@ -3042,6 +3043,17 @@ dependencies = [
  "tokio",
  "yuantuan-plugin-api",
  "zip",
+]
+
+[[package]]
+name = "yuantuan-plugin-qq"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde_json",
+ "tokio",
+ "yuantuan-plugin-api",
 ]
 
 [[package]]

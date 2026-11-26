@@ -109,6 +109,7 @@ jobs:
           cargo test --locked -p yuantuan-core --lib scheduler::agents::tests
           cargo test --locked -p yuantuan-webui --test pages_api connector_probe
           cargo test --locked -p yuantuan-plugin-qzone
+          cargo test --locked -p yuantuan-plugin-qq
           cargo test --locked -p yuantuan-core --test qzone_host
           cargo test --locked -p yuantuan-adapter-qq --lib qzone
           cargo test --locked -p yuantuan-core --lib bot::tests::plugin_command_works_without_models_and_keeps_output_as_text
