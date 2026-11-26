@@ -66,4 +66,4 @@ OneBot 在登录握手后接收 NapCat 的 `notice/notify/poke`。事件账号�
 
 QQ空间通过装配层注入受限服务并复用现有NapcatSender，不导出QQ登录凭据。`send_qzone_msg` 使用90秒回执等待，兼容图片数组为字符串的原生接口；普通非媒体动作预算不变。账号、图片和发布回执规则见[QQ空间](../extensions/plugins/qzone.md)，不将QQ连接成功当作说说已经发布。
 
-OneBot 传输层通过 [`onebot_gateway`](../../../crates/adapter-qq/src/client.rs) 实现 `ProtocolGateway`，QQ 官方机器人通过 [`official_gateway`](../../../crates/adapter-qq/src/official.rs) 实现 `ProtocolGateway`，共同注册到 `ServiceRegistry` 供平台插件调用；[`avatar_resolver`](../../../crates/adapter-qq/src/lib.rs) 为核心记忆库注入 QQ 头像解析接口，跨通道身份关联经核心 `sync_platform_identity_links` 写入。
+OneBot 传输层通过 [`onebot_gateway`](../../../crates/adapter-qq/src/client.rs) 实现 `ProtocolGateway`，QQ 官方机器人通过 [`official_gateway`](../../../crates/adapter-qq/src/official.rs) 实现 `ProtocolGateway`，共同注册到 `ServiceRegistry` 供平台插件调用；[`avatar_resolver`](../../../crates/adapter-qq/src/lib.rs) 为核心记忆库注入 QQ 头像解析接口，跨通道身份关联经核心 `sync_platform_identity_links` 写入，[`platform.rs`](../../../crates/core/src/platform.rs) 提供通用 `resolved_chat_platform` 解析。

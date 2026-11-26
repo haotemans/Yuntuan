@@ -489,8 +489,21 @@ pub async fn capture_reply_snapshot(
         anchor.ts,
     )
     .await?;
-    let aliases:Vec<String> = tx.prepare("SELECT 'p_' || platform_uid FROM identities WHERE person_id='self' AND platform='qq' ORDER BY platform_uid LIMIT 8").await?
-        .query_map(params![],|r|r.try_get(0)).await?.collect::<sqlx::Result<_>>()?;
+    let aliases: Vec<String> = tx
+        .prepare(
+            "SELECT CASE
+                WHEN platform='qq' THEN 'p_' || platform_uid
+                ELSE platform || '_' || platform_uid
+             END
+             FROM identities WHERE person_id='self'
+             UNION
+             SELECT alias FROM memory_aliases WHERE person_id='self'
+             LIMIT 16",
+        )
+        .await?
+        .query_map(params![], |r| r.try_get(0))
+        .await?
+        .collect::<sqlx::Result<_>>()?;
     // at_me comes from the protocol, not quoted text or model interpretation.
     // Multiple real addressees remain ambiguous; do not force a reply to them.
     let only_bot = anchor.at_me
