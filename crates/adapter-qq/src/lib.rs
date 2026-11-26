@@ -9,6 +9,7 @@ pub mod official;
 mod qzone;
 mod server;
 pub use moderation::moderation_service;
+pub use official::official_gateway;
 pub use qzone::qzone_service;
 
 pub use client::{

@@ -216,6 +216,76 @@ impl OfficialQq {
     }
 }
 
+/// Expose QQ Official Bot Open Platform API as a `ProtocolGateway` for plugins.
+pub fn official_gateway(official: OfficialQq) -> Arc<dyn yuantuan_plugin_api::ProtocolGateway> {
+    Arc::new(OfficialGateway { official })
+}
+
+struct OfficialGateway {
+    official: OfficialQq,
+}
+
+#[async_trait::async_trait]
+impl yuantuan_plugin_api::ProtocolGateway for OfficialGateway {
+    fn protocol_id(&self) -> &'static str {
+        QQ_OFFICIAL_ID
+    }
+
+    fn account_id(&self) -> Option<String> {
+        (!self.official.0.cfg.app_id.is_empty()).then(|| self.official.0.cfg.app_id.clone())
+    }
+
+    fn is_connected(&self) -> bool {
+        self.official.status().state == "online"
+    }
+
+    async fn call_action(
+        &self,
+        _ctx: &yuantuan_plugin_api::ToolCtx,
+        action: &str,
+        _params: Value,
+    ) -> Result<Value> {
+        use yuantuan_plugin_api::{ToolError, ToolErrorKind};
+        match action {
+            "get_status" => {
+                let st = self.official.status();
+                Ok(json!({
+                    "platform": QQ_OFFICIAL_ID,
+                    "app_id": st.account,
+                    "state": st.state,
+                    "connected": st.state == "online",
+                    "detail": st.detail,
+                }))
+            }
+            "get_bot_info" | "get_login_info" => {
+                if !self.official.0.cfg.enabled {
+                    return Err(ToolError::new(
+                        ToolErrorKind::Unavailable,
+                        "QQ 官方机器人未启用",
+                    )
+                    .into());
+                }
+                let token = self.official.token().await?;
+                let response = self
+                    .official
+                    .request(reqwest::Method::GET, "/users/@me", &token)
+                    .send()
+                    .await
+                    .map_err(|_| anyhow!("查询 QQ 官方机器人资料失败"))?;
+                if response.status().as_u16() == 401 {
+                    self.official.0.token.lock().await.take();
+                }
+                response_json(response, "查询 QQ 官方机器人资料").await
+            }
+            _ => Err(ToolError::new(
+                ToolErrorKind::Unavailable,
+                format!("QQ 官方机器人开放平台暂不支持动作：{action}"),
+            )
+            .into()),
+        }
+    }
+}
+
 async fn response_json(mut response: Response, action: &str) -> Result<Value> {
     let status = response.status();
     let mut body = Vec::new();

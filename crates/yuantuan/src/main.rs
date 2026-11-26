@@ -249,6 +249,11 @@ async fn main() -> Result<()> {
             yuantuan_adapter_qq::qzone_service(h.clone(), super_admin),
         );
     }
+    if let Some(official_handle) = official.as_ref() {
+        backend_services.register_protocol(yuantuan_adapter_qq::official_gateway(
+            official_handle.clone(),
+        ));
+    }
     let plugins = yuantuan_core::plugins::PluginManager::load_with_registry(
         compiled_plugins(),
         data_root.clone(),

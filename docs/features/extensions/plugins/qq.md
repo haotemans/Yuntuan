@@ -8,8 +8,10 @@
 
 ## 实际行为
 
-- **纯协议网关调用**：插件通过 `HostServices::call_protocol(ctx, "onebot", ...)` 调用核心 OneBot 后端，不直接依赖 `adapter-qq` 或 `core`。
-- **通道边界**：仅在 `ctx.inferred_platform() == "onebot"` 的会话中可用；QQ 官方通道或非群聊（针对群专属能力）会自动拒绝或隐藏。
+- **纯协议网关调用**：插件通过 `HostServices::call_protocol` 同时兼容 `onebot` 与 `qq_official` 两种协议后端，不直接依赖 `adapter-qq` 或 `core`。
+- **通道边界**：
+  - `qq.channel_status`（`/QQ状态`、`/频道状态`）与 `qq.group_info`（`/群信息`）同时支持 OneBot QQ 与 QQ 官方机器人通道。
+  - `qq.member_info`、`qq.user_info`、`qq.essence_list`、`qq.poke`、`qq.group_notice`、`qq.qzone_*` 与群管/审核能力仅在 `onebot` 通道可用；在 `qq_official` 通道中自动隐藏并在直接调用时明确提示不支持。
 - **能力清单**：
   - `qq.group_info` / `/群信息`：查询当前 QQ 群信息（`get_group_info`）。
   - `qq.member_info` / `/群成员 [QQ号]`：查询当前群成员信息（`get_group_member_info`）。

@@ -20,6 +20,16 @@ impl HostServices for MockHost {
     fn account_owner_qq(&self) -> Option<u64> {
         self.owner
     }
+    fn protocol_account(&self, protocol: &str) -> Option<String> {
+        match protocol {
+            "onebot" => Some("10001".into()),
+            "qq_official" => Some("102030".into()),
+            _ => None,
+        }
+    }
+    fn is_protocol_connected(&self, protocol: &str) -> bool {
+        matches!(protocol, "onebot" | "qq_official")
+    }
     async fn call_protocol(
         &self,
         _ctx: &ToolCtx,
@@ -31,20 +41,26 @@ impl HostServices for MockHost {
             .lock()
             .unwrap()
             .push((protocol.to_string(), action.to_string(), params.clone()));
-        Ok(match action {
-            "get_group_info" => json!({
+        Ok(match (protocol, action) {
+            ("qq_official", "get_status") => json!({
+                "platform": "qq_official",
+                "app_id": "102030",
+                "state": "online",
+                "connected": true
+            }),
+            (_, "get_group_info") => json!({
                 "group_id": params["group_id"],
                 "group_name": "云团测试群",
                 "member_count": 12,
                 "max_member_count": 500
             }),
-            "get_group_member_info" => json!({
+            (_, "get_group_member_info") => json!({
                 "user_id": params["user_id"],
                 "nickname": "小团",
                 "card": "群友小团",
                 "role": "member"
             }),
-            "get_essence_msg_list" => json!([{"message_id": 1}]),
+            (_, "get_essence_msg_list") => json!([{"message_id": 1}]),
             _ => json!({"ok": true}),
         })
     }
@@ -150,4 +166,36 @@ async fn qq_plugin_rejects_non_onebot_channel() {
     let poke = caps.tools.iter().find(|t| t.name() == "qq.poke").unwrap();
     assert!(!poke.available_in_chat(&official_ctx));
     assert!(poke.call(&official_ctx, json!({"user_id": 10001})).await.is_err());
+
+    let qzone_pub = caps
+        .tools
+        .iter()
+        .find(|t| t.name() == "qq.qzone_publish")
+        .unwrap();
+    assert!(!qzone_pub.available_in_chat(&official_ctx));
+
+    let recall = caps.tools.iter().find(|t| t.name() == "qq.recall").unwrap();
+    assert!(!recall.available_in_chat(&official_ctx));
+
+    let status = caps
+        .tools
+        .iter()
+        .find(|t| t.name() == "qq.channel_status")
+        .unwrap();
+    assert!(status.available_in_chat(&official_ctx));
+    let official_status = status.call(&official_ctx, json!({})).await.unwrap();
+    assert!(official_status.summary.contains("QQ 官方机器人"));
+    assert_eq!(official_status.data["app_id"], "102030");
+
+    let group_info = caps
+        .tools
+        .iter()
+        .find(|t| t.name() == "qq.group_info")
+        .unwrap();
+    assert!(group_info.available_in_chat(&official_ctx));
+    let official_group = group_info.call(&official_ctx, json!({})).await.unwrap();
+    assert_eq!(official_group.data["platform"], "qq_official");
+
+    let onebot_status = status.call(&group_ctx("p_10001"), json!({})).await.unwrap();
+    assert!(onebot_status.summary.contains("OneBot QQ"));
 }

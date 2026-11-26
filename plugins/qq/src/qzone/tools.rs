@@ -51,6 +51,9 @@ impl Tool for Handler {
     fn description(&self) -> &'static str {
         self.description()
     }
+    fn available_in_chat(&self, ctx: &ToolCtx) -> bool {
+        ctx.inferred_platform() == "onebot"
+    }
     fn policy(&self) -> ToolPolicy {
         ToolPolicy {
             effect: if matches!(self.op, Op::Publish) {

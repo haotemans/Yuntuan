@@ -6,9 +6,11 @@ use std::sync::Arc;
 use yuantuan_plugin_api::*;
 
 const ONEBOT: &str = "onebot";
+const QQ_OFFICIAL: &str = "qq_official";
 
 #[derive(Clone, Copy)]
 pub(crate) enum Op {
+    ChannelStatus,
     GroupInfo,
     MemberInfo,
     UserInfo,
@@ -21,12 +23,17 @@ impl Op {
     pub(crate) fn has_skill(self) -> bool {
         matches!(
             self,
-            Self::GroupInfo | Self::MemberInfo | Self::EssenceList | Self::Poke
+            Self::ChannelStatus
+                | Self::GroupInfo
+                | Self::MemberInfo
+                | Self::EssenceList
+                | Self::Poke
         )
     }
 
     fn tool_name(self) -> &'static str {
         match self {
+            Self::ChannelStatus => "qq.channel_status",
             Self::GroupInfo => "qq.group_info",
             Self::MemberInfo => "qq.member_info",
             Self::UserInfo => "qq.user_info",
@@ -38,18 +45,23 @@ impl Op {
 
     fn description(self) -> &'static str {
         match self {
-            Self::GroupInfo => "查询当前 QQ 群的基础信息（群名、成员数等）",
-            Self::MemberInfo => "查询当前 QQ 群指定成员的群名片、角色与活跃信息",
-            Self::UserInfo => "查询指定 QQ 号用户的公开基础资料",
-            Self::EssenceList => "查看当前 QQ 群的精华消息列表",
-            Self::Poke => "在当前 QQ 群或私聊中发送一次戳一戳",
-            Self::GroupNotice => "由超级管理员在当前 QQ 群发布群公告",
+            Self::ChannelStatus => "查询当前 QQ 通道（OneBot 或 QQ 官方机器人）的连接与账号状态",
+            Self::GroupInfo => "查询当前 QQ 群的基础信息（OneBot 返回群详情，官方通道返回通道状态）",
+            Self::MemberInfo => "查询当前 QQ 群指定成员的群名片、角色与活跃信息（仅 OneBot）",
+            Self::UserInfo => "查询指定 QQ 号用户的公开基础资料（仅 OneBot）",
+            Self::EssenceList => "查看当前 QQ 群的精华消息列表（仅 OneBot）",
+            Self::Poke => "在当前 QQ 群或私聊中发送一次戳一戳（仅 OneBot）",
+            Self::GroupNotice => "由超级管理员在当前 QQ 群发布群公告（仅 OneBot）",
         }
     }
 
     fn policy(self) -> ToolPolicy {
         match self {
-            Self::GroupInfo | Self::MemberInfo | Self::UserInfo | Self::EssenceList => ToolPolicy {
+            Self::ChannelStatus
+            | Self::GroupInfo
+            | Self::MemberInfo
+            | Self::UserInfo
+            | Self::EssenceList => ToolPolicy {
                 effect: ToolEffect::ReadOnly,
                 timeout_ms: 15_000,
                 cancellation: ToolCancellation::DropFuture,
@@ -66,6 +78,10 @@ impl Op {
 
     fn schema(self) -> Value {
         match self {
+            Self::ChannelStatus => json!({
+                "type": "object",
+                "properties": {}
+            }),
             Self::GroupInfo | Self::EssenceList => json!({
                 "type": "object",
                 "properties": {
@@ -105,6 +121,7 @@ impl Op {
 
     fn commands(self) -> &'static [&'static str] {
         match self {
+            Self::ChannelStatus => &["/QQ状态", "/频道状态"],
             Self::GroupInfo => &["/群信息"],
             Self::MemberInfo => &["/群成员"],
             Self::EssenceList => &["/精华消息"],
@@ -115,6 +132,7 @@ impl Op {
 
     fn skill_description(self) -> &'static str {
         match self {
+            Self::ChannelStatus => "查看当前 QQ 通道（OneBot 或官方机器人）连接状态",
             Self::GroupInfo => "查看当前 QQ 群信息",
             Self::MemberInfo => "查看当前 QQ 群成员信息，可指定 QQ 号",
             Self::EssenceList => "查看当前 QQ 群精华消息",
@@ -135,7 +153,7 @@ fn ensure_onebot(ctx: &ToolCtx) -> Result<()> {
         ctx.inferred_platform() == ONEBOT,
         ToolError::new(
             ToolErrorKind::Unavailable,
-            "当前会话不是 OneBot QQ 通道，无法执行该 QQ 平台操作"
+            "当前会话为 QQ 官方机器人通道（qq_official），QQ 官方开放平台暂不支持该功能（仅 OneBot 通道可用）"
         )
     );
     Ok(())
@@ -187,13 +205,75 @@ fn user_id_arg(args: &Value, ctx: &ToolCtx, required: bool) -> Result<u64> {
 
 impl Handler {
     async fn execute(&self, ctx: &ToolCtx, args: Value) -> Result<ToolOutput> {
-        ensure_onebot(ctx)?;
+        let platform = ctx.inferred_platform();
         match self.op {
+            Op::ChannelStatus => {
+                if platform == QQ_OFFICIAL {
+                    let data = self
+                        .host
+                        .call_protocol(ctx, QQ_OFFICIAL, "get_status", json!({}))
+                        .await?;
+                    let app_id = data["app_id"].as_str().unwrap_or("未配置");
+                    let state = data["state"].as_str().unwrap_or("unknown");
+                    return Ok(ToolOutput {
+                        summary: format!("当前通道：QQ 官方机器人（AppID: {app_id}，状态：{state}）"),
+                        artifacts: vec![],
+                        data,
+                    });
+                }
+                let connected = self.host.is_protocol_connected(ONEBOT);
+                let account = self
+                    .host
+                    .protocol_account(ONEBOT)
+                    .unwrap_or_else(|| "未知".into());
+                let data = self
+                    .host
+                    .call_protocol(ctx, ONEBOT, "get_login_info", json!({}))
+                    .await
+                    .unwrap_or_else(|_| {
+                        json!({
+                            "platform": ONEBOT,
+                            "account": account,
+                            "connected": connected,
+                        })
+                    });
+                Ok(ToolOutput {
+                    summary: format!(
+                        "当前通道：OneBot QQ（账号：{account}，连接：{}）",
+                        if connected { "在线" } else { "未连接" }
+                    ),
+                    artifacts: vec![],
+                    data,
+                })
+            }
             Op::GroupInfo => {
                 ensure!(
                     self.settings.allow_group_queries,
                     ToolError::new(ToolErrorKind::PermissionDenied, "插件已关闭群信息查询")
                 );
+                ensure!(
+                    ctx.chat_type == "group",
+                    ToolError::new(ToolErrorKind::PermissionDenied, "该操作仅支持 QQ 群聊")
+                );
+                if platform == QQ_OFFICIAL {
+                    let status = self
+                        .host
+                        .call_protocol(ctx, QQ_OFFICIAL, "get_status", json!({}))
+                        .await
+                        .unwrap_or_else(|_| json!({ "platform": QQ_OFFICIAL }));
+                    return Ok(ToolOutput {
+                        summary: format!(
+                            "当前为 QQ 官方群聊通道（{}），QQ 官方开放平台暂不提供群名称与成员数查询",
+                            ctx.chat_id
+                        ),
+                        artifacts: vec![],
+                        data: json!({
+                            "platform": QQ_OFFICIAL,
+                            "chat_id": ctx.chat_id,
+                            "channel": status,
+                        }),
+                    });
+                }
                 let group_id = group_id_from_ctx(ctx)?;
                 let no_cache = args["no_cache"].as_bool().unwrap_or(false);
                 let data = self
@@ -215,6 +295,7 @@ impl Handler {
                 })
             }
             Op::MemberInfo => {
+                ensure_onebot(ctx)?;
                 ensure!(
                     self.settings.allow_group_queries,
                     ToolError::new(ToolErrorKind::PermissionDenied, "插件已关闭群成员查询")
@@ -248,6 +329,7 @@ impl Handler {
                 })
             }
             Op::UserInfo => {
+                ensure_onebot(ctx)?;
                 ensure!(
                     self.settings.allow_group_queries,
                     ToolError::new(ToolErrorKind::PermissionDenied, "插件已关闭用户资料查询")
@@ -271,6 +353,7 @@ impl Handler {
                 })
             }
             Op::EssenceList => {
+                ensure_onebot(ctx)?;
                 ensure!(
                     self.settings.allow_group_queries,
                     ToolError::new(ToolErrorKind::PermissionDenied, "插件已关闭精华消息查询")
@@ -293,6 +376,7 @@ impl Handler {
                 })
             }
             Op::Poke => {
+                ensure_onebot(ctx)?;
                 ensure!(
                     self.settings.allow_poke,
                     ToolError::new(ToolErrorKind::PermissionDenied, "插件已关闭戳一戳功能")
@@ -315,6 +399,7 @@ impl Handler {
                 })
             }
             Op::GroupNotice => {
+                ensure_onebot(ctx)?;
                 ensure!(
                     self.settings.allow_owner_notice,
                     ToolError::new(ToolErrorKind::PermissionDenied, "插件未启用群公告发布")
@@ -367,17 +452,24 @@ impl Tool for Handler {
     }
 
     fn available_in_chat(&self, ctx: &ToolCtx) -> bool {
-        if ctx.inferred_platform() != ONEBOT {
-            return false;
-        }
+        let platform = ctx.inferred_platform();
         match self.op {
-            Op::GroupInfo | Op::MemberInfo | Op::EssenceList => {
-                self.settings.allow_group_queries && ctx.chat_type == "group"
+            Op::ChannelStatus => matches!(platform, ONEBOT | QQ_OFFICIAL),
+            Op::GroupInfo => {
+                self.settings.allow_group_queries
+                    && ctx.chat_type == "group"
+                    && matches!(platform, ONEBOT | QQ_OFFICIAL)
             }
-            Op::UserInfo => self.settings.allow_group_queries,
-            Op::Poke => self.settings.allow_poke,
+            Op::MemberInfo | Op::EssenceList => {
+                platform == ONEBOT
+                    && self.settings.allow_group_queries
+                    && ctx.chat_type == "group"
+            }
+            Op::UserInfo => platform == ONEBOT && self.settings.allow_group_queries,
+            Op::Poke => platform == ONEBOT && self.settings.allow_poke,
             Op::GroupNotice => {
-                self.settings.allow_owner_notice
+                platform == ONEBOT
+                    && self.settings.allow_owner_notice
                     && ctx.chat_type == "group"
                     && self.host.is_account_owner(ctx)
             }

@@ -80,4 +80,4 @@ V14迁移回归同步最新版本断言，继续验证已有申请、记忆、�
 
 ## 能力注册表装配
 
-启动装配通过 `ServiceRegistry` 注册协议网关（`onebot_gateway`）及扩展服务（群管理、QQ 空间），并经 `PluginManager::load_with_registry` 注入插件宿主，替代逐项位置参数。
+启动装配通过 `ServiceRegistry` 注册协议网关（`onebot_gateway`、`official_gateway`）及扩展服务（群管理、QQ 空间），并经 `PluginManager::load_with_registry` 注入插件宿主，替代逐项位置参数。

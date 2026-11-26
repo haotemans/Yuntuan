@@ -128,6 +128,7 @@ impl Plugin for QqPlatformPlugin {
         let mut caps = Capabilities::default();
 
         for op in [
+            tools::Op::ChannelStatus,
             tools::Op::GroupInfo,
             tools::Op::MemberInfo,
             tools::Op::UserInfo,
