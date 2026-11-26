@@ -46,23 +46,23 @@
 ## 边界
 
 - 不能由模型声明自身“是管理员”；跨群撤回、越权禁言、虚构消息 ID 都必须拒绝。
-- 单次时长、权限与失败处理详见[插件 README](../../../../plugins/moderator/README.md)。
+- 源码已并入统一 QQ 插件包 [`plugins/qq`](../../../../plugins/qq/src/lib.rs)，保留原插件 ID `moderator` 与配置目录兼容。
 
 ## 对应实现（本页负责的主源码）
 
 - [`crates/adapter-qq/src/moderation.rs`](../../../../crates/adapter-qq/src/moderation.rs)
-- [`plugins/moderator/src/lib.rs`](../../../../plugins/moderator/src/lib.rs)
+- [`plugins/qq/src/moderator/mod.rs`](../../../../plugins/qq/src/moderator/mod.rs)
 
 - [`crates/core/src/membership.rs`](../../../../crates/core/src/membership.rs)
 
 - [`crates/adapter-qq/src/moderation/membership.rs`](../../../../crates/adapter-qq/src/moderation/membership.rs)
 
-- [`plugins/moderator/src/membership.rs`](../../../../plugins/moderator/src/membership.rs)
+- [`plugins/qq/src/moderator/membership.rs`](../../../../plugins/qq/src/moderator/membership.rs)
 
 ## 验证入口
 
 - [`crates/adapter-qq/src/moderation/tests.rs`](../../../../crates/adapter-qq/src/moderation/tests.rs)
-- [`plugins/moderator/src/tests.rs`](../../../../plugins/moderator/src/tests.rs)
+- [`plugins/qq/src/moderator/tests.rs`](../../../../plugins/qq/src/moderator/tests.rs)
 
 维护规则：修改上列源码的功能行为时，同一 PR 更新本页；新增、删除或迁移模块时同步更新 `catalog.json`。测试入口只代表可追踪的验证位置，不代表本次执行通过。
 
@@ -70,7 +70,7 @@
 
 - [`crates/core/tests/membership.rs`](../../../../crates/core/tests/membership.rs)
 - [`crates/adapter-qq/src/moderation/membership/tests.rs`](../../../../crates/adapter-qq/src/moderation/membership/tests.rs)
-- [`plugins/moderator/src/membership/tests.rs`](../../../../plugins/moderator/src/membership/tests.rs)
+- [`plugins/qq/src/moderator/membership/tests.rs`](../../../../plugins/qq/src/moderator/membership/tests.rs)
 
 申请队列的迁移回滚测试随数据库V11更新版本断言，继续验证重放迁移不会丢失已有群聊记忆。
 

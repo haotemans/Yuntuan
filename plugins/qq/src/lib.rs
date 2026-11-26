@@ -5,12 +5,22 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use yuantuan_plugin_api::*;
 
+pub mod moderator;
+pub mod qzone;
 #[cfg(test)]
 mod tests;
 mod tools;
 
 pub fn plugin() -> Arc<dyn Plugin> {
     Arc::new(QqPlatformPlugin)
+}
+
+pub fn qzone_plugin() -> Arc<dyn Plugin> {
+    qzone::plugin()
+}
+
+pub fn moderator_plugin() -> Arc<dyn Plugin> {
+    moderator::plugin()
 }
 
 #[derive(Clone, Copy)]

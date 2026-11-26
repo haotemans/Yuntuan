@@ -40,9 +40,9 @@ Skill 委托 Publisher 前调用 `HostServices::authorize_tool_for_skill`；这�
 
 ## 对应实现
 
-- [`plugins/qzone/src/lib.rs`](../../../../plugins/qzone/src/lib.rs)：插件元数据、配置和注册。
-- [`plugins/qzone/src/tools.rs`](../../../../plugins/qzone/src/tools.rs)：Tool/Skill、命令解析、统一权限检查。
-- [`plugins/qzone/src/publisher.rs`](../../../../plugins/qzone/src/publisher.rs)：持久回执、额度、去重与结果呈现。
+- [`plugins/qq/src/qzone/mod.rs`](../../../../plugins/qq/src/qzone/mod.rs)：插件元数据、配置和注册（已并入统一 QQ 插件包，保留原插件 ID `qzone`）。
+- [`plugins/qq/src/qzone/tools.rs`](../../../../plugins/qq/src/qzone/tools.rs)：Tool/Skill、命令解析、统一权限检查。
+- [`plugins/qq/src/qzone/publisher.rs`](../../../../plugins/qq/src/qzone/publisher.rs)：持久回执、额度、去重与结果呈现。
 - [`crates/core/src/plugins/qzone.rs`](../../../../crates/core/src/plugins/qzone.rs)：宿主能力与安全图片转换边界。
 - [`crates/adapter-qq/src/qzone.rs`](../../../../crates/adapter-qq/src/qzone.rs)：账号权限、原生动作和回执。
 
@@ -50,7 +50,7 @@ Skill 委托 Publisher 前调用 `HostServices::authorize_tool_for_skill`；这�
 
 ## 验证入口
 
-- [`plugins/qzone/src/tests.rs`](../../../../plugins/qzone/src/tests.rs)：混合入口去重、权限、额度、重启、取消、缺失回执与落盘失败。
+- [`plugins/qq/src/qzone/tests.rs`](../../../../plugins/qq/src/qzone/tests.rs)：混合入口去重、权限、额度、重启、取消、缺失回执与落盘失败。
 - [`crates/core/tests/qzone_host.rs`](../../../../crates/core/tests/qzone_host.rs)：真实插件宿主、工具开关/会话范围、单并发不死锁；连接器为 fake。
 - 宿主/适配器模块内测试：图片边界、容器传输、账号、可见范围与回执；[`client.rs`](../../../../crates/adapter-qq/src/client.rs) 验证发布等待预算。
 - [`bot.rs`](../../../../crates/core/src/bot.rs) 的命令到发送回归包含无参数查询；[`plugins-flow.spec.js`](../../../../webui-frontend/tests/plugins-flow.spec.js) 验证独立配置页、参数元数据、权限开关及配置保存。

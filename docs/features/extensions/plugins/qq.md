@@ -22,6 +22,7 @@
 
 - 所有调用继续受宿主 `PluginManager` 的启停、会话白名单（`allowed_chats`）、能力开关与参数 Schema 校验约束。
 - 该插件默认未启用，需在管理面板中开启或配置后生效。
+- 原 [`qzone`](qzone.md) 与 [`moderator`](moderator.md) 插件源码已并入统一 QQ 插件包 `plugins/qq`（分别导出 `qzone_plugin` 与 `moderator_plugin`），保留既有插件 ID、配置目录与命令兼容。
 
 ## 对应实现（本页负责的主源码）
 

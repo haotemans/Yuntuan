@@ -83,7 +83,7 @@ impl Skill for Handler {
             description: self.description(),
             prompt_template: "".into(),
             tools: vec![self.name()],
-            role_hint: Some(include_str!("../SKILL.md")),
+            role_hint: Some(include_str!("SKILL.md")),
         }
     }
     fn accepts_empty_command(&self) -> bool {
