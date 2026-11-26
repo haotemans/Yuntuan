@@ -54,13 +54,13 @@ impl HostServices for MockHost {
                 "member_count": 12,
                 "max_member_count": 500
             }),
-            "get_group_member_info" => json!({
+            (_, "get_group_member_info") => json!({
                 "user_id": params["user_id"],
                 "nickname": "小团",
                 "card": "群友小团",
                 "role": "member"
             }),
-            "get_essence_msg_list" => json!([{"message_id": 1}]),
+            (_, "get_essence_msg_list") => json!([{"message_id": 1}]),
             _ => json!({"ok": true}),
         })
     }
