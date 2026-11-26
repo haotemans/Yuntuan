@@ -403,7 +403,7 @@ async fn start() -> Rig {
     extras.plugin_manager = Some(
         yuantuan_core::plugins::PluginManager::load(
             vec![
-                yuantuan_plugin_qq::moderator_plugin(),
+                yuantuan_plugin_qq::plugin(),
                 yuantuan_plugin_quark_drive::plugin(),
             ],
             dir.clone(),
@@ -826,7 +826,7 @@ async fn pages_api_full_pass() {
 
     // 插件目录来自运行时，配置校验失败不能覆盖旧配置。
     let (_, plugins) = rig.get("/api/plugins/list").await;
-    assert_eq!(plugins["plugins"][0]["name"], "moderator");
+    assert_eq!(plugins["plugins"][0]["name"], "qq");
     assert_eq!(plugins["plugins"][0]["loaded"], false);
     let mut settings = plugins["plugins"][0]["settings"].clone();
     settings["config"]["operator_qqs"] = json!("123456");
@@ -835,7 +835,7 @@ async fn pages_api_full_pass() {
         .http
         .post(format!("{}/api/plugins/config", rig.base))
         .bearer_auth(&rig.token)
-        .json(&json!({"name":"moderator", "settings":settings}))
+        .json(&json!({"name":"qq", "settings":settings}))
         .send()
         .await
         .unwrap();
@@ -845,7 +845,7 @@ async fn pages_api_full_pass() {
         .http
         .post(format!("{}/api/plugins/config", rig.base))
         .bearer_auth(&rig.token)
-        .json(&json!({"name":"moderator", "settings":settings}))
+        .json(&json!({"name":"qq", "settings":settings}))
         .send()
         .await
         .unwrap();

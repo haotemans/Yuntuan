@@ -5,6 +5,48 @@ use std::sync::Arc;
 use yuantuan_plugin_api::*;
 mod membership;
 
+pub(crate) fn moderator_config_fields() -> Vec<ConfigField> {
+    ModeratorPlugin::default().config_fields()
+}
+
+pub(crate) fn validate_moderator_config(config: &Value) -> Result<()> {
+    operators(config["operator_qqs"].as_str().unwrap_or(""))?;
+    admission_rules(config)?;
+    if config
+        .get("max_auto_reviews_per_day")
+        .is_some_and(|v| !v.as_u64().is_some_and(|n| (1..=100).contains(&n)))
+    {
+        bail!("每日自动审核上限须为1–100");
+    }
+    if config
+        .get("max_ban_minutes")
+        .is_some_and(|v| !v.as_u64().is_some_and(|n| (1..=43200).contains(&n)))
+    {
+        bail!("禁言上限须为 1–43200 分钟");
+    }
+    Ok(())
+}
+
+pub(crate) fn register_moderator_capabilities(
+    ctx: &PluginContext,
+    config: &Value,
+    caps: &mut Capabilities,
+) -> Result<tokio::task::JoinHandle<()>> {
+    let ops = operators(config["operator_qqs"].as_str().unwrap_or(""))?;
+    for op in [Op::Recall, Op::Ban, Op::Unban] {
+        let handler = Arc::new(Handler {
+            host: ctx.host.clone(),
+            operators: ops.clone(),
+            max_seconds: config["max_ban_minutes"].as_u64().unwrap_or(1440) as u32 * 60,
+            op,
+        });
+        caps.tools.push(handler.clone());
+        caps.skills.push(handler);
+    }
+    membership::register(caps, ctx.host.clone(), ops);
+    Ok(membership::spawn(ctx.host.clone(), config.clone()))
+}
+
 pub fn plugin() -> Arc<dyn Plugin> {
     Arc::new(ModeratorPlugin::default())
 }
@@ -172,9 +214,9 @@ struct Handler {
 impl Handler {
     fn name(&self) -> &'static str {
         match self.op {
-            Op::Recall => "moderator.recall",
-            Op::Ban => "moderator.ban",
-            Op::Unban => "moderator.unban",
+            Op::Recall => "qq.recall",
+            Op::Ban => "qq.ban",
+            Op::Unban => "qq.unban",
         }
     }
     fn description(&self) -> &'static str {

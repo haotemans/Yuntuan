@@ -367,7 +367,7 @@ impl HostServices for Services {
         qzone::execute(self, ctx, action).await
     }
     async fn membership(&self, ctx: &ToolCtx, action: MembershipAction) -> Result<Value> {
-        if self.id != "moderator" || !self.uses_group_moderation {
+        if (self.id != "moderator" && self.id != "qq") || !self.uses_group_moderation {
             bail!("此插件不能管理好友或入群申请");
         }
         self.services
@@ -798,7 +798,7 @@ impl PluginManager {
                 "revision":e.revision.load(Ordering::Acquire).to_string(),
                 "description":e.meta.description, "presentation":e.plugin.presentation(),
                 "api_version":e.meta.api_version, "enabled":desired.enabled, "loaded":loaded,
-                "requires_onebot":e.plugin.uses_group_moderation() || e.meta.id == "qzone",
+                "requires_onebot":e.plugin.uses_group_moderation() || e.meta.id == "qzone" || e.meta.id == "qq",
                 "requires_group":e.plugin.uses_group_moderation(),
                 "updating":e.updating.load(Ordering::Acquire),
                 "pending_restart":e.restart_required.load(Ordering::Acquire),
