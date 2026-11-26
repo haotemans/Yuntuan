@@ -156,7 +156,7 @@ async fn plugin_stop_cancels_automatic_request_polling() {
         )
         .await
         .unwrap();
-    assert_eq!(caps.tools.len(), 18);
+    assert_eq!(caps.tools.len(), 19);
     tokio::task::yield_now().await;
     assert!(h
         .calls

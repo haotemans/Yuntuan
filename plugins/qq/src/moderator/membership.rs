@@ -290,6 +290,9 @@ impl Tool for Handler {
     fn description(&self) -> &'static str {
         self.description()
     }
+    fn available_in_chat(&self, ctx: &ToolCtx) -> bool {
+        ctx.inferred_platform() == "onebot"
+    }
     fn parameters_schema(&self) -> Value {
         match self.op {
             Op::GroupList | Op::FriendList => {
