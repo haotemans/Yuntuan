@@ -229,9 +229,9 @@ test('search, late-response isolation, retry and phone/dark layouts', async ({ p
   await page.waitForTimeout(550)
   await expect(page.locator('.portrait-record')).toContainText('使用 Python 测试模型')
   await expect(page.locator('.portrait-record')).not.toContainText('长期使用 Rust')
-  await page.getByPlaceholder('搜索昵称、QQ 或记忆内容').fill('不存在的词')
+  await page.getByPlaceholder('搜索昵称、账号或记忆内容').fill('不存在的词')
   await expect(page.locator('.memory-content').getByText('暂无匹配人物', { exact: true })).toBeVisible()
-  await page.getByPlaceholder('搜索昵称、QQ 或记忆内容').fill('')
+  await page.getByPlaceholder('搜索昵称、账号或记忆内容').fill('')
   await expect(page.locator('.portrait-card')).toHaveCount(2)
   state.fail = true
   await page.getByRole('button', { name: '刷新', exact: true }).click()
