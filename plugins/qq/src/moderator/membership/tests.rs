@@ -101,7 +101,7 @@ async fn request_commands_validate_ids_operator_and_rejection_reason() {
     };
     caps.skills
         .iter()
-        .find(|s| s.def().name == "moderator.reject_request")
+        .find(|s| s.def().name == "qq.reject_request")
         .unwrap()
         .invoke(
             &operator,
@@ -120,7 +120,7 @@ async fn request_commands_validate_ids_operator_and_rejection_reason() {
     let handler = caps
         .skills
         .iter()
-        .find(|s| s.def().name == "moderator.reject_request")
+        .find(|s| s.def().name == "qq.reject_request")
         .unwrap();
     assert!(handler
         .invoke(&operator, json!({"explicit_command":true,"user_text":"12"}))
@@ -148,7 +148,7 @@ async fn request_commands_validate_ids_operator_and_rejection_reason() {
 #[tokio::test(start_paused = true)]
 async fn plugin_stop_cancels_automatic_request_polling() {
     let h = Arc::new(host(Some(30), json!({})));
-    let p = crate::moderator_plugin();
+    let p = crate::plugin();
     let caps = p
         .start(
             PluginContext { host: h.clone() },
@@ -156,7 +156,7 @@ async fn plugin_stop_cancels_automatic_request_polling() {
         )
         .await
         .unwrap();
-    assert_eq!(caps.tools.len(), 9);
+    assert_eq!(caps.tools.len(), 18);
     tokio::task::yield_now().await;
     assert!(h
         .calls

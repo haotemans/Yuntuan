@@ -40,7 +40,7 @@ Skill 委托 Publisher 前调用 `HostServices::authorize_tool_for_skill`；这�
 
 ## 对应实现
 
-- [`plugins/qq/src/qzone/mod.rs`](../../../../plugins/qq/src/qzone/mod.rs)：插件元数据、配置和注册（已并入统一 QQ 插件包，保留原插件 ID `qzone`）。
+- [`plugins/qq/src/qzone/mod.rs`](../../../../plugins/qq/src/qzone/mod.rs)：已彻底合入统一 QQ 插件 `qq`（鸿雁），能力前缀为 `qq.qzone_*`，斜杠命令 `/说说`、`/发说说`、`/空间状态`、`/空间记录` 保持不变。
 - [`plugins/qq/src/qzone/tools.rs`](../../../../plugins/qq/src/qzone/tools.rs)：Tool/Skill、命令解析、统一权限检查。
 - [`plugins/qq/src/qzone/publisher.rs`](../../../../plugins/qq/src/qzone/publisher.rs)：持久回执、额度、去重与结果呈现。
 - [`crates/core/src/plugins/qzone.rs`](../../../../crates/core/src/plugins/qzone.rs)：宿主能力与安全图片转换边界。

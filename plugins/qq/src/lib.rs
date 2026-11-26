@@ -1,8 +1,9 @@
-//! QQ platform capability and compatibility plugin built on top of `HostServices::call_protocol("onebot", ...)`.
+//! Unified QQ platform plugin consolidating QQ protocol actions, group moderation/membership, and QQ Space.
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use tokio::task::JoinHandle;
 use yuantuan_plugin_api::*;
 
 pub mod moderator;
@@ -12,15 +13,7 @@ mod tests;
 mod tools;
 
 pub fn plugin() -> Arc<dyn Plugin> {
-    Arc::new(QqPlatformPlugin)
-}
-
-pub fn qzone_plugin() -> Arc<dyn Plugin> {
-    qzone::plugin()
-}
-
-pub fn moderator_plugin() -> Arc<dyn Plugin> {
-    moderator::plugin()
+    Arc::new(QqPlatformPlugin::default())
 }
 
 #[derive(Clone, Copy)]
@@ -40,7 +33,20 @@ impl Settings {
     }
 }
 
-struct QqPlatformPlugin;
+#[derive(Default)]
+struct QqPlatformPlugin {
+    moderator_worker: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl Drop for QqPlatformPlugin {
+    fn drop(&mut self) {
+        if let Ok(worker) = self.moderator_worker.get_mut() {
+            if let Some(worker) = worker.take() {
+                worker.abort();
+            }
+        }
+    }
+}
 
 #[async_trait]
 impl Plugin for QqPlatformPlugin {
@@ -49,31 +55,36 @@ impl Plugin for QqPlatformPlugin {
             id: "qq",
             name: "鸿雁",
             version: env!("CARGO_PKG_VERSION"),
-            description: "QQ 平台专属能力与协议兼容（戳一戳、群/成员信息、精华消息与群公告）",
+            description: "QQ 平台专属能力与协议兼容（群聊交互、撤回禁言审核、QQ空间与协议动作）",
             api_version: API_VERSION,
         }
     }
 
     fn presentation(&self) -> PluginPresentation {
         PluginPresentation {
-            purpose: "QQ 平台兼容与交互扩展",
+            purpose: "QQ 平台全套能力（交互、群管审核、QQ空间）",
             poem: "小雅·鸿雁",
             verse: "鸿雁于飞，肃肃其羽。",
             examples: vec![
                 "/群信息",
-                "/群成员 123456",
                 "/戳一戳 123456",
-                "/精华消息",
+                "/撤回",
+                "/禁言 @成员 10",
+                "/说说 今天完成了一个小目标",
             ],
         }
     }
 
+    fn uses_group_moderation(&self) -> bool {
+        true
+    }
+
     fn default_timeout_ms(&self) -> u64 {
-        30_000
+        120_000
     }
 
     fn config_fields(&self) -> Vec<ConfigField> {
-        vec![
+        let mut fields = vec![
             ConfigField {
                 key: "allow_poke",
                 label: "允许使用戳一戳（send_poke）",
@@ -98,7 +109,17 @@ impl Plugin for QqPlatformPlugin {
                 secret: false,
                 options: vec![],
             },
-        ]
+        ];
+        fields.extend(qzone::qzone_config_fields());
+        fields.extend(moderator::moderator_config_fields());
+        fields
+    }
+
+    fn validate_config(&self, config: &Value) -> Result<()> {
+        validate_config(&self.config_fields(), config)?;
+        qzone::validate_qzone_config(config)?;
+        moderator::validate_moderator_config(config)?;
+        Ok(())
     }
 
     async fn start(&self, ctx: PluginContext, config: Value) -> Result<Capabilities> {
@@ -124,6 +145,19 @@ impl Plugin for QqPlatformPlugin {
                 caps.skills.push(handler);
             }
         }
+
+        qzone::register_qzone_capabilities(&ctx, &config, &mut caps)?;
+        let worker = moderator::register_moderator_capabilities(&ctx, &config, &mut caps)?;
+        if let Some(previous) = self.moderator_worker.lock().unwrap().replace(worker) {
+            previous.abort();
+        }
         Ok(caps)
+    }
+
+    async fn stop(&self) -> Result<()> {
+        if let Some(worker) = self.moderator_worker.lock().unwrap().take() {
+            worker.abort();
+        }
+        Ok(())
     }
 }

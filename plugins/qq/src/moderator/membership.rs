@@ -157,12 +157,12 @@ pub(super) fn register(caps: &mut Capabilities, host: Arc<dyn HostServices>, ope
 impl Handler {
     fn name(&self) -> &'static str {
         match self.op {
-            Op::GroupList => "moderator.group_requests",
-            Op::FriendList => "moderator.friend_requests",
-            Op::Inspect => "moderator.inspect_request",
-            Op::Approve => "moderator.approve_request",
-            Op::Reject => "moderator.reject_request",
-            Op::AddFriend => "moderator.add_friend",
+            Op::GroupList => "qq.group_requests",
+            Op::FriendList => "qq.friend_requests",
+            Op::Inspect => "qq.inspect_request",
+            Op::Approve => "qq.approve_request",
+            Op::Reject => "qq.reject_request",
+            Op::AddFriend => "qq.add_friend",
         }
     }
     fn description(&self) -> &'static str {

@@ -51,7 +51,8 @@ impl HostServices for Host {
         _args: &Value,
     ) -> Result<()> {
         ensure!(
-            name.starts_with("qzone.") && self.enabled.load(Ordering::SeqCst),
+            (name.starts_with("qzone.") || name.starts_with("qq."))
+                && self.enabled.load(Ordering::SeqCst),
             "Tool已停用"
         );
         Ok(())

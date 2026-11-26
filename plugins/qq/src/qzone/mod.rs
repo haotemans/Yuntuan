@@ -9,6 +9,46 @@ mod publisher;
 mod tests;
 mod tools;
 
+pub(crate) fn qzone_config_fields() -> Vec<ConfigField> {
+    Qzone.config_fields()
+}
+
+pub(crate) fn validate_qzone_config(config: &Value) -> Result<()> {
+    ensure!(
+        config
+            .get("daily_limit")
+            .is_none_or(|v| v.as_u64().is_some_and(|n| (1..=100).contains(&n))),
+        "每日发布上限须为1–100"
+    );
+    Ok(())
+}
+
+pub(crate) fn register_qzone_capabilities(
+    ctx: &PluginContext,
+    config: &Value,
+    caps: &mut Capabilities,
+) -> Result<()> {
+    let publisher = Arc::new(publisher::Publisher::new(
+        ctx.host.clone(),
+        serde_json::from_value(
+            config
+                .get("default_visibility")
+                .cloned()
+                .unwrap_or(json!("friends")),
+        )?,
+        config["daily_limit"].as_u64().unwrap_or(10) as usize,
+    ));
+    for op in [tools::Op::Publish, tools::Op::Status, tools::Op::History] {
+        let handler = Arc::new(tools::Handler {
+            publisher: publisher.clone(),
+            op,
+        });
+        caps.tools.push(handler.clone());
+        caps.skills.push(handler);
+    }
+    Ok(())
+}
+
 pub fn plugin() -> Arc<dyn Plugin> {
     Arc::new(Qzone)
 }

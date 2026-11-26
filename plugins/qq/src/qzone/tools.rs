@@ -18,9 +18,9 @@ pub(super) struct Handler {
 impl Handler {
     fn name(&self) -> &'static str {
         match self.op {
-            Op::Publish => "qzone.publish",
-            Op::Status => "qzone.status",
-            Op::History => "qzone.history",
+            Op::Publish => "qq.qzone_publish",
+            Op::Status => "qq.qzone_status",
+            Op::History => "qq.qzone_history",
         }
     }
     fn description(&self) -> &'static str {

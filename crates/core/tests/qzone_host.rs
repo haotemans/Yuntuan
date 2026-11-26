@@ -47,7 +47,7 @@ fn context() -> ToolCtx {
 #[tokio::test]
 async fn command_and_agent_share_tool_permissions_without_recursively_taking_the_plugin_gate() {
     let root = std::env::temp_dir().join(format!("qzone-host-{}", rand::random::<u64>()));
-    std::fs::create_dir_all(root.join("plugins/qzone")).unwrap();
+    std::fs::create_dir_all(root.join("plugins/qq")).unwrap();
     let db_path = root.join("yuantuan.db");
     let mut conn = db::connect(&db_path).await.unwrap();
     db::migrate(&mut conn).await.unwrap();
@@ -59,7 +59,7 @@ async fn command_and_agent_share_tool_permissions_without_recursively_taking_the
         ..Default::default()
     };
     std::fs::write(
-        root.join("plugins/qzone/settings.json"),
+        root.join("plugins/qq/settings.json"),
         serde_json::to_vec(&settings).unwrap(),
     )
     .unwrap();
@@ -67,7 +67,7 @@ async fn command_and_agent_share_tool_permissions_without_recursively_taking_the
     let skills = SkillRegistry::new();
     let external = Arc::new(Connector::default());
     let manager = PluginManager::load_with_services(
-        vec![yuantuan_plugin_qq::qzone_plugin()],
+        vec![yuantuan_plugin_qq::plugin()],
         root.clone(),
         root.join("source"),
         tools.clone(),
@@ -78,10 +78,10 @@ async fn command_and_agent_share_tool_permissions_without_recursively_taking_the
     )
     .await
     .unwrap();
-    let tool = tools.get("qzone.publish").unwrap();
+    let tool = tools.get("qq.qzone_publish").unwrap();
     yuantuan_core::capabilities::register(
         &db_path,
-        "qzone.publish",
+        "qq.qzone_publish",
         "tool",
         tool.description(),
         &tool.parameters_schema(),
@@ -89,26 +89,26 @@ async fn command_and_agent_share_tool_permissions_without_recursively_taking_the
     .await
     .unwrap();
     conn.execute(
-        "UPDATE capability_catalog SET enabled=0 WHERE name='qzone.publish' AND kind='tool'",
+        "UPDATE capability_catalog SET enabled=0 WHERE name='qq.qzone_publish' AND kind='tool'",
         params![],
     )
     .await
     .unwrap();
-    let skill = skills.get("qzone.publish").unwrap();
+    let skill = skills.get("qq.qzone_publish").unwrap();
     assert!(!skill.accepts_empty_command());
-    assert!(skills.get("qzone.status").unwrap().accepts_empty_command());
-    assert!(skills.get("qzone.history").unwrap().accepts_empty_command());
+    assert!(skills.get("qq.qzone_status").unwrap().accepts_empty_command());
+    assert!(skills.get("qq.qzone_history").unwrap().accepts_empty_command());
     assert!(skill
         .invoke(&context(), json!({"content":"禁用Tool时不应发布"}))
         .await
         .is_err());
     assert!(external.published.lock().unwrap().is_empty());
-    conn.execute("UPDATE capability_catalog SET enabled=1,scopes='[\"private:123\"]' WHERE name='qzone.publish' AND kind='tool'",params![]).await.unwrap();
+    conn.execute("UPDATE capability_catalog SET enabled=1,scopes='[\"private:123\"]' WHERE name='qq.qzone_publish' AND kind='tool'",params![]).await.unwrap();
     assert!(skill
         .invoke(&context(), json!({"content":"范围不符不发布"}))
         .await
         .is_err());
-    conn.execute("UPDATE capability_catalog SET scopes='[\"group:42\"]' WHERE name='qzone.publish' AND kind='tool'",params![]).await.unwrap();
+    conn.execute("UPDATE capability_catalog SET scopes='[\"group:42\"]' WHERE name='qq.qzone_publish' AND kind='tool'",params![]).await.unwrap();
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(3),
         skill.invoke(
