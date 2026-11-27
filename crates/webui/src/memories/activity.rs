@@ -90,7 +90,7 @@ pub async fn status(
           COALESCE((SELECT cursor FROM memory_progress WHERE stage='portrait' AND owner_id=?1 AND chat_type=''),0) AS cursor,
           COALESCE((SELECT baseline FROM memory_progress WHERE stage='portrait' AND owner_id=?1 AND chat_type=''),0) AS baseline
         FROM day LEFT JOIN messages m ON m.chat_type IN ('group','private')
-         AND m.sender_pid IN (SELECT ?1 UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1)")
+         AND m.sender_pid IN (SELECT ?1 UNION ALL SELECT alias FROM memory_aliases WHERE person_id=?1)")
         .bind(&id).bind(q.offset()).fetch_one(&mut *conn).await.map_err(db_error)?;
     let raw: Option<String> = row.try_get("refresh").map_err(db_error)?;
     let refresh = raw
@@ -104,13 +104,13 @@ pub async fn status(
       MIN(CASE WHEN m.msg_id>COALESCE(p.cursor,0) AND c.msg_id IS NULL THEN m.ts END) AS oldest_pending_at
       FROM messages m LEFT JOIN portrait_coverage c ON c.person_id=m.sender_pid AND c.msg_id=m.msg_id
       LEFT JOIN memory_progress p ON p.owner_id=m.sender_pid AND p.stage='portrait' AND p.chat_type=''
-      WHERE m.sender_pid IN (SELECT ?1 UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1)
+      WHERE m.sender_pid IN (SELECT ?1 UNION ALL SELECT alias FROM memory_aliases WHERE person_id=?1)
         AND m.chat_type IN ('group','private') AND length(trim(COALESCE(m.text,'')))>=4")
       .bind(&id).fetch_one(&mut *conn).await.map_err(db_error)?;
     let pending: i64 = coverage.try_get("pending").map_err(db_error)?;
     let eligible: i64 = coverage.try_get("total").map_err(db_error)?;
     let last=sqlx::query("SELECT r.*,b.from_id,b.end_id,b.started_at,b.finished_at,b.lease_until FROM portrait_runs r JOIN memory_batches b ON b.id=r.batch_id
-      WHERE b.owner_id IN (SELECT ?1 UNION ALL SELECT alias FROM qq_memory_aliases WHERE person_id=?1) ORDER BY b.id DESC LIMIT 1")
+      WHERE b.owner_id IN (SELECT ?1 UNION ALL SELECT alias FROM memory_aliases WHERE person_id=?1) ORDER BY b.id DESC LIMIT 1")
       .bind(&id).fetch_optional(&mut *conn).await.map_err(db_error)?;
     let last_run=last.map(|r|->sqlx::Result<Value>{
         let status:String=r.try_get("status")?;

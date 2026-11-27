@@ -55,21 +55,29 @@ async fn claim(path: &Path, options: &Options, at: i64) -> Result<Claim> {
     let prefix = format!("profile_nightly_person:v1:{}:", options.date);
     let rotation = used >= options.limit.saturating_sub((options.limit / 5).max(1)) as u64;
     let person=sqlx::query_scalar::<_,String>(
-        "SELECT m.sender_pid FROM messages m
-         LEFT JOIN state_kv s ON s.key='profile_refresh:v1:'||m.sender_pid
-         LEFT JOIN memory_progress progress ON progress.stage='portrait' AND progress.owner_id=m.sender_pid AND progress.chat_type=''
-         WHERE m.sender_pid<>'self' AND m.chat_type IN ('group','private')
-           AND length(trim(COALESCE(m.text,'')))>=4
-           AND m.msg_id>COALESCE(progress.cursor,0)
-           AND NOT EXISTS(SELECT 1 FROM portrait_coverage c WHERE c.person_id=m.sender_pid AND c.msg_id=m.msg_id)
-           AND NOT EXISTS(SELECT 1 FROM state_kv done WHERE done.key=?1||m.sender_pid)
-         GROUP BY m.sender_pid
-         HAVING MAX(m.msg_id)>COALESCE(progress.cursor,0)
-           AND COALESCE(json_extract(CASE WHEN json_valid(s.value) THEN s.value ELSE '{}' END,'$.attempt'),0)<=?2-300
-         ORDER BY CASE WHEN ?3 THEN 0 ELSE CASE WHEN EXISTS(SELECT 1 FROM person_profile_versions v WHERE v.person_id=m.sender_pid AND v.source_msg_id>COALESCE(progress.cursor,0) AND NOT EXISTS(SELECT 1 FROM portrait_coverage c WHERE c.person_id=v.person_id AND c.msg_id=v.source_msg_id)) THEN 0 ELSE 1 END END,
-         CASE WHEN ?3 THEN 0 ELSE CASE WHEN EXISTS(SELECT 1 FROM memory_facts f WHERE f.owner_type='person' AND f.owner_id=m.sender_pid AND f.source_msg_id>COALESCE(progress.cursor,0)) THEN 0 ELSE 1 END END,
-         CASE WHEN ?3 THEN 0 ELSE CASE WHEN MAX(m.ts)>=?2-86400 THEN 0 ELSE 1 END END,
-         COALESCE(json_extract(CASE WHEN json_valid(s.value) THEN s.value ELSE '{}' END,'$.last_success_at'),json_extract(CASE WHEN json_valid(s.value) THEN s.value ELSE '{}' END,'$.completed_at'),0),MAX(m.ts) DESC,m.sender_pid LIMIT 1")
+        "WITH candidates AS (
+            SELECT COALESCE(d.directory_id,m.sender_pid) AS subject,
+                   MAX(m.ts) AS latest_ts,
+                   MAX(COALESCE(json_extract(CASE WHEN json_valid(s.value) THEN s.value ELSE '{}' END,'$.attempt'),0)) AS last_attempt,
+                   MAX(COALESCE(json_extract(CASE WHEN json_valid(s.value) THEN s.value ELSE '{}' END,'$.last_success_at'),json_extract(CASE WHEN json_valid(s.value) THEN s.value ELSE '{}' END,'$.completed_at'),0)) AS last_success
+            FROM messages m
+            LEFT JOIN memory_directory d ON d.person_id=m.sender_pid
+            LEFT JOIN state_kv s ON s.key='profile_refresh:v1:'||COALESCE(d.directory_id,m.sender_pid)
+            LEFT JOIN memory_progress progress ON progress.stage='portrait' AND progress.owner_id=m.sender_pid AND progress.chat_type=''
+            WHERE m.sender_pid<>'self' AND COALESCE(d.directory_id,m.sender_pid)<>'self'
+              AND m.chat_type IN ('group','private')
+              AND length(trim(COALESCE(m.text,'')))>=4
+              AND m.msg_id>COALESCE(progress.cursor,0)
+              AND NOT EXISTS(SELECT 1 FROM portrait_coverage c WHERE c.person_id=m.sender_pid AND c.msg_id=m.msg_id)
+              AND NOT EXISTS(SELECT 1 FROM state_kv done WHERE done.key=?1||COALESCE(d.directory_id,m.sender_pid))
+            GROUP BY COALESCE(d.directory_id,m.sender_pid)
+            HAVING last_attempt<=?2-300
+         )
+         SELECT subject FROM candidates
+         ORDER BY CASE WHEN ?3 THEN 0 ELSE CASE WHEN EXISTS(SELECT 1 FROM person_profile_versions v LEFT JOIN memory_progress vp ON vp.stage='portrait' AND vp.owner_id=v.person_id AND vp.chat_type='' WHERE v.person_id IN (SELECT candidates.subject UNION ALL SELECT alias FROM memory_aliases WHERE person_id=candidates.subject) AND v.source_msg_id>COALESCE(vp.cursor,0) AND NOT EXISTS(SELECT 1 FROM portrait_coverage c WHERE c.person_id=v.person_id AND c.msg_id=v.source_msg_id)) THEN 0 ELSE 1 END END,
+         CASE WHEN ?3 THEN 0 ELSE CASE WHEN EXISTS(SELECT 1 FROM memory_facts f LEFT JOIN memory_progress fp ON fp.stage='portrait' AND fp.owner_id=f.owner_id AND fp.chat_type='' WHERE f.owner_type='person' AND f.owner_id IN (SELECT candidates.subject UNION ALL SELECT alias FROM memory_aliases WHERE person_id=candidates.subject) AND f.source_msg_id>COALESCE(fp.cursor,0)) THEN 0 ELSE 1 END END,
+         CASE WHEN ?3 THEN 0 ELSE CASE WHEN latest_ts>=?2-86400 THEN 0 ELSE 1 END END,
+         last_success,latest_ts DESC,subject LIMIT 1")
         .bind(prefix.clone()).bind(at).bind(rotation).fetch_optional(&mut *tx).await?;
     let Some(person) = person else {
         return Ok(Claim::Done);
