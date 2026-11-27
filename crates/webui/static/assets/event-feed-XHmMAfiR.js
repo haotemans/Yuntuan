@@ -1,0 +1,1 @@
+function e(e){let t=e.payload??e;return e.kind===`MessageReceived`&&t.msg_id!=null?`message:${t.msg_id}`:null}function t(t,n=1/0){let r=[],i=new Map;for(let n of t){let t=e(n)??(n.id==null?null:`event:${n.id}`);if(t!=null&&i.has(t)){let e=i.get(t);r[e].id==null&&n.id!=null&&(r[e]=n);continue}t!=null&&i.set(t,r.length),r.push(n)}return r.slice(0,n)}export{e as n,t};

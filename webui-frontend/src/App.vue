@@ -48,7 +48,7 @@
         <n-layout has-sider position="absolute" style="top: 56px">
           <n-layout-sider v-if="!compact" class="yt-sider" :class="{ 'is-collapsed': ui.collapsed }" bordered collapse-mode="width"
                           :width="212" :collapsed-width="64" :collapsed="ui.collapsed" :native-scrollbar="false">
-            <n-menu :options="menuOptions" :value="String($route.name)" :collapsed="ui.collapsed"
+            <n-menu :options="menuOptions" :value="String($route.meta?.menu || $route.name)" :collapsed="ui.collapsed"
                     :collapsed-width="64" :collapsed-icon-size="18" :root-indent="16" :indent="14"
                     class="yt-nav-menu" @update:value="go" />
           </n-layout-sider>
@@ -63,7 +63,7 @@
       </n-layout>
       <n-drawer v-if="$route.name !== 'login' && compact" v-model:show="mobileNavigation" :width="260" placement="left">
         <n-drawer-content title="导航" closable :native-scrollbar="false" :body-content-style="{ padding: '8px' }">
-          <n-menu :options="menuOptions" :value="String($route.name)" :root-indent="16" :indent="14" @update:value="go" />
+          <n-menu :options="menuOptions" :value="String($route.meta?.menu || $route.name)" :root-indent="16" :indent="14" @update:value="go" />
         </n-drawer-content>
       </n-drawer>
     </n-message-provider>

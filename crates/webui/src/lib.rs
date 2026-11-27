@@ -87,6 +87,7 @@ pub async fn serve_on(
         .route("/api/memes/{id}/reject", post(memes::reject))
         .route("/api/meme-file/{id}", get(memes::file))
         .route("/api/memories", get(memories::memories))
+        .route("/api/memories/platforms", get(memories::platforms))
         .route("/api/memories/people", get(memories::people))
         .route(
             "/api/memories/people/{id}/refresh",

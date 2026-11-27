@@ -43,6 +43,7 @@
 - [`webui-frontend/src/event-feed.js`](../../../webui-frontend/src/event-feed.js)
 - [`webui-frontend/src/views/Dashboard.vue`](../../../webui-frontend/src/views/Dashboard.vue)
 - [`webui-frontend/src/views/Login.vue`](../../../webui-frontend/src/views/Login.vue)
+- [`webui-frontend/src/views/PlatformHub.vue`](../../../webui-frontend/src/views/PlatformHub.vue)
 - [`webui-frontend/src/views/Trace.vue`](../../../webui-frontend/src/views/Trace.vue)
 
 ## 验证入口
@@ -95,3 +96,5 @@ V20 复用管理员 Session 保护层注册夸克链接守护的五个 GET/POST/
 导航新增机器人管理，显示主人、运维授权、插件维护、带日期审计和进程守护重启。当前网页密码会话拥有主人管理能力，QQ 授权不成为网页登录账号；页面区分已保存与当前生效的主人 ID，授权失败保留草稿，刷新不覆盖未保存授权。完整行为和接口归属见[机器人管理](../runtime/management.md)。
 
 `Extras` 新增可选 `avatar_resolver` 槽位，由平台适配器注入头像 URL 解析器供记忆库接口使用，避免 WebUI 状态与具体平台硬绑定。
+
+受管理员认证保护的 `GET /api/memories/platforms` 返回各接入平台（`onebot`、`qq_official`）的人物、记忆、摘要与图谱节点/关系计数；`/memories` 与 `/relations` 入口路由通过共享 `PlatformHub.vue` 先展示按平台隔离的概览卡片，再进入对应的 `:platform` 详情页。

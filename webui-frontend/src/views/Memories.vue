@@ -1,8 +1,11 @@
 <template>
   <div class="yt-page memories-page">
+    <div class="topbar">
+      <n-button text @click="router.push({ name: 'memories' })" aria-label="返回平台列表">〈 返回平台列表</n-button>
+    </div>
     <div class="yt-page-head">
       <div class="yt-page-head-left">
-        <span class="yt-page-title">记忆库</span>
+        <span class="yt-page-title">记忆库 · {{ currentPlatformTitle }}</span>
         <span class="yt-page-sub mono">{{ peopleTotal }} 位人物</span>
       </div>
       <n-button size="small" secondary :loading="loading || peopleLoading" @click="refresh">刷新</n-button>
@@ -10,7 +13,6 @@
 
     <div class="yt-toolbar memory-toolbar" :class="{ 'profile-toolbar': tab === 'profile' }">
       <n-input v-model:value="search" clearable :maxlength="100" placeholder="搜索昵称、账号或记忆内容" aria-label="搜索记忆" />
-      <n-select v-model:value="platformFilter" :options="platformOptions" clearable placeholder="全部平台" aria-label="平台来源" />
       <n-select v-if="tab !== 'profile'" v-model:value="conversationKey" :options="conversationOptions" :loading="conversationsLoading" :disabled="conversationsLoading" clearable filterable placeholder="全部会话" aria-label="来源会话" />
     </div>
 
@@ -41,7 +43,7 @@
           <div class="identity-text"><span class="selected-name">{{ selectedPerson.name }}</span><span class="identity-id mono">{{ selectedPerson.qq ? `QQ ${selectedPerson.qq}` : selectedPerson.id }}</span></div>
           <n-button v-if="selectedPerson.id !== 'self'" size="small" secondary class="relations-link" :loading="refreshingProfile" :disabled="refreshingProfile" @click="refreshProfile">整理画像</n-button>
           <n-button v-if="selectedPerson.id !== 'self'" size="small" secondary @click="openHistory">画像变更</n-button>
-          <n-button size="small" secondary @click="router.push({ path: '/relations', query: { person: selectedPerson.id } })">关系图谱</n-button>
+          <n-button size="small" secondary @click="router.push({ name: 'relations-platform', params: { platform: activePlatform || 'onebot' }, query: { person: selectedPerson.id } })">关系图谱</n-button>
         </div>
         <div v-if="selectedPerson && activity" class="person-activity">
           <n-button text size="small" type="primary" @click="showToday">今天 {{ activity.today_count }} 条发言</n-button>
@@ -177,9 +179,10 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
 import { fmtTs } from '../fmt'
+import { normalizePlatform, platformTitle } from '../platforms'
 import EmptyState from '../components/EmptyState.vue'
 import YtIcon from '../components/YtIcon.vue'
 import mascot from '../assets/mascot.png'
@@ -194,13 +197,11 @@ type Message = { msg_id: number; text: string; ts: number; has_image: boolean; t
 type PortraitRun = { status: string; error_kind?: string; model: string; elapsed_ms: number; started_at: number; inspected_messages: number; updated_fields: number; repairs: number; rejected_updates: number; source_start_ts?: number; source_end_ts?: number }
 type Activity = { legacy_baseline?: number; today_count: number; last_seen?: number; pending: boolean; pending_messages?: number; processed_messages?: number; legacy_messages?: number; recent_pending_messages?: number; last_run?: PortraitRun; profile_refresh: { status?: string; attempt?: number; completed_at?: number; last_success_at?: number } }
 type Tab = 'memories' | 'summaries' | 'profile' | 'messages'
+const route = useRoute()
 const router = useRouter()
+const activePlatform = computed(() => normalizePlatform(route.params.platform))
+const currentPlatformTitle = computed(() => platformTitle(activePlatform.value) || '未知平台')
 const search = ref('')
-const platformFilter = ref<string | null>(null)
-const platformOptions = [
-  { label: 'OneBot QQ', value: 'onebot' },
-  { label: 'QQ 官方机器人', value: 'qq_official' },
-]
 const conversationKey = ref<string | null>(null)
 const conversations = ref<Conversation[]>([])
 const conversationsLoading = ref(false)
@@ -303,7 +304,7 @@ function showVersionSource(version: ProfileVersion) { closeHistory(false); sourc
 function query(includePerson = true) {
   const p = new URLSearchParams()
   if (includePerson && selectedPerson.value) p.set('person_id', selectedPerson.value.id)
-  if (platformFilter.value) p.set('platform', platformFilter.value)
+  if (activePlatform.value) p.set('platform', activePlatform.value)
   if (search.value.trim()) p.set('search', search.value.trim())
   if (tab.value !== 'profile' && conversationKey.value) { const [kind, id] = JSON.parse(conversationKey.value); p.set('chat_id', id); if (kind) p.set('chat_type', kind) }
   return p
@@ -325,6 +326,7 @@ async function loadConversations() {
   const request = conversationController = new AbortController()
   conversationsLoading.value = true
   const q = new URLSearchParams()
+  if (activePlatform.value) q.set('platform', activePlatform.value)
   if (selectedPerson.value) q.set('person_id', selectedPerson.value.id)
   try {
     const { data } = await api.get(`/memories/conversations?${q}`, { signal: request.signal })
@@ -397,7 +399,11 @@ watch(search, () => {
   }, 250)
 })
 watch(conversationKey, () => { peoplePage.value = 1; void loadPeople(); resetRecords() })
-watch(platformFilter, () => { selectedPerson.value = null; peoplePage.value = 1; void loadPeople(); if (tab.value !== 'profile') void loadConversations(); resetRecords() })
+watch(activePlatform, next => {
+  if (route.name === 'memories-platform' && !next) { void router.replace({ name: 'memories' }); return }
+  if (!next) return
+  selectedPerson.value = null; conversationKey.value = null; peoplePage.value = 1; tab.value = 'profile'; refresh()
+})
 async function loadSource() {
   if (!sourceRecord) return
   sourceController?.abort()
@@ -412,6 +418,7 @@ async function loadSource() {
 function showSource(record: Memory) { sourceRecord = { id: record.id, kind: tab.value === 'summaries' ? 'summary' : 'memory' }; sourceOpen.value = true; void loadSource() }
 function closeSource(value: boolean) { sourceOpen.value = value; if (!value) { sourceController?.abort(); sourceData.value = null; sourceError.value = ''; sourceLoading.value = false } }
 onMounted(() => {
+  if (!activePlatform.value) { void router.replace({ name: 'memories' }); return }
   refresh()
   activityTimer = setInterval(() => {
     if (document.visibilityState !== 'visible' || !selectedPerson.value || refreshingProfile.value || loading.value) return
@@ -423,8 +430,9 @@ onBeforeUnmount(() => { disposed = true; clearTimeout(searchTimer); clearInterva
 </script>
 
 <style scoped>
-.memory-toolbar { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(140px, 180px) minmax(180px, 280px); gap: 12px; }
-.memory-toolbar.profile-toolbar { grid-template-columns: minmax(200px, 1fr) minmax(140px, 200px); }
+.topbar { margin-bottom: 12px; }
+.memory-toolbar { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(180px, 280px); gap: 12px; }
+.memory-toolbar.profile-toolbar { grid-template-columns: 1fr; }
 .person-activity, .message-filters { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 12px 0; color: var(--yt-ink-3); font-size: 12px; }
 .message-filters input { background: var(--yt-card-bg); color: var(--yt-ink-2); border: 1px solid var(--yt-card-border); border-radius: 6px; padding: 5px 8px; font: inherit; }
 .memory-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 18px; align-items: start; }

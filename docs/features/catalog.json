@@ -312,6 +312,7 @@
         "crates/webui/src/ws.rs",
         "webui-frontend/src/views/Dashboard.vue",
         "webui-frontend/src/views/Login.vue",
+        "webui-frontend/src/views/PlatformHub.vue",
         "webui-frontend/src/views/Trace.vue"
       ],
       "tests": [

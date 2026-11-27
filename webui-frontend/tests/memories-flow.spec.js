@@ -26,7 +26,14 @@ async function openMemories(page, options = {}) {
   await page.route('https://q1.qlogo.cn/**', route => route.abort())
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url()), q = url.searchParams
-    state.requests.push({ path: url.pathname, person: q.get('person_id'), chat: q.get('chat_id'), page: q.get('page') })
+    state.requests.push({ path: url.pathname, platform: q.get('platform'), person: q.get('person_id'), chat: q.get('chat_id'), page: q.get('page') })
+    if (url.pathname === '/api/platforms') return route.fulfill({ json: { platforms: [{ id: 'onebot', state: 'online', account: '10001' }, { id: 'qq_official', state: 'disabled', account: null }] } })
+    if (url.pathname === '/api/memories/platforms') {
+      return route.fulfill({ json: { platforms: [
+        { id: 'onebot', people: 2, memories: 251, summaries: 1, nodes: 3, edges: 0 },
+        { id: 'qq_official', people: 1, memories: 3, summaries: 0, nodes: 2, edges: 0 },
+      ] } })
+    }
     if (/\/api\/memories\/people\/[^/]+\/refresh$/.test(url.pathname)) {
       expect(route.request().method()).toBe('POST')
       if (state.refreshFail) return route.fulfill({ status: 503, json: { error: '未配置 Decision 模型' } })
@@ -81,10 +88,28 @@ async function openMemories(page, options = {}) {
     return route.fulfill({ json: {} })
   })
   await page.goto('/memories')
-  if (!state.fail) await expect(page.locator('.portrait-card')).toHaveCount(2)
+  if (!options.stayOnHub) {
+    await page.getByRole('button', { name: `进入 ${options.platform === 'qq_official' ? 'QQ 官方机器人' : 'OneBot 11'}记忆库` }).click()
+    if (!state.fail) await expect(page.locator('.portrait-card')).toHaveCount(2)
+  }
   return state
 }
 const person = (page, id) => page.locator('.person-option').filter({ hasText: id })
+
+test('memories overview shows separate platform cards and enters scoped view', async ({ page }) => {
+  const state = await openMemories(page, { stayOnHub: true })
+  await expect(page.locator('.channel-card')).toHaveCount(2)
+  await expect(page.locator('[data-platform="onebot"]')).toContainText('OneBot 11')
+  await expect(page.locator('[data-platform="onebot"]')).toContainText('251')
+  await expect(page.locator('[data-platform="qq_official"]')).toContainText('QQ 官方机器人')
+  expect(state.requests.some(r => r.path === '/api/memories/people')).toBe(false)
+  await page.getByRole('button', { name: '进入 QQ 官方机器人记忆库' }).click()
+  await expect(page).toHaveURL('/memories/qq_official')
+  await expect(page.locator('.yt-page-title')).toContainText('QQ 官方机器人')
+  await expect.poll(() => state.requests.some(r => r.path === '/api/memories/people' && r.platform === 'qq_official')).toBe(true)
+  await page.getByRole('button', { name: '返回平台列表' }).click()
+  await expect(page).toHaveURL('/memories')
+})
 
 test('profile versions load on demand, retain old values and link to source speech', async ({page})=>{
   const state=await openMemories(page)
@@ -200,7 +225,7 @@ test('one portrait per person stays primary even with 251 history records', asyn
   await expect(page.locator('.portrait-record')).toHaveCount(1)
   await expect(page.locator('.memory-record')).toHaveCount(0)
   await page.getByRole('button', { name: '关系图谱', exact: true }).click()
-  await expect(page).toHaveURL(/\/relations\?person=p_101/)
+  await expect(page).toHaveURL(/\/relations\/onebot\?person=p_101/)
   await expect(page.locator('.person-name')).toHaveText('小冰猪')
 })
 
