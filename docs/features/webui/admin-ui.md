@@ -97,4 +97,4 @@ V20 复用管理员 Session 保护层注册夸克链接守护的五个 GET/POST/
 
 `Extras` 新增可选 `avatar_resolver` 槽位，由平台适配器注入头像 URL 解析器供记忆库接口使用，避免 WebUI 状态与具体平台硬绑定。
 
-受管理员认证保护的 `GET /api/memories/platforms` 返回各接入平台（`onebot`、`qq_official`）的人物、记忆、摘要与图谱节点/关系计数；`/memories` 与 `/relations` 入口路由通过共享 `PlatformHub.vue` 先展示按平台隔离的概览卡片，再进入对应的 `:platform` 详情页。[`state.rs`](../../../crates/webui/src/state.rs) 以通用 `config_hooks` 替代原 `napcat_token_slot`，[`events_api.rs`](../../../crates/webui/src/events_api.rs) 同步按 `memory_aliases` 排除跨平台 `self` 别名消息。
+受管理员认证保护的 `GET /api/memories/platforms` 返回各接入平台（`onebot`、`qq_official`）的人物、记忆、摘要与图谱节点/关系计数；`/memories` 与 `/relations` 入口路由通过共享 `PlatformHub.vue` 先展示按平台隔离的概览卡片，再进入对应的 `:platform` 详情页。[`state.rs`](../../../crates/webui/src/state.rs) 以通用 `config_hooks` 替代原 `napcat_token_slot`，[`events_api.rs`](../../../crates/webui/src/events_api.rs) 同步按 `memory_aliases` 排除跨平台 `self` 别名消息，[`ws.rs`](../../../crates/webui/src/ws.rs) 在完成 WebSocket 升级握手前订阅 `EventBus`，消除握手刚结束时丢失紧随配置/状态事件的竞态。
