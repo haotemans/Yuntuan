@@ -1,0 +1,31 @@
+export const PLATFORMS = [
+  {
+    id: 'onebot',
+    title: 'OneBot 11',
+    memoriesDescription: '通过 NapCat 接入的 QQ 群聊与私聊记忆，包含人物画像、历史记忆、每日摘要与原始发言。',
+    relationsDescription: '通过 NapCat 接入的 QQ 人物关系图谱，独立展示 OneBot 通道内的人物互动网络。',
+  },
+  {
+    id: 'qq_official',
+    title: 'QQ 官方机器人',
+    memoriesDescription: '通过 QQ 官方机器人接口接入的群聊与单聊记忆，与 OneBot 数据按平台独立隔离展示。',
+    relationsDescription: '通过 QQ 官方机器人接口接入的人物关系图谱，独立展示官方通道内的人物互动网络。',
+  },
+]
+
+export const STATUS_LABELS = {
+  online: '已连接',
+  offline: '未连接',
+  disabled: '未启用',
+  connecting: '连接中',
+  reconnecting: '重连中',
+  error: '连接异常',
+}
+
+export function normalizePlatform(value) {
+  return value === 'onebot' || value === 'qq_official' ? value : null
+}
+
+export function platformTitle(id) {
+  return PLATFORMS.find(p => p.id === id)?.title || ''
+}

@@ -1,16 +1,14 @@
 <template>
   <div class="yt-page">
+    <div class="topbar">
+      <n-button text @click="router.push({ name: 'relations' })" aria-label="返回平台列表">〈 返回平台列表</n-button>
+    </div>
     <div class="yt-page-head">
       <div class="yt-page-head-left">
-        <span class="yt-page-title">关系图谱</span>
+        <span class="yt-page-title">关系图谱 · {{ currentPlatformTitle }}</span>
         <span class="yt-page-sub mono">{{ data.nodes.length }} 节点 · {{ data.edges.length }} 关系</span>
       </div>
       <n-space align="center" :size="10">
-        <n-radio-group v-model:value="platformFilter" size="small" aria-label="平台来源">
-          <n-radio-button value="">全部</n-radio-button>
-          <n-radio-button value="onebot">OneBot</n-radio-button>
-          <n-radio-button value="qq_official">QQ 官方</n-radio-button>
-        </n-radio-group>
         <n-select :value="sel?.id" :options="data.nodes.map(n => ({ label: n.name || n.id, value: n.id }))"
                   filterable clearable :disabled="loading || !!loadError" placeholder="定位人物节点" size="small" style="width: 200px" @update:value="selectPerson" />
         <n-button size="small" secondary :disabled="loading || !!loadError || !hasNodes" @click="net?.fit({ animation: !reduceMotion })">重置视图</n-button>
@@ -102,10 +100,11 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { DataSet, Network } from 'vis-network/standalone'
 import { api } from '../api'
 import { fmtTs } from '../fmt'
+import { normalizePlatform, platformTitle } from '../platforms'
 import { useUiStore } from '../store/ui'
 import EmptyState from '../components/EmptyState.vue'
 import mascot from '../assets/mascot.png'
@@ -122,9 +121,11 @@ const detailError = ref('')
 /** @type {import('vue').Ref<{ nodes: any[], edges: any[] }>} */
 const data = ref({ nodes: [], edges: [] })
 const selfQq = ref(0)
-const platformFilter = ref('')
 const ui = useUiStore()
 const route = useRoute()
+const router = useRouter()
+const activePlatform = computed(() => normalizePlatform(route.params.platform))
+const currentPlatformTitle = computed(() => platformTitle(activePlatform.value) || '未知平台')
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 /** @type {any} */
 let net = null
@@ -132,7 +133,9 @@ let net = null
 let graphNodes = null
 /** @type {any} */
 let graphEdges = null
-const requests = new AbortController()
+const dashboardController = new AbortController()
+/** @type {AbortController | undefined} */
+let graphController
 let disposed = false
 let settleTimer
 const avatarJobs = new Set()
@@ -277,14 +280,21 @@ function selectPerson(id) {
 }
 
 async function loadGraph() {
+  const platform = activePlatform.value
+  if (!platform) {
+    void router.replace({ name: 'relations' })
+    return
+  }
+  graphController?.abort()
+  const request = graphController = new AbortController()
   destroyGraph()
   sel.value = null
   loading.value = true
   loadError.value = ''
   try {
-    const url = platformFilter.value ? `/relations?platform=${encodeURIComponent(platformFilter.value)}` : '/relations'
-    const { data: d } = await api.get(url, { signal: requests.signal })
-    if (disposed) return
+    const url = `/relations?platform=${encodeURIComponent(platform)}`
+    const { data: d } = await api.get(url, { signal: request.signal })
+    if (disposed || request.signal.aborted) return
     if (!Array.isArray(d?.nodes) || !Array.isArray(d?.edges)) throw new Error('关系图谱数据格式异常')
     data.value = d
     if (!hasNodes.value) return
@@ -390,29 +400,36 @@ async function loadGraph() {
       sel.value = p.nodes.length ? d.nodes.find((n) => n.id === p.nodes[0]) : null
     })
   } catch (error) {
-    if (!disposed) {
+    if (!disposed && !request.signal.aborted) {
       destroyGraph()
       loadError.value = error.response?.data?.error || error.message || '关系图谱加载失败，请重试'
     }
   } finally {
-    if (!disposed) loading.value = false
+    if (!disposed && graphController === request) loading.value = false
   }
 }
 
 onMounted(() => {
   // Dashboard metadata is optional; it must not hold up the graph request.
-  void api.get('/dashboard', { signal: requests.signal }).then(({ data: dash }) => {
+  void api.get('/dashboard', { signal: dashboardController.signal }).then(({ data: dash }) => {
     if (!disposed && dash?.self_qq) selfQq.value = dash.self_qq
   }).catch(() => {})
   void loadGraph()
 })
 
-watch(platformFilter, () => { void loadGraph() })
+watch(activePlatform, next => {
+  if (route.name === 'relations-platform' && !next) {
+    void router.replace({ name: 'relations' })
+    return
+  }
+  if (next) void loadGraph()
+})
 watch(() => route.query.person, id => { if (!loading.value) selectPerson(typeof id === 'string' ? id : null) })
 
 onUnmounted(() => {
   disposed = true
-  requests.abort()
+  dashboardController.abort()
+  graphController?.abort()
   destroyGraph()
 })
 
@@ -436,6 +453,7 @@ watch(() => ui.dark, () => {
 </script>
 
 <style scoped>
+.topbar { margin-bottom: 12px; }
 .relations-card :deep(.n-card__content) {
   padding: 0 !important;
 }

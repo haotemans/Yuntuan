@@ -487,6 +487,14 @@ async fn linked_platform_accounts_share_one_directory_card_and_keep_original_sou
     assert_eq!(r.get("/api/memories/people").await["total"], 4);
     assert_eq!(r.get("/api/memories/people?platform=qq_official").await["total"], 2);
     assert_eq!(r.get("/api/memories/people?platform=onebot").await["total"], 2);
+    let platform_stats = r.get("/api/memories/platforms").await;
+    let stats = platform_stats["platforms"].as_array().unwrap();
+    assert_eq!(stats[0]["id"], "onebot");
+    assert_eq!(stats[0]["people"], 2);
+    assert!(stats[0]["memories"].as_i64().unwrap() >= 1);
+    assert_eq!(stats[1]["id"], "qq_official");
+    assert_eq!(stats[1]["people"], 2);
+    assert_eq!(stats[1]["memories"], 1);
 }
 
 #[tokio::test]
@@ -631,6 +639,7 @@ async fn memory_browser_requires_auth_and_rejects_bad_filters() {
     let r = Rig::start().await;
     for path in [
         "/api/memories",
+        "/api/memories/platforms",
         "/api/memories/people",
         "/api/memories/conversations",
         "/api/memories/1/source",

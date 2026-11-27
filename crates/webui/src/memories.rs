@@ -237,6 +237,65 @@ pub async fn summaries(State(state): State<AppState>, Query(q): Query<MemQuery>)
     list(state, q, true).await
 }
 
+pub async fn platforms(State(state): State<AppState>) -> ApiResult {
+    let mut conn = state.open_db().await.map_err(db_error)?;
+    let mut tx = sqlx::Connection::begin(&mut *conn)
+        .await
+        .map_err(db_error)?;
+    let mut items = Vec::with_capacity(2);
+    for id in [
+        yuantuan_core::platform::ONEBOT_ID,
+        yuantuan_core::platform::QQ_OFFICIAL_ID,
+    ] {
+        let q = MemQuery {
+            platform: Some(id.to_owned()),
+            ..MemQuery::default()
+        };
+        let people: i64 = people_filtered(&q, true)
+            .build_query_scalar()
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        let memories: i64 = filtered(false, &q, true)
+            .build_query_scalar()
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        let summaries: i64 = filtered(true, &q, true)
+            .build_query_scalar()
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        let official = id == yuantuan_core::platform::QQ_OFFICIAL_ID;
+        let nodes: i64 = sqlx::query_scalar(if official {
+            "SELECT COUNT(*) FROM persons WHERE person_id='self' OR instr(person_id,'qq-official_')=1"
+        } else {
+            "SELECT COUNT(*) FROM persons WHERE instr(person_id,'qq-official_')<>1"
+        })
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        let edges: i64 = sqlx::query_scalar(if official {
+            "SELECT COUNT(*) FROM relationship_edges WHERE from_pid<>to_pid AND (from_pid='self' OR instr(from_pid,'qq-official_')=1) AND (to_pid='self' OR instr(to_pid,'qq-official_')=1)"
+        } else {
+            "SELECT COUNT(*) FROM relationship_edges WHERE from_pid<>to_pid AND instr(from_pid,'qq-official_')<>1 AND instr(to_pid,'qq-official_')<>1"
+        })
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        items.push(json!({
+            "id": id,
+            "people": people,
+            "memories": memories,
+            "summaries": summaries,
+            "nodes": nodes,
+            "edges": edges,
+        }));
+    }
+    tx.commit().await.map_err(db_error)?;
+    Ok(Json(json!({ "platforms": items })))
+}
+
 fn people_filtered(q: &MemQuery, count: bool) -> QueryBuilder<'static, Sqlite> {
     let mut b = QueryBuilder::<Sqlite>::new(
         "WITH matched AS (SELECT d.directory_id,MAX(p.last_seen) AS last_seen FROM persons p

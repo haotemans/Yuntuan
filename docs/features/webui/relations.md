@@ -36,3 +36,5 @@
 人物按需详情附加带依据、状态和来源会话的综合画像，供记忆页复用；读取需管理员认证。统一人物身份不改变Bot回复时的私聊来源隔离规则。
 
 人物详情与别名查询已改为使用核心层的平台无关 `memory_directory` 与 `memory_aliases` 视图，不再直接依赖 `qq_memory_*`；`/api/relations` 通过 `AvatarResolver` 注入头像地址，并支持按 `platform`（`onebot` / `qq_official`）筛选节点与关系边。
+
+`/relations` 入口页先以按平台隔离的卡片展示各接入平台的状态及节点/关系计数，点击卡片后进入 `/relations/:platform` 原生关系图谱页；直接携带 `?person=<id>` 访问 `/relations` 时自动跳转到对应平台图谱并高亮目标人物。

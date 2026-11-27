@@ -35,10 +35,18 @@ async function openGraph(page, options = {}) {
     if (options.avatars) return route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><circle cx="40" cy="40" r="40" fill="#2563eb"/></svg>' })
     return route.abort()
   })
+  const requestedPlatforms = []
   await page.route('**/api/**', async route => {
-    const pathname = new URL(route.request().url()).pathname
+    const url = new URL(route.request().url())
+    const pathname = url.pathname
+    if (pathname === '/api/platforms') return route.fulfill({ json: { platforms: [{ id: 'onebot', state: 'online', account: '10001' }, { id: 'qq_official', state: 'offline', account: null }] } })
+    if (pathname === '/api/memories/platforms') return route.fulfill({ json: { platforms: [
+      { id: 'onebot', people: 2, memories: 10, summaries: 1, nodes: 159, edges: 247 },
+      { id: 'qq_official', people: 1, memories: 2, summaries: 0, nodes: 3, edges: 1 },
+    ] } })
     if (pathname === '/api/dashboard' && options.slowDashboard) return
     if (pathname === '/api/relations') {
+      requestedPlatforms.push(url.searchParams.get('platform'))
       if (options.delayRelations) await new Promise(resolve => setTimeout(resolve, 500))
       if (options.fail) return route.fulfill({ status: 500, json: { error: '数据库暂时不可用' } })
       return route.fulfill({ json: options.empty ? { nodes: [], edges: [] } : options.graph || { nodes, edges } })
@@ -47,8 +55,25 @@ async function openGraph(page, options = {}) {
     return route.fulfill({ json: {} })
   })
   await page.goto('/relations')
+  if (!options.stayOnHub) {
+    await page.getByRole('button', { name: `进入 ${options.platform === 'qq_official' ? 'QQ 官方机器人' : 'OneBot 11'}关系图谱` }).click()
+  }
   return errors
 }
+
+test('relations overview shows platform cards and enters scoped graph', async ({ page }) => {
+  const errors = await openGraph(page, { stayOnHub: true })
+  await expect(page.locator('.channel-card')).toHaveCount(2)
+  await expect(page.locator('[data-platform="onebot"]')).toContainText('159')
+  await expect(page.locator('[data-platform="onebot"]')).toContainText('247')
+  await expect(page.locator('[data-platform="qq_official"]')).toContainText('QQ 官方机器人')
+  await page.getByRole('button', { name: '进入 QQ 官方机器人关系图谱' }).click()
+  await expect(page).toHaveURL('/relations/qq_official')
+  await expect(page.locator('.yt-page-title')).toContainText('QQ 官方机器人')
+  await page.getByRole('button', { name: '返回平台列表' }).click()
+  await expect(page).toHaveURL('/relations')
+  expect(errors).toEqual([])
+})
 
 test('159 people render without remote avatars and remain interactive', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
