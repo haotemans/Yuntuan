@@ -48,7 +48,6 @@ OneBot 在登录握手后接收 NapCat 的 `notice/notify/poke`。事件账号�
 - [`crates/adapter-qq/src/official/gateway.rs`](../../../crates/adapter-qq/src/official/gateway.rs)
 - [`crates/adapter-qq/src/official/ingest.rs`](../../../crates/adapter-qq/src/official/ingest.rs)
 - [`crates/adapter-qq/src/server.rs`](../../../crates/adapter-qq/src/server.rs)
-- [`crates/core/src/napcat_slot.rs`](../../../crates/core/src/napcat_slot.rs)
 - [`crates/core/src/platform.rs`](../../../crates/core/src/platform.rs)
 - [`webui-frontend/src/views/Platform.vue`](../../../webui-frontend/src/views/Platform.vue)
 
