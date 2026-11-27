@@ -497,10 +497,22 @@ async fn main() -> Result<()> {
                     as std::sync::Arc<dyn Fn() -> bool + Send + Sync>
             })
             .unwrap_or_else(|| std::sync::Arc::new(|| false)),
-        napcat_token_slot: if cfg.napcat.enabled {
-            Some(napcat_token_slot.clone())
+        config_hooks: if cfg.napcat.enabled {
+            let slot = napcat_token_slot.clone();
+            vec![Arc::new(move |back, applied, requires_restart| {
+                if let Some(nap) = back.get("napcat") {
+                    if let Some(tok) = nap.get("token").and_then(|v| v.as_str()) {
+                        *slot.write().unwrap() = tok.to_string();
+                        applied.push("napcat token 热应用（下次 NapCat 拨入即生效）".into());
+                    }
+                    if nap.get("listen_addr").is_some() || nap.get("enabled").is_some() {
+                        requires_restart
+                            .push("napcat listen_addr/enabled（重启生效；token 为热应用）".into());
+                    }
+                }
+            })]
         } else {
-            None
+            vec![]
         },
         platform_status: {
             let onebot = adapter.clone();

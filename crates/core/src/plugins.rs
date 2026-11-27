@@ -294,6 +294,7 @@ struct Services {
     io: Mutex<()>,
     services: ServiceRegistry,
     uses_group_moderation: bool,
+    uses_qzone: bool,
     tools: crate::tools::Registry,
     db_path: PathBuf,
     account_owner: Arc<AtomicU64>,
@@ -738,6 +739,7 @@ impl PluginManager {
                     owner_identities: manager.owner_identities.clone(),
                     services: manager.services.clone(),
                     uses_group_moderation: plugin.uses_group_moderation(),
+                    uses_qzone: plugin.uses_qzone(),
                 });
                 let result = gate
                     .run(plugin.start(PluginContext { host }, settings.config.clone()))
@@ -838,7 +840,7 @@ impl PluginManager {
                 "revision":e.revision.load(Ordering::Acquire).to_string(),
                 "description":e.meta.description, "presentation":e.plugin.presentation(),
                 "api_version":e.meta.api_version, "enabled":desired.enabled, "loaded":loaded,
-                "requires_onebot":e.plugin.uses_group_moderation() || e.meta.id == "qzone" || e.meta.id == "qq",
+                "requires_onebot": e.plugin.uses_group_moderation() || e.plugin.uses_qzone(),
                 "requires_group":e.plugin.uses_group_moderation(),
                 "updating":e.updating.load(Ordering::Acquire),
                 "pending_restart":e.restart_required.load(Ordering::Acquire),
@@ -1146,6 +1148,7 @@ impl PluginManager {
             owner_identities: self.owner_identities.clone(),
             services: self.services.clone(),
             uses_group_moderation: entry.plugin.uses_group_moderation(),
+            uses_qzone: entry.plugin.uses_qzone(),
         });
         let result = async {
             let caps = gate

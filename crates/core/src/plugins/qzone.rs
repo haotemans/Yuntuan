@@ -20,7 +20,7 @@ pub(super) async fn execute(
     mut action: QzoneAction,
 ) -> Result<serde_json::Value> {
     ensure!(
-        host.id == "qzone" || host.id == "qq",
+        host.uses_qzone && (host.id == "qzone" || host.id == "qq"),
         ToolError::new(ToolErrorKind::PermissionDenied, "此插件不能操作QQ空间")
     );
     ensure!(

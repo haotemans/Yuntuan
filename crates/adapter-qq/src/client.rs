@@ -48,9 +48,13 @@ pub fn new_pending() -> Pending {
     Arc::new(Mutex::new(HashMap::new()))
 }
 
-/// 共享的 access token（重导出 core 类型；本 crate 内部与外部调用都用这一个）。
+/// 共享的 access token（ws_handler 在每次连接时 read，热应用侧 write 立即生效）。
 /// 仅 token 支持热应用；listen_addr 改动仍需重启进程（端口绑定是一次性的）。
-pub use yuantuan_core::napcat_slot::{shared_token, SharedToken};
+pub type SharedToken = std::sync::Arc<std::sync::RwLock<String>>;
+
+pub fn shared_token(t: &str) -> SharedToken {
+    std::sync::Arc::new(std::sync::RwLock::new(t.to_string()))
+}
 
 #[derive(Debug, Clone)]
 pub struct NapcatConfig {

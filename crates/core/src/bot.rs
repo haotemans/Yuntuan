@@ -68,6 +68,17 @@ type DirectLanes =
     std::collections::HashMap<Conversation, tokio::sync::mpsc::Sender<MessageReceivedPayload>>;
 type PipelineWorkers = tokio::task::JoinSet<Option<Conversation>>;
 
+fn self_pid(deps: &PipelineDeps) -> Option<String> {
+    let q = deps.self_qq.load(Ordering::Relaxed);
+    (q != 0).then(|| format!("p_{q}"))
+}
+
+fn is_self_message(deps: &PipelineDeps, m: &MessageReceivedPayload) -> bool {
+    m.sender_bot
+        || m.sender_pid == "self"
+        || self_pid(deps).as_deref() == Some(m.sender_pid.as_str())
+}
+
 fn is_immediate(deps: &PipelineDeps, m: &MessageReceivedPayload) -> bool {
     is_direct_message(m, &deps.self_ids)
         || is_image_command(&m.text)
@@ -154,8 +165,7 @@ fn spawn_pipeline_with_period(deps: PipelineDeps, period: std::time::Duration) -
             tokio::select! {
                 event = rx.recv() => match event {
                     Ok(Event::MessageReceived(m)) => {
-                        let self_qq = deps.self_qq.load(Ordering::Relaxed);
-                        if m.sender_bot || m.sender_pid == "self" || (self_qq != 0 && m.sender_pid == format!("p_{self_qq}")) {
+                        if is_self_message(&deps, &m) {
                             mark_processed(&deps.db_path, m.msg_id).await;
                         } else if is_immediate(&deps, &m) {
                             dispatch_direct(&deps, &mut lanes, &mut workers, m).await;
@@ -365,8 +375,7 @@ async fn handle_inner(
         return None;
     }
 
-    let q = deps.self_qq.load(Ordering::Relaxed);
-    let self_pid = (q != 0).then(|| format!("p_{q}"));
+    let self_pid = self_pid(deps);
     let pf = *deps.prefilter.read().unwrap(); // 热应用：每条取当前阈值
     match crate::prefilter::check(&pf, self_pid.as_deref(), &deps.self_ids, &deps.db_path, m).await
     {
@@ -883,8 +892,7 @@ async fn handle_periodic(deps: &PipelineDeps, mut batch: crate::window::PendingB
         return;
     }
     let mut claimed = vec![];
-    let q = deps.self_qq.load(Ordering::Relaxed);
-    let self_pid = (q != 0).then(|| format!("p_{q}"));
+    let self_pid = self_pid(deps);
     let pf = *deps.prefilter.read().unwrap();
     for m in batch.messages {
         if !crate::window::claim(&deps.db_path, m.msg_id)
@@ -1096,11 +1104,7 @@ fn match_plugin_message(
     deps: &PipelineDeps,
     m: &MessageReceivedPayload,
 ) -> anyhow::Result<Option<(Arc<dyn crate::skills::Skill>, serde_json::Value)>> {
-    let own_qq = deps.self_qq.load(Ordering::Relaxed);
-    if m.sender_bot
-        || m.sender_pid == "self"
-        || (own_qq != 0 && m.sender_pid == format!("p_{own_qq}"))
-    {
+    if is_self_message(deps, m) {
         return Ok(None);
     }
     let Some(registry) = deps.skill_registry.as_ref() else {

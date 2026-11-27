@@ -69,3 +69,5 @@ Agent模型绑定追加tool_protocol，可选json（缺省，兼容旧配置）�
 ## 管理入口复用配置保存
 
 机器人管理保存主人 ID 复用配置 API 的解析、校验、密钥保留和需重启响应，不替换整份模板，也不修改 Provider。已有配置重启接口在显式守护模式通过管理服务请求优雅重启；容器不具备该模式时继续拒绝。管理服务不存在时保留原非容器启动兼容路径。具体权限与状态见[机器人管理](../runtime/management.md)。
+
+[`config_api.rs`](../../../crates/webui/src/config_api.rs) 不再硬编码具体通道槽位，而是调用 `Extras.config_hooks`（由启动装配注册），使配置 API 保持通道无关。
