@@ -363,22 +363,17 @@ pub async fn post_config(
             }
         }
 
-        // napcat：token 可热应用（写共享槽，ws_handler 每次连接 read），listen_addr 仍需重启
-        if let Some(nap) = back.get("napcat") {
-            let mut hot = false;
-            if let Some(tok) = nap.get("token").and_then(|v| v.as_str()) {
-                if let Some(slot) = &state.extras.napcat_token_slot {
-                    *slot.write().unwrap() = tok.to_string();
-                    hot = true;
-                }
-            }
-            if hot {
-                applied.push("napcat token 热应用（下次 NapCat 拨入即生效）".into());
-            }
-            if nap.get("listen_addr").is_some() || nap.get("enabled").is_some() {
-                requires_restart
-                    .push("napcat listen_addr/enabled（重启生效；token 为热应用）".into());
-            }
+        // 由装配层注入的适配器配置热应用钩子处理（例如具体通道 token）
+        for hook in &state.extras.config_hooks {
+            hook(&back, &mut applied, &mut requires_restart);
+        }
+        if back.get("napcat").is_some()
+            && !applied
+                .iter()
+                .chain(requires_restart.iter())
+                .any(|item| item.contains("napcat"))
+        {
+            requires_restart.push("napcat 接入配置（重启生效）".into());
         }
         if back.get("webui").is_some() {
             requires_restart.push("webui 监听地址（重启生效）".into());

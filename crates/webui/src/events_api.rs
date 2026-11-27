@@ -119,7 +119,12 @@ pub async fn decision_status(
     }
     let self_qq = s.extras.self_qq.load(std::sync::atomic::Ordering::Relaxed);
     let mut binds: Vec<yuantuan_core::db::Value> = vec![format!("p_{self_qq}").into()];
-    let mut filter=String::from("m.sender_pid!='self' AND m.sender_pid!=?1 AND m.sender_bot=0 AND ((m.processed_at IS NULL AND m.decision_state IN ('pending','deciding','executing')) OR m.decision_state IN ('uncertain','failed'))");
+    let mut filter = String::from(
+        "m.sender_pid!='self' AND m.sender_pid!=?1 \
+         AND m.sender_pid NOT IN (SELECT alias FROM memory_aliases WHERE person_id='self') \
+         AND m.sender_bot=0 \
+         AND ((m.processed_at IS NULL AND m.decision_state IN ('pending','deciding','executing')) OR m.decision_state IN ('uncertain','failed'))",
+    );
     if let Some(chat) = q
         .chat_id
         .as_deref()

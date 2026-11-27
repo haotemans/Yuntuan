@@ -77,6 +77,9 @@ impl Plugin for Qzone {
             ],
         }
     }
+    fn uses_qzone(&self) -> bool {
+        true
+    }
     fn default_timeout_ms(&self) -> u64 {
         120_000
     }

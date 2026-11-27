@@ -8,6 +8,9 @@ use yuantuan_core::llm::LlmGateway;
 
 pub const SESSION_TTL: Duration = Duration::from_secs(24 * 3600);
 
+pub type ConfigHotApplyHook =
+    Arc<dyn Fn(&toml::Value, &mut Vec<String>, &mut Vec<String>) + Send + Sync>;
+
 /// 装配层注入（main 组装；测试自行构造）
 #[derive(Clone)]
 pub struct Extras {
@@ -37,8 +40,8 @@ pub struct Extras {
     pub adapter_connected: Arc<dyn Fn() -> bool + Send + Sync>,
     pub platform_status: Arc<dyn Fn() -> Vec<yuantuan_core::platform::PlatformStatus> + Send + Sync>,
     pub avatar_resolver: Option<yuantuan_core::memory::AvatarResolver>,
-    /// NapCat access_token 共享槽（ws_handler 每次连接时 read，热应用 write 立即生效）
-    pub napcat_token_slot: Option<yuantuan_core::napcat_slot::SharedToken>,
+    /// 平台或外围适配器注册的配置热应用钩子
+    pub config_hooks: Vec<ConfigHotApplyHook>,
     /// 备份配置共享槽（面板写回后热应用，每日调度器每轮循环 read）
     pub backup_cfg: yuantuan_core::backup::SharedBackupCfg,
     /// 工具注册表（Plugins 面板列出哪些插件被实际加载）
@@ -81,7 +84,7 @@ impl Extras {
             adapter_connected: Arc::new(|| false),
             platform_status: Arc::new(Vec::new),
             avatar_resolver: None,
-            napcat_token_slot: None,
+            config_hooks: Vec::new(),
             backup_cfg: yuantuan_core::backup::shared_backup_cfg(),
             tools_registry: yuantuan_core::tools::Registry::new(),
             skill_registry: yuantuan_core::skills::SkillRegistry::new(),

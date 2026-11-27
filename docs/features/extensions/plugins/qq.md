@@ -24,7 +24,7 @@
 
 - 所有调用继续受宿主 `PluginManager` 的启停、会话白名单（`allowed_chats`）、能力开关与参数 Schema 校验约束。
 - 该插件默认未启用，需在管理面板中开启或配置后生效。
-- 原 [`qzone`](qzone.md) 与 [`moderator`](moderator.md) 已彻底合入统一插件 `qq`（鸿雁），不再作为独立重复卡片注册；对应 Tool/Skill 统一使用 `qq.*` 前缀（如 `qq.qzone_publish`、`qq.recall`、`qq.ban`、`qq.group_requests` 等），原有斜杠命令保持不变。
+- 原 [`qzone`](qzone.md) 与 [`moderator`](moderator.md) 已彻底合入统一插件 `qq`（鸿雁），不再作为独立重复卡片注册；对应 Tool/Skill 统一使用 `qq.*` 前缀（如 `qq.qzone_publish`、`qq.recall`、`qq.ban`、`qq.group_requests` 等），原有斜杠命令保持不变；插件显式声明 `uses_group_moderation` 与 `uses_qzone`。
 
 ## 对应实现（本页负责的主源码）
 

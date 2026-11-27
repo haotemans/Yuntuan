@@ -26,11 +26,11 @@ pub async fn handler(
     if !ok {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    Ok(ws.on_upgrade(move |socket| forward(socket, state)))
+    let rx = state.extras.bus.subscribe();
+    Ok(ws.on_upgrade(move |socket| forward(socket, rx)))
 }
 
-async fn forward(mut socket: WebSocket, state: AppState) {
-    let mut rx = state.extras.bus.subscribe();
+async fn forward(mut socket: WebSocket, mut rx: tokio::sync::broadcast::Receiver<yuantuan_core::event::Event>) {
     tracing::info!("WebUI /ws 客户端已连接");
     loop {
         tokio::select! {

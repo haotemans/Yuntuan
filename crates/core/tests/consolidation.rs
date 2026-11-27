@@ -337,4 +337,44 @@ async fn consolidation_end_to_end() {
         .await
         .unwrap();
     assert!((f2 - 0.02).abs() < 1e-9, "重跑后 familiar 被重复累加: {f2}");
+
+    // 7. 跨平台 self 别名（memory_aliases / identities）在 self_qq=0 时仍将 @bot 归入 self→user。
+    let mock_empty = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(|| async {
+            axum::Json(json!({
+                "choices": [{"message": {"content": "{\"chat_summary\":\"简短测试\",\"person_facts\":[],\"group_facts\":[],\"rel_events\":[]}"}}]
+            }))
+        }),
+    );
+    let l2 = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let p2 = l2.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(l2, mock_empty).await.unwrap() });
+    let prov2 = dir.join("providers_alias.toml");
+    std::fs::write(&prov2, format!("[provider.m]\nbase_url = \"http://127.0.0.1:{p2}/v1\"\n[roles]\ndecision = {{ provider = \"m\", model = \"m\" }}\n")).unwrap();
+    let gw2 = Arc::new(yuantuan_core::llm::LlmGateway::load(&prov2).unwrap());
+    conn.execute_batch(
+        "INSERT OR IGNORE INTO persons(person_id,display_name,first_seen,last_seen) VALUES('self','云团',1,1),('qq-official_self_bot','云团官方',1,1),('qq-official_u1','用户A',1,1);
+         INSERT OR IGNORE INTO identities(person_id,platform,platform_uid) VALUES('self','qq_official','qq-official_self_bot');
+         INSERT INTO messages(chat_id,chat_type,sender_pid,nickname,text,mentions,ts)
+         VALUES('qq-official_g9','group','qq-official_u1','用户A','@云团 你好','[\"qq-official_self_bot\"]',100);",
+    ).await.unwrap();
+    let deps2 = ConsolidationDeps {
+        db_path: db_path.clone(),
+        llm: Arc::new(std::sync::RwLock::new(Some(gw2))),
+        bus: bus.clone(),
+        self_qq: Arc::new(AtomicU64::new(0)),
+        cfg: ConsolidationCfg::default(),
+    };
+    run_once(&deps2).await;
+    wait_for_done(&db_path, 3).await;
+    let bot_familiar: f64 = conn
+        .query_row(
+            "SELECT familiar FROM relationship_edges WHERE from_pid='self' AND to_pid='qq-official_u1'",
+            yuantuan_core::db::params![],
+            |r| r.try_get(0),
+        )
+        .await
+        .unwrap();
+    assert!((bot_familiar - 0.01).abs() < 1e-9);
 }

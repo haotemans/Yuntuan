@@ -60,4 +60,4 @@ Skill 委托 Publisher 前调用 `HostServices::authorize_tool_for_skill`；这�
 
 界面展示名为“鹿鸣”，沿用现有《诗经》系命名，出处《小雅·鹿鸣》。副标题保留QQ空间和用途；内部插件 ID `qzone`、Tool/Skill 名、命令、配置路径与持久记录继续沿用原值，无数据迁移。
 
-宿主侧 QQ 空间服务已改为从 `ServiceRegistry` 获取，原有插件范围、超级管理员与图片大小校验边界不变。
+宿主侧 QQ 空间服务已改为从 `ServiceRegistry` 获取且由插件显式声明 `Plugin::uses_qzone()` 才可调用，原有插件范围、超级管理员与图片大小校验边界不变。

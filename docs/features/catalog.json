@@ -52,7 +52,6 @@
         "crates/adapter-qq/src/official/gateway.rs",
         "crates/adapter-qq/src/official/ingest.rs",
         "crates/adapter-qq/src/server.rs",
-        "crates/core/src/napcat_slot.rs",
         "crates/core/src/platform.rs",
         "webui-frontend/src/views/Platform.vue"
       ],

@@ -115,5 +115,5 @@ Agent任务统一执行和回执规则以[任务功能](../core/tasks.md#v18-统
 
 为支持多平台接入并将协议传输与平台特性解耦，[`plugin-api`](../../../crates/plugin-api/src/lib.rs) 与 [`PluginManager::load_with_registry`](../../../crates/core/src/plugins.rs) 引入 `ServiceRegistry` 与 `ProtocolGateway`：
 
-- 协议后端（如 [`onebot_gateway`](../../../crates/adapter-qq/src/client.rs)）在启动装配时注册到 `ServiceRegistry`，宿主通过 `HostServices::call_protocol`、`protocol_account`、`is_protocol_connected` 与平台无关的 `account_owner` / `is_account_owner`（支持多平台 `owner_identities`）暴露给插件，并继续执行插件 `allowed_chats` 范围校验；`qq` 插件同时声明 `uses_group_moderation` 并使用受限 `qzone` / `membership` 服务。
+- 协议后端（如 [`onebot_gateway`](../../../crates/adapter-qq/src/client.rs)）在启动装配时注册到 `ServiceRegistry`，宿主通过 `HostServices::call_protocol`、`protocol_account`、`is_protocol_connected` 与平台无关的 `account_owner` / `is_account_owner`（支持多平台 `owner_identities`）暴露给插件，并继续执行插件 `allowed_chats` 范围校验；`Plugin::uses_qzone` 与 `uses_group_moderation` 声明插件能力边界，移除核心插件列表对 `qq` / `qzone` ID 的硬编码判断。
 - 原有 `GroupModeration`、`QzoneService` 与 `load_with_services` 通过 `ServiceRegistry` 保持向后兼容过渡，后续平台专属功能与兼容优化可直接作为插件基于协议网关实现。回归见 [`plugin_host.rs`](../../../crates/core/tests/plugin_host.rs)。

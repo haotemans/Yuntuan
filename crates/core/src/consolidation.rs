@@ -340,13 +340,23 @@ async fn apply_mention_stats(
     rows: &[MsgRow],
     outcome: &ChatConsolidationOutcome,
 ) -> Result<usize> {
-    let self_pid = {
-        let q = deps.self_qq.load(Ordering::Relaxed);
-        (q != 0).then(|| format!("p_{q}"))
-    };
+    let mut self_pids: std::collections::HashSet<String> = ["self".to_owned()].into_iter().collect();
+    let q = deps.self_qq.load(Ordering::Relaxed);
+    if q != 0 {
+        self_pids.insert(format!("p_{q}"));
+    }
+    let db_aliases: Vec<String> = sqlx::query_scalar(
+        "SELECT alias FROM memory_aliases WHERE person_id='self'
+         UNION ALL SELECT CASE WHEN platform='qq' THEN 'p_'||platform_uid ELSE platform_uid END
+         FROM identities WHERE person_id='self'",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    self_pids.extend(db_aliases);
+
     let mut pairs: HashMap<(String, String), i64> = HashMap::new();
     for r in rows {
-        if r.sender_pid == "self" {
+        if self_pids.contains(&r.sender_pid) {
             continue; // 云团@人不产生关系增量（防自嗨）
         }
         let mentions: Vec<String> = serde_json::from_str(&r.mentions).unwrap_or_default();
@@ -355,7 +365,7 @@ async fn apply_mention_stats(
                 continue;
             }
             // @bot → self→user；普通@ → sender→被@
-            let (from, to) = if Some(m.as_str()) == self_pid.as_deref() {
+            let (from, to) = if self_pids.contains(&m) {
                 ("self".to_string(), r.sender_pid.clone())
             } else {
                 (r.sender_pid.clone(), m)

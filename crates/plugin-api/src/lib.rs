@@ -277,6 +277,10 @@ pub trait Plugin: Send + Sync {
     fn uses_group_moderation(&self) -> bool {
         false
     }
+    /// Opt in to host-mediated Qzone access and image encoding.
+    fn uses_qzone(&self) -> bool {
+        false
+    }
     fn default_timeout_ms(&self) -> u64 {
         30_000
     }
