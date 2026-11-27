@@ -542,19 +542,6 @@ pub async fn refresh_profile(
     if !exists {
         return Err((StatusCode::NOT_FOUND, Json(json!({"error":"人物不存在"}))));
     }
-    let subject: String = sqlx::query_scalar(
-        "SELECT COALESCE((SELECT m.sender_pid FROM messages m
-          LEFT JOIN memory_progress p ON p.owner_id=m.sender_pid AND p.stage='portrait' AND p.chat_type=''
-          LEFT JOIN portrait_coverage c ON c.person_id=m.sender_pid AND c.msg_id=m.msg_id
-          WHERE m.sender_pid IN (SELECT ?1 UNION ALL SELECT alias FROM memory_aliases WHERE person_id=?1)
-            AND m.chat_type IN ('group','private') AND m.sender_bot=0 AND length(trim(COALESCE(m.text,'')))>=4
-            AND m.msg_id>COALESCE(p.cursor,0) AND c.msg_id IS NULL
-          ORDER BY m.msg_id DESC LIMIT 1),?1)",
-    )
-    .bind(&id)
-    .fetch_one(&mut *conn)
-    .await
-    .map_err(|_| db_error("人物读取失败"))?;
     drop(conn);
     let gateway = state
         .extras
@@ -569,7 +556,7 @@ pub async fn refresh_profile(
                 Json(json!({"error":"未配置 Decision 模型"})),
             )
         })?;
-    let result = yuantuan_core::memory::refresh::person(&state.db_path, &gateway, &subject, true)
+    let result = yuantuan_core::memory::refresh::person(&state.db_path, &gateway, &id, true)
         .await
         .map_err(|e| {
             tracing::warn!(error=%e,"人物画像整理失败");

@@ -689,3 +689,67 @@ async fn portrait_write_failures_roll_back_versions_and_progress_but_invalid_ite
     );
     assert_eq!(r.calls.lock().unwrap().len(), 2);
 }
+
+#[tokio::test]
+async fn linked_cross_channel_person_uses_single_nightly_slot_and_deduplicates_utterances() {
+    let r = Rig::new(
+        json!({"updates":[
+            {"field":"technical_preferences","value":"长期使用 Rust","evidence_msg_id":2,"evidence_quote":"我长期使用 Rust"},
+            {"field":"ongoing_projects","value":"正在做新机器人","evidence_msg_id":3,"evidence_quote":"我在做新机器人"}
+        ]})
+        .to_string(),
+    )
+    .await;
+    let mut conn = db::connect(&r.path).await.unwrap();
+    let now = memory::processing::now();
+    conn.execute_batch(&format!(
+        "INSERT INTO persons(person_id,display_name,first_seen,last_seen) VALUES
+          ('p_101','冰猪',1,{now}),('qq-official_user_open1','冰猪官方',1,{now});
+         INSERT INTO qq_memory_links(official_pid,onebot_pid) VALUES('qq-official_user_open1','p_101');
+         INSERT INTO messages(msg_id,chat_id,chat_type,sender_pid,text,ts) VALUES
+          (1,'10','group','p_101','我长期使用 Rust',{t1}),
+          (2,'qq-official_g1','group','qq-official_user_open1','我长期使用 Rust',{t2}),
+          (3,'qq-official_g1','group','qq-official_user_open1','我在做新机器人',{t3});",
+        t1 = now - 60,
+        t2 = now - 30,
+        t3 = now - 10,
+    ))
+    .await
+    .unwrap();
+    let options = night_options("2026-11-27", 10);
+    nightly::run(&r.path, &r.slot, &options).await.unwrap();
+    nightly::run(&r.path, &r.slot, &options).await.unwrap();
+    assert_eq!(r.calls.lock().unwrap().len(), 1);
+    let input: Value = serde_json::from_str(
+        r.calls.lock().unwrap()[0]["messages"][1]["content"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(input["messages"].as_array().unwrap().len(), 2);
+    let state: String =
+        sqlx::query_scalar("SELECT value FROM state_kv WHERE key='profile_nightly:v1:2026-11-27'")
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&state).unwrap()["used"], 1);
+    assert_eq!(
+        memory::processing::cursor(&mut conn, &memory::processing::Scope::portrait("p_101"))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        memory::processing::cursor(
+            &mut conn,
+            &memory::processing::Scope::portrait("qq-official_user_open1")
+        )
+        .await
+        .unwrap(),
+        3
+    );
+    let unified = memory::directory_profiles(&mut conn, &["p_101".to_owned()], i64::MAX)
+        .await
+        .unwrap();
+    assert_eq!(unified["p_101"].len(), 2);
+}

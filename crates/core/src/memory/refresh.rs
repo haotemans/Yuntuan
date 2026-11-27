@@ -102,7 +102,9 @@ pub async fn person(
             .fetch_one(&mut *conn)
             .await?;
     ensure!(exists, "人物不存在");
-    let window = portrait_queue::load(&mut conn, person).await?;
+    let subject = portrait_queue::resolve_subject(&mut conn, person).await?;
+    ensure!(subject != "self", "不能整理机器人自身画像");
+    let window = portrait_queue::load(&mut conn, &subject).await?;
     let result = |status, updated_fields| RefreshResult {
         status,
         inspected_messages: window.sources.len(),
@@ -111,16 +113,16 @@ pub async fn person(
     if window.inspected.is_empty() {
         return Ok(result("unchanged", 0));
     }
-    let key = format!("{PREFIX}{person}");
+    let key = format!("{PREFIX}{subject}");
     let attempt = processing::now();
     let busy:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM state_kv WHERE key=?1 AND json_valid(value) AND COALESCE(json_extract(value,'$.attempt'),0)>?2-300)")
         .bind(&key).bind(attempt).fetch_one(&mut *conn).await?;
     if busy {
         return Ok(result("unchanged", 0));
     }
-    let from = window.inspected[0] - 1;
-    let cutoff = *window.inspected.last().unwrap();
-    let Some(batch) = processing::claim_portrait(&mut conn, person, from, cutoff).await? else {
+    let from = window.inspected.iter().map(|(_, id)| *id).min().unwrap() - 1;
+    let cutoff = window.inspected.iter().map(|(_, id)| *id).max().unwrap();
+    let Some(batch) = processing::claim_portrait(&mut conn, &subject, from, cutoff).await? else {
         return Ok(result("unchanged", 0));
     };
     let started = Instant::now();
@@ -139,9 +141,9 @@ pub async fn person(
     let work = async {
         let (kind, chat) = window.visibility.as_ref().unwrap();
         let current =
-            super::semantic::scoped_profile(&mut conn, person, chat, kind, i64::MAX).await?;
+            super::semantic::scoped_profile(&mut conn, &subject, chat, kind, i64::MAX).await?;
         let current_memory =
-            super::semantic::current(&mut conn, "person", person, chat, kind, i64::MAX, attempt)
+            super::semantic::current(&mut conn, "person", &subject, chat, kind, i64::MAX, attempt)
                 .await?;
         drop(conn);
 
@@ -151,7 +153,7 @@ pub async fn person(
                 memory_updates: vec![],
             }
         } else {
-            let user=json!({"person_id":person,"current_profile":current,"current_memory":current_memory,"messages":window.sources}).to_string();
+            let user=json!({"person_id":subject,"current_profile":current,"current_memory":current_memory,"messages":window.sources}).to_string();
             let system = format!("{SYSTEM}{}", super::semantic::CONTRACT);
             let raw = request(gw, &system, &user).await?;
             match parse(&raw) {
@@ -177,7 +179,7 @@ pub async fn person(
             };
             match update_profile(
                 &mut tx,
-                person,
+                &source.sender_pid,
                 &source.chat_id,
                 source.msg_id,
                 source.msg_id,
@@ -192,16 +194,20 @@ pub async fn person(
             }
         }
         for update in &output.memory_updates {
-            if !update.evidence.iter().all(|e| {
-                window
-                    .sources
-                    .iter()
-                    .any(|s| s.msg_id == e.msg_id && s.text.contains(&e.quote))
-            }) {
+            let mut author: Option<&str> = None;
+            let valid = !update.evidence.is_empty()
+                && update.evidence.iter().all(|e| {
+                    window
+                        .sources
+                        .iter()
+                        .find(|s| s.msg_id == e.msg_id && s.text.contains(&e.quote))
+                        .is_some_and(|s| *author.get_or_insert(&s.sender_pid) == s.sender_pid)
+                });
+            let Some(owner) = author.filter(|_| valid) else {
                 rejected += 1;
                 continue;
-            }
-            match super::semantic::write_current(&mut tx, person, from + 1, cutoff, update).await {
+            };
+            match super::semantic::write_current(&mut tx, owner, from + 1, cutoff, update).await {
                 Ok(true) => written += 1,
                 Ok(false) => {}
                 Err(e) if e.downcast_ref::<sqlx::Error>().is_some() => return Err(e),

@@ -7,6 +7,8 @@ use sqlx::{sqlite::SqliteRow, Row};
 
 #[derive(Serialize)]
 pub(super) struct Source {
+    #[serde(skip_serializing)]
+    pub sender_pid: String,
     pub msg_id: i64,
     pub chat_id: String,
     pub chat_type: String,
@@ -17,29 +19,39 @@ pub(super) struct Source {
 
 pub(super) struct Window {
     pub sources: Vec<Source>,
-    pub inspected: Vec<i64>,
+    pub inspected: Vec<(String, i64)>,
     pub visibility: Option<(String, String)>,
 }
 
+pub(super) async fn resolve_subject(conn: &mut sqlx::SqliteConnection, person: &str) -> Result<String> {
+    Ok(sqlx::query_scalar(
+        "SELECT COALESCE((SELECT directory_id FROM memory_directory WHERE person_id=?1),?1)",
+    )
+    .bind(person)
+    .fetch_one(&mut *conn)
+    .await?)
+}
+
 pub(super) async fn load(conn: &mut sqlx::SqliteConnection, person: &str) -> Result<Window> {
-    let cursor = processing::cursor(conn, &Scope::portrait(person)).await?;
-    let query = "SELECT m.msg_id,m.chat_id,m.chat_type,m.text,m.ts FROM messages m
-      WHERE m.sender_pid=?1 AND m.chat_type IN ('group','private') AND m.msg_id>?2
-      AND length(trim(COALESCE(m.text,'')))>=4
-      AND NOT EXISTS(SELECT 1 FROM portrait_coverage c WHERE c.person_id=?1 AND c.msg_id=m.msg_id)";
+    let subject = resolve_subject(conn, person).await?;
+    let query = "SELECT m.msg_id,m.sender_pid,m.chat_id,m.chat_type,m.text,m.ts
+      FROM messages m
+      LEFT JOIN memory_progress p ON p.stage='portrait' AND p.owner_id=m.sender_pid AND p.chat_type=''
+      WHERE m.sender_pid IN (SELECT ?1 UNION ALL SELECT alias FROM memory_aliases WHERE person_id=?1)
+        AND m.chat_type IN ('group','private') AND m.msg_id>COALESCE(p.cursor,0)
+        AND length(trim(COALESCE(m.text,'')))>=4
+        AND NOT EXISTS(SELECT 1 FROM portrait_coverage c WHERE c.person_id=m.sender_pid AND c.msg_id=m.msg_id)";
     // Recent messages get 120 of the same 160-message budget; remaining slots close old gaps.
     let mut rows = sqlx::query(&format!(
-        "{query} AND m.ts>=?3 ORDER BY m.msg_id DESC LIMIT 120"
+        "{query} AND m.ts>=?2 ORDER BY m.msg_id DESC LIMIT 120"
     ))
-    .bind(person)
-    .bind(cursor)
+    .bind(&subject)
     .bind(processing::now() - 30 * 86400)
     .fetch_all(&mut *conn)
     .await?;
     let visibility = rows.first().map(scope).transpose()?;
     let oldest = sqlx::query(&format!("{query} ORDER BY m.msg_id LIMIT 160"))
-        .bind(person)
-        .bind(cursor)
+        .bind(&subject)
         .fetch_all(&mut *conn)
         .await?;
     let visibility = visibility.or(oldest.first().map(scope).transpose()?);
@@ -60,6 +72,7 @@ pub(super) async fn load(conn: &mut sqlx::SqliteConnection, person: &str) -> Res
     // Retain recent priority under the character budget, then present evidence chronologically.
     let mut sources = Vec::new();
     let mut inspected = Vec::new();
+    let mut seen_cross_channel: Vec<(String, String, i64)> = Vec::new();
     let mut chars = 0;
     let has_backfill = rows
         .iter()
@@ -67,9 +80,20 @@ pub(super) async fn load(conn: &mut sqlx::SqliteConnection, person: &str) -> Res
     let mut recent_chars = 0;
     for row in rows {
         let original: String = row.try_get("text")?;
-        let id = row.try_get("msg_id")?;
+        let sender_pid: String = row.try_get("sender_pid")?;
+        let id: i64 = row.try_get("msg_id")?;
+        let ts: i64 = row.try_get("ts")?;
         if crate::consolidation::is_sensitive(&original) {
-            inspected.push(id);
+            inspected.push((sender_pid, id));
+            continue;
+        }
+        let trimmed = original.trim().to_owned();
+        if !trimmed.is_empty()
+            && seen_cross_channel.iter().any(|(prev_pid, prev_text, prev_ts)| {
+                prev_pid != &sender_pid && prev_text == &trimmed && (ts - prev_ts).abs() <= 120
+            })
+        {
+            inspected.push((sender_pid, id));
             continue;
         }
         let text: String = original.chars().take(4000).collect();
@@ -83,18 +107,22 @@ pub(super) async fn load(conn: &mut sqlx::SqliteConnection, person: &str) -> Res
         if recent.contains(&id) {
             recent_chars += text.chars().count();
         }
-        inspected.push(id);
+        if !trimmed.is_empty() {
+            seen_cross_channel.push((sender_pid.clone(), trimmed, ts));
+        }
+        inspected.push((sender_pid.clone(), id));
         sources.push(Source {
+            sender_pid,
             msg_id: id,
             chat_id: row.try_get("chat_id")?,
             chat_type: row.try_get("chat_type")?,
             text,
-            ts: row.try_get("ts")?,
+            ts,
             text_truncated: original.chars().count() > 4000,
         });
     }
     sources.sort_by_key(|s| s.msg_id);
-    inspected.sort_unstable();
+    inspected.sort_by_key(|(_, id)| *id);
     Ok(Window {
         sources,
         inspected,
@@ -114,20 +142,26 @@ fn same_scope(r: &SqliteRow, v: &(String, String)) -> bool {
 pub(super) async fn complete(
     conn: &mut sqlx::SqliteConnection,
     batch: &Batch,
-    ids: &[i64],
+    ids: &[(String, i64)],
 ) -> Result<()> {
     let at = processing::now();
     let changed = conn.execute("UPDATE memory_batches SET status='completed',finished_at=?2 WHERE id=?1 AND status='running' AND lease_until>?2",params![batch.id,at]).await?;
     ensure!(changed == 1, "归纳批次已失效，拒绝迟到结果");
-    for id in ids {
-        conn.execute("INSERT OR IGNORE INTO portrait_coverage(person_id,msg_id,batch_id,processed_at) VALUES(?1,?2,?3,?4)",params![batch.scope.owner_id,id,batch.id,at]).await?;
+    let mut owners = std::collections::BTreeSet::new();
+    owners.insert(batch.scope.owner_id.clone());
+    for (owner, id) in ids {
+        owners.insert(owner.clone());
+        conn.execute("INSERT OR IGNORE INTO portrait_coverage(person_id,msg_id,batch_id,processed_at) VALUES(?1,?2,?3,?4)",params![owner,id,batch.id,at]).await?;
     }
     // Only the contiguous frontier advances; disjoint recent ranges remain in coverage.
-    conn.execute("UPDATE memory_progress SET cursor=MAX(cursor,COALESCE(
-       (SELECT MIN(m.msg_id)-1 FROM messages m WHERE m.sender_pid=?1 AND m.msg_id>memory_progress.cursor
-        AND m.chat_type IN ('group','private') AND length(trim(COALESCE(m.text,'')))>=4
-        AND NOT EXISTS(SELECT 1 FROM portrait_coverage c WHERE c.person_id=?1 AND c.msg_id=m.msg_id)),
-       (SELECT MAX(m.msg_id) FROM messages m WHERE m.sender_pid=?1 AND m.chat_type IN ('group','private') AND length(trim(COALESCE(m.text,'')))>=4),cursor)),updated_at=?2
-       WHERE stage='portrait' AND owner_id=?1 AND chat_type=''",params![batch.scope.owner_id,at]).await?;
+    for owner in owners {
+        conn.execute("INSERT INTO memory_progress(stage,owner_id,chat_type) VALUES('portrait',?1,'') ON CONFLICT DO NOTHING",params![owner]).await?;
+        conn.execute("UPDATE memory_progress SET cursor=MAX(cursor,COALESCE(
+           (SELECT MIN(m.msg_id)-1 FROM messages m WHERE m.sender_pid=?1 AND m.msg_id>memory_progress.cursor
+            AND m.chat_type IN ('group','private') AND length(trim(COALESCE(m.text,'')))>=4
+            AND NOT EXISTS(SELECT 1 FROM portrait_coverage c WHERE c.person_id=?1 AND c.msg_id=m.msg_id)),
+           (SELECT MAX(m.msg_id) FROM messages m WHERE m.sender_pid=?1 AND m.chat_type IN ('group','private') AND length(trim(COALESCE(m.text,'')))>=4),cursor)),updated_at=?2
+           WHERE stage='portrait' AND owner_id=?1 AND chat_type=''",params![owner,at]).await?;
+    }
     Ok(())
 }
